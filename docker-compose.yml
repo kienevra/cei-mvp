@@ -1,8 +1,7 @@
-version: '3.8'
-
-services:
+﻿services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
     volumes:
       - ./backend:/app
     env_file:
@@ -10,5 +9,6 @@ services:
     environment:
       - DATABASE_URL
       - JWT_SECRET
+      - PGSSLMODE
     ports:
-      - "8000:8000"
+      - '8000:8000'
