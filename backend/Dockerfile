@@ -1,3 +1,11 @@
+FROM python:3.11-slim
+# Copy entrypoint script
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+# Set entrypoint
+ENTRYPOINT ["/docker-entrypoint.sh"]
+FROM python:3.11-slim
 # Copy entrypoint script
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
