@@ -1,0 +1,9 @@
+{
+  "devDependencies": {
+    "@types/axios": "^0.9.36",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/react-router-dom": "^5.3.3",
+    "@types/recharts": "^1.8.29"
+  }
+}
