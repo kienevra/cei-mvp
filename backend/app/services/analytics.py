@@ -269,6 +269,9 @@ class AnalyticsService:
             raise
     # End of AnalyticsService
     """
+    Calculate energy metrics for a given time window.
+    Returns a dict with energy_kwh, avg_power_kw, peak_kw, load_factor, window_hours, window_start, window_end.
+    """
     end_ts = datetime.utcnow()
     start_ts = end_ts - timedelta(days=window_days)
     # Use SQL aggregation to compute avg and max
