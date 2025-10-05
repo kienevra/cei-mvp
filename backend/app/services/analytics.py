@@ -264,9 +264,9 @@ class AnalyticsService:
 
                         return cast(AnomalyResult, result)
 
-                    except Exception as e:
-                        logger.error("Error in anomaly detection: %s", str(e))
-                        raise
+                except Exception as e:
+                    logger.error("Error in anomaly detection: %s", str(e))
+                    raise
     # End of AnalyticsService
     """
     end_ts = datetime.utcnow()
