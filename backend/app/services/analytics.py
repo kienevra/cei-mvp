@@ -23,6 +23,27 @@ Usage:
 
 import csv
 import logging
+class KPIResult(TypedDict):
+    energy_kwh: float
+    avg_power_kw: float
+    peak_kw: float
+    load_factor: float | None
+    window_hours: float
+    window_start: str
+    window_end: str
+
+class BenchmarkResult(TypedDict):
+    metric_name: str
+    value: float
+    benchmark: float | None
+    percent_of_benchmark: float | None
+    flagged: bool
+    recommendation: str
+
+class AnomalyResult(TypedDict):
+    method: str
+    anomaly_indices: List[int]
+    anomalies: List[float]
 import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple, TypedDict, Union, cast
