@@ -268,6 +268,8 @@ class AnalyticsService:
             logger.error("Error in anomaly detection: %s", str(e))
             raise
     # End of AnalyticsService
+
+def energy_metrics_for_window(db: Session, site_id: int, window_days: int = 30) -> dict:
     """
     Calculate energy metrics for a given time window.
     Returns a dict with energy_kwh, avg_power_kw, peak_kw, load_factor, window_hours, window_start, window_end.
@@ -312,7 +314,6 @@ class AnalyticsService:
         "window_start": start_ts.isoformat(),
         "window_end": end_ts.isoformat(),
     }
-
 def benchmark_against_industry(metric_name: str, value: float) -> Dict[str, Optional[float]]:
     """
     Compare `value` against a benchmark for metric_name.
