@@ -23,6 +23,8 @@ Usage:
 
 import csv
 import logging
+from typing import Dict, List, Optional, Sequence, Tuple, TypedDict, Union, cast
+
 class KPIResult(TypedDict):
     energy_kwh: float
     avg_power_kw: float
