@@ -2,8 +2,7 @@
 set -euo pipefail
 
 # CEI optimized startup script: run alembic only if needed, then start app.
-ALEMBIC_CFG="backend/alembic.ini"
-
+ALEMBIC_CFG="alembic.ini"
 echo "=== CEI backend start: checking migrations ==="
 
 _alembic_out() {
