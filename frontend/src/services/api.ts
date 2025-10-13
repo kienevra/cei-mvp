@@ -1,8 +1,8 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 import { ApiResponse } from '../types/api';
 
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: (import.meta?.env?.VITE_API_URL ?? process?.env?.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'),
   timeout: 10000, // 10 second timeout
 });
 
@@ -46,3 +46,4 @@ api.interceptors.response.use(
 
 
 export default api;
+
