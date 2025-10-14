@@ -1,36 +1,18 @@
-﻿import axios from "axios";
-
-/**
- * API base URL resolution:
- * 1) Prefer build-time env (VITE_API_URL or NEXT_PUBLIC_API_URL) — set this in Vercel.
- * 2) If not present, prefer runtime origin (window.location.origin).
- * 3) Final fallback: explicit Render backend URL.
- */
-function getApiBase(): string {
-  // 1) build-time envs injected at build
-  const buildEnv = (process?.env?.VITE_API_URL || process?.env?.NEXT_PUBLIC_API_URL);
-  if (buildEnv && buildEnv.length) {
-    return buildEnv;
-  }
-
-  // 2) runtime — useful for local dev serving
+﻿const DEFAULT_API = ((): string => {
   try {
-    if (typeof window !== "undefined" && window.location && window.location.origin) {
+    if (typeof window !== "undefined" && window.location) {
+      // running in browser; prefer same-origin + /api/v1
       return `${window.location.origin}/api/v1`;
     }
-  } catch (e) {
+  } catch (_) {
     // ignore
   }
 
-  // 3) explicit fallback to your Render backend
-  return "https://cei-mvp.onrender.com/api/v1";
-}
+  // Build-time env (Vite) -> import.meta.env
+  // Also fallback to process.env.* for compatibility if you previously used that.
+  const vite = (import.meta as any).env?.VITE_API_URL;
+  const nextPublic = (process.env as any).NEXT_PUBLIC_API_URL;
+  const procVite = (process.env as any).VITE_API_URL;
 
-const DEFAULT_API = getApiBase();
-
-const api = axios.create({
-  baseURL: DEFAULT_API,
-  timeout: 10000,
-});
-
-export default api;
+  return vite || nextPublic || procVite || "http://localhost:8000/api/v1";
+})();
