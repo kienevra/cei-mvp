@@ -2,21 +2,29 @@
 
 /**
  * Runtime-friendly API base URL:
- * - If running in a browser, use the same origin + /api/v1 (works when frontend is served from Vercel)
- * - Else fall back to VITE_API_URL (build-time env), NEXT_PUBLIC_API_URL, or localhost for dev.
+ * - In browser: use same origin + /api/v1 (preferred for Vercel serving frontend)
+ * - Else: fall back to build-time env VITE_API_URL / NEXT_PUBLIC_API_URL
+ * - Final fallback: the Render backend URL provided
  */
-const DEFAULT_API = ((): string => {
+function getApiBase(): string {
   try {
-    if (typeof window !== "undefined" && window.location) {
-      // When the frontend is hosted (Vercel), this will point to the Vercel origin.
-      // If you want to force Render regardless of origin, set VITE_API_URL in Vercel env.
+    if (typeof window !== "undefined" && window.location && window.location.origin) {
+      // If the frontend is loaded in the browser, use that origin at runtime.
       return `${window.location.origin}/api/v1`;
     }
-  } catch (_) {
+  } catch (e) {
     // ignore
   }
-  return (process.env.VITE_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1");
-})();
+
+  // build-time environment variables injected by Vite/Next or an explicit Render URL
+  const fromEnv = (process?.env?.VITE_API_URL || process?.env?.NEXT_PUBLIC_API_URL);
+  if (fromEnv && fromEnv.length) return fromEnv;
+
+  // Last resort (use your Render backend URL)
+  return "https://cei-mvp.onrender.com/api/v1";
+}
+
+const DEFAULT_API = getApiBase();
 
 const api = axios.create({
   baseURL: DEFAULT_API,
