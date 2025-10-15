@@ -20,8 +20,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [token]);
 
   const login = async (username: string, password: string) => {
-    const res = await api.post<AuthResponse>("/auth/login", { username, password });
-    setToken(res.data.access_token);
+    try {
+      const res = await api.post<AuthResponse>("/auth/login", { username, password });
+      setToken(res.data.access_token);
+    } catch (error) {
+      throw new Error("Login failed");
+    }
   };
 
   const logout = () => {
@@ -50,18 +54,12 @@ export function useAuth() {
   return ctx;
 }
 
-// useRequireAuth should be a hook, not a function that redirects immediately.
-// Instead, use it inside a component to conditionally redirect.
-import { useEffect } from "react";
 export function useRequireAuth() {
   const { isAuthenticated } = useAuth();
-  const navigateToLogin = () => {
-    window.location.href = "/login";
-  };
 
   useEffect(() => {
     if (!isAuthenticated) {
-      navigateToLogin();
+      window.location.href = "/login";
     }
   }, [isAuthenticated]);
 }
