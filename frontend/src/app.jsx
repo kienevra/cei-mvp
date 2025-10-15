@@ -1,15 +1,11 @@
-import React from 'react';
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
-import Dashboard from './pages/Dashboard';
-import SiteView from './pages/SiteView';
+// filepath: c:\Users\leonm\MyProject\frontend\src\App.jsx
+import React from "react";
 
 export default function App() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/sites/:id" element={<SiteView />} />
-      </Routes>
-    </Router>
+    <div>
+      <h1>Welcome to CEI Platform</h1>
+      {/* Add your UI components here */}
+    </div>
   );
 }
