@@ -1,69 +1,62 @@
-import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import api from '../services/api';
-import { Site, SitesResponse, ApiResponse } from '../types/api';
+import React from "react";
+import { useApi } from "../hooks/useApi";
+import Card from "../components/Card";
+import Table from "../components/Table";
+import LoadingSpinner from "../components/LoadingSpinner";
+import ErrorBanner from "../components/ErrorBanner";
+import { useQuery } from "@tanstack/react-query";
+import { getSites } from "../services/sites";
+import { Site } from "../types/site";
+import { HealthIndicator } from "../components/HealthIndicator";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
-const Dashboard: React.FC = () => {
-  const [sites, setSites] = useState<Site[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export default function Dashboard() {
+  const { data: sites, isLoading: sitesLoading, error: sitesError } = useQuery<Site[], Error>({
+    queryKey: ["sites"],
+    queryFn: getSites,
+  });
 
-  useEffect(() => {
-    const fetchSites = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const response = await api.get<ApiResponse<SitesResponse>>('/api/v1/sites');
-        setSites(response.data.data.sites);
-      } catch (err) {
-        console.error('Failed to fetch sites:', err);
-        setError('Failed to load sites. Please try again later.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  const { data: health, isLoading: healthLoading, error: healthError } = useApi<{ status: string }>("/health");
 
-    fetchSites();
-  }, []);
+  const metrics = [
+    { label: "Sites", value: sites?.length ?? 0 },
+    { label: "Active Alerts", value: 2 }, // TODO: call /alerts endpoint
+    { label: "Weekly Savings", value: "$1,200" }, // TODO: call /metrics endpoint
+  ];
 
-  if (isLoading) {
-    return (
-      <div className="p-8 flex justify-center items-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-8">
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
-          {error}
-        </div>
-      </div>
-    );
-  }
+  const chartData = [
+    { name: "Mon", value: 120 },
+    { name: "Tue", value: 210 },
+    { name: "Wed", value: 180 },
+    { name: "Thu", value: 260 },
+    { name: "Fri", value: 300 },
+    { name: "Sat", value: 200 },
+    { name: "Sun", value: 150 },
+  ];
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold mb-4">Sites Dashboard</h1>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {sites.map(site => (
-          <Link to={`/sites/${site.id}`} key={site.id} className="block">
-            <div className="bg-white rounded shadow p-4 hover:shadow-lg transition-shadow duration-200">
-              <h2 className="text-xl font-semibold mb-2">{site.name}</h2>
-              <div className="space-y-1">
-                <div>Energy (kWh): {site.kpis.energy_kwh.toFixed(2)}</div>
-                <div>Avg Power (kW): {site.kpis.avg_power_kw.toFixed(2)}</div>
-                <div>Peak (kW): {site.kpis.peak_kw.toFixed(2)}</div>
-                <div>Load Factor: {site.kpis.load_factor.toFixed(2)}</div>
-              </div>
-            </div>
-          </Link>
+    <div>
+      <HealthIndicator status={health?.status} loading={healthLoading} error={healthError} />
+      <div className="dashboard-cards">
+        {metrics.map((m) => (
+          <Card key={m.label} title={m.label} value={m.value} />
         ))}
       </div>
+      <section>
+        <h2>Weekly Metrics</h2>
+        <ResponsiveContainer width="100%" height={200}>
+          <LineChart data={chartData}>
+            <XAxis dataKey="name" />
+            <YAxis />
+            <Tooltip />
+            <Line type="monotone" dataKey="value" stroke="#2563eb" />
+          </LineChart>
+        </ResponsiveContainer>
+      </section>
+      <section>
+        <h2>Recent Alerts</h2>
+        {sitesLoading ? <LoadingSpinner /> : sitesError ? <ErrorBanner error={sitesError} /> : <Table data={sites ?? []} />}
+      </section>
     </div>
   );
-};
-
-export default Dashboard;
+}
