@@ -1,6 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api";
-import { Site, SiteListResponse } from "../types/site";
+import { Site } from "../types/site";
+
+// Define SiteListResponse type to match expected API response
+type SiteListResponse = Site[] | { items: Site[] };
 
 // Fix: react-query v4 expects queryKey as array, and mutationFn should match types
 export function useSites(params?: { page?: number; per_page?: number; search?: string }) {

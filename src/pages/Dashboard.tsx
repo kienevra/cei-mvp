@@ -55,7 +55,7 @@ export default function Dashboard() {
       </section>
       <section>
         <h2>Recent Alerts</h2>
-        {sitesLoading ? <LoadingSpinner /> : sitesError ? <ErrorBanner error={sitesError} /> : <Table data={sites ?? []} />}
+        {sitesLoading ? <LoadingSpinner /> : sitesError ? <ErrorBanner error={sitesError} /> : <Table data={sites ?? []} columns={[]} />}
       </section>
     </div>
   );
