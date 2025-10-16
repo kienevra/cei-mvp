@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import api from "../services/api";
-import { AuthResponse } from "../types/auth";
 
 interface AuthContextType {
   token: string | null;
@@ -20,12 +19,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [token]);
 
   const login = async (username: string, password: string) => {
-    try {
-      const res = await api.post<AuthResponse>("/auth/login", { username, password });
-      setToken(res.data.access_token);
-    } catch (error) {
-      throw new Error("Login failed");
-    }
+    const res = await api.post("/auth/login", { username, password });
+    setToken(res.data.access_token);
   };
 
   const logout = () => {
@@ -39,27 +34,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isAuthenticated: !!token,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (ctx === undefined) {
-    throw new Error("useAuth must be used within AuthProvider");
-  }
+  if (ctx === undefined) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
-}
-
-export function useRequireAuth() {
-  const { isAuthenticated } = useAuth();
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      window.location.href = "/login";
-    }
-  }, [isAuthenticated]);
 }
