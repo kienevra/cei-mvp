@@ -5,6 +5,19 @@ from app.api.v1.health import router as health_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.opportunities import router as opportunities_router
 from app.api.v1.reports import router as reports_router
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.get("/sites")
+def get_sites():
+    # Your logic here
+    return []
+from fastapi import FastAPI
+from .your_router_file import router
+
+app = FastAPI()
+app.include_router(router, prefix="/api/v1")
 
 app = FastAPI()
 origins = [
