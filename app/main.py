@@ -18,11 +18,7 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[ "http://localhost:5173",
-        "https://cei-ddmiued24-leons-projects-d3d4c274.vercel.app",
-        "https://cei-mvp.vercel.app",
-        "https://cei-mvp-git-main-leons-projects-d3d4c274.vercel.app"
-    ],  # Development frontend URL
+    allow_origins=origins,  # Use the full list defined above
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
