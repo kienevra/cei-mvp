@@ -1,3 +1,29 @@
+<<<<<<< HEAD
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+ENV/
+env.bak/
+*.sqlite3
+
+# Node
+node_modules/
+dist/
+
+# Alembic
+backend/alembic/versions/
+
+# Environment files
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+=======
 ﻿# Python
 __pycache__/
 *.py[cod]
@@ -20,3 +46,4 @@ build/
 *.log
 # other
 *.sqlite3
+>>>>>>> d89a389 (chore(backend): add CORS middleware, update configs and ignore pyc files)

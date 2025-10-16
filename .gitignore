@@ -1,11 +1,13 @@
 ﻿# Node / frontend
+frontend/node_modules/
+frontend/dist/
 node_modules/
 dist/
 .vite/
-npm-debug.log
-package-lock.json
-.env
 .vscode/
+.env
+.env.local
+.env.*.local
 
 # Python / backend
 .venv/
@@ -14,7 +16,7 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 
-# OS & editors
+# OS / editors
 .DS_Store
 Thumbs.db
 .idea/
