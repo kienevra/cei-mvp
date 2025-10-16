@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Python
 __pycache__/
 *.pyc
@@ -22,3 +23,27 @@ backend/alembic/versions/
 # OS
 .DS_Store
 Thumbs.db
+=======
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+env/
+.env
+# IDEs
+.vscode/
+.idea/
+# OS
+.DS_Store
+Thumbs.db
+# Build / python packaging
+dist/
+build/
+*.egg-info/
+# logs
+*.log
+# other
+*.sqlite3
+>>>>>>> d89a389 (chore(backend): add CORS middleware, update configs and ignore pyc files)

@@ -7,10 +7,22 @@ from app.api.v1.opportunities import router as opportunities_router
 from app.api.v1.reports import router as reports_router
 
 app = FastAPI()
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://cei-mvp.vercel.app",
+    "https://cei-ddmiued24-leons-projects-d3d4c274.vercel.app",
+    "https://cei-mvp-git-main-leons-projects-d3d4c274.vercel.app",
+    "https://cei-mvp.onrender.com",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Development frontend URL
+    allow_origins=[ "http://localhost:5173",
+        "https://cei-ddmiued24-leons-projects-d3d4c274.vercel.app",
+        "https://cei-mvp.vercel.app",
+        "https://cei-mvp-git-main-leons-projects-d3d4c274.vercel.app"
+    ],  # Development frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
