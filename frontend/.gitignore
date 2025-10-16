@@ -1,3 +1,54 @@
+<<<<<<< HEAD
+<<<<<<< HEAD
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+ENV/
+env.bak/
+*.sqlite3
+
+# Node
+node_modules/
+dist/
+
+# Alembic
+backend/alembic/versions/
+
+# Environment files
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+=======
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+env/
+.env
+# IDEs
+.vscode/
+.idea/
+# OS
+.DS_Store
+Thumbs.db
+# Build / python packaging
+dist/
+build/
+*.egg-info/
+# logs
+*.log
+# other
+*.sqlite3
+>>>>>>> d89a389 (chore(backend): add CORS middleware, update configs and ignore pyc files)
+=======
 ﻿# Node deps and build artifacts
 node_modules/
 dist/
@@ -22,3 +73,4 @@ yarn-error.log*
 *.log
 .DS_Store
 Thumbs.db
+>>>>>>> b60df6c (chore(frontend): add frontend source/config; prepare deployment)

@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "cei-backend"
+version = "0.1.0"
+description = "Carbon Efficiency Intelligence Backend"
+authors = ["Your Name <your.email@example.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "*"
+uvicorn = {extras = ["standard"], version = "*"}
+sqlalchemy = "*"
+alembic = "*"
+psycopg2-binary = "*"
+pydantic = "*"
+python-dotenv = "*"
+passlib = {extras = ["bcrypt"], version = "*"}
+python-jose = {extras = ["cryptography"], version = "*"}
+pandas = "*"
+scikit-learn = "*"
+reportlab = "*"
+aiofiles = "*"
+httpx = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
