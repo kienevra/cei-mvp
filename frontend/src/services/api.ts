@@ -1,48 +1,50 @@
 import axios from 'axios';
-import { ApiResponse } from '../types/api';
+import { getApiBaseUrl } from '../utils/runtimeConfig';
+import { getToken, setToken, getRefreshToken, setRefreshToken, removeToken, removeRefreshToken } from '../utils/storage';
 
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
-  timeout: 10000, // 10 second timeout
+  baseURL: getApiBaseUrl(),
+  withCredentials: false,
 });
 
-// JWT token handling
+// Request interceptor to attach token
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('jwt');
+  const token = getToken();
   if (token && config.headers) {
-    config.headers.Authorization = `Bearer ${token}`;
+    config.headers['Authorization'] = `Bearer ${token}`;
   }
   return config;
 });
 
-// Response handling
+// Response interceptor for token refresh skeleton
 api.interceptors.response.use(
-  (response) => {
-    return {
-      ...response,
-      data: {
-        data: response.data,
-        error: undefined
-      } as ApiResponse<typeof response.data>
-    };
-  },
-  (error) => {
-    const errorMessage = 
-      error.response?.data?.message || 
-      error.message || 
-      'An unexpected error occurred';
-    
-    console.error('API Error:', errorMessage);
-    
-    return Promise.reject({
-      ...error,
-      data: {
-        data: null,
-        error: errorMessage
-      } as ApiResponse<null>
-    });
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    if (error.response && error.response.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      const refreshToken = getRefreshToken();
+      if (refreshToken) {
+        try {
+          // Implement your refresh endpoint if available
+          const res = await axios.post(getApiBaseUrl() + '/auth/refresh', { refresh_token: refreshToken });
+          setToken(res.data.access_token);
+          if (res.data.refresh_token) setRefreshToken(res.data.refresh_token);
+          originalRequest.headers['Authorization'] = `Bearer ${res.data.access_token}`;
+          return api(originalRequest);
+        } catch (refreshErr) {
+          removeToken();
+          removeRefreshToken();
+          window.location.href = '/login';
+        }
+      } else {
+        removeToken();
+        removeRefreshToken();
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
   }
 );
-
 
 export default api;

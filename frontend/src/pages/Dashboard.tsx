@@ -1,66 +1,65 @@
-import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import api from '../services/api';
-import { Site, SitesResponse, ApiResponse } from '../types/api';
+import React, { useEffect } from "react";
+import { useApi } from "../hooks/useApi";
+import { Card } from "../components/Card";
+import LoadingSpinner from "../components/LoadingSpinner";
+import ErrorBanner from "../components/ErrorBanner";
+import { useAuth } from "../hooks/useAuth";
+import { getSites } from "../services/sites";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import PageHeader from "../components/PageHeader";
 
 const Dashboard: React.FC = () => {
-  const [sites, setSites] = useState<Site[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { data: health, loading: healthLoading, error: healthError } = useApi(() =>
+    fetch(`${import.meta.env.VITE_API_URL}/health`).then((r) => r.json())
+  );
+  const { data: sites, loading: sitesLoading } = useApi(getSites);
 
+  // Example: get metrics for first site (or fallback)
+  const [metrics, setMetrics] = React.useState<any[]>([]);
   useEffect(() => {
-    const fetchSites = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const response = await api.get<ApiResponse<SitesResponse>>('/api/v1/sites');
-        setSites(response.data.data.sites);
-      } catch (err) {
-        console.error('Failed to fetch sites:', err);
-        setError('Failed to load sites. Please try again later.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchSites();
-  }, []);
-
-  if (isLoading) {
-    return (
-      <div className="p-8 flex justify-center items-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-8">
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
-          {error}
-        </div>
-      </div>
-    );
-  }
+    if (sites && sites.length > 0) {
+      fetch(`${import.meta.env.VITE_API_URL}/sites/${sites[0].id}/metrics`)
+        .then((r) => r.json())
+        .then((d) => setMetrics(d.metrics || []))
+        .catch(() => setMetrics([]));
+    }
+  }, [sites]);
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold mb-4">Sites Dashboard</h1>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {sites.map(site => (
-          <Link to={`/sites/${site.id}`} key={site.id} className="block">
-            <div className="bg-white rounded shadow p-4 hover:shadow-lg transition-shadow duration-200">
-              <h2 className="text-xl font-semibold mb-2">{site.name}</h2>
-              <div className="space-y-1">
-                <div>Energy (kWh): {site.kpis.energy_kwh.toFixed(2)}</div>
-                <div>Avg Power (kW): {site.kpis.avg_power_kw.toFixed(2)}</div>
-                <div>Peak (kW): {site.kpis.peak_kw.toFixed(2)}</div>
-                <div>Load Factor: {site.kpis.load_factor.toFixed(2)}</div>
-              </div>
-            </div>
-          </Link>
-        ))}
+    <div>
+      <PageHeader title="Dashboard" />
+      {healthLoading && <LoadingSpinner />}
+      {healthError && <ErrorBanner error={healthError} />}
+      {health && (
+        <div className="mb-4">
+          <span
+            className={`inline-block w-3 h-3 rounded-full mr-2 ${health.status === "ok" ? "bg-green-500" : "bg-red-500"}`}
+            aria-label={health.status === "ok" ? "Healthy" : "Unhealthy"}
+          />
+          <span className="text-sm">API Health: {health.status}</span>
+        </div>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <Card label="Sites" value={sites?.length ?? "-"} />
+        <Card label="Active Alerts" value="TODO" />
+        <Card label="Weekly Savings" value="TODO" />
+      </div>
+      <div className="bg-white rounded shadow p-4 mb-6">
+        <div className="font-semibold mb-2">Example Metrics</div>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={metrics}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="timestamp" />
+            <YAxis />
+            <Tooltip />
+            <Line type="monotone" dataKey="value" stroke="#16a34a" dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <div>
+        <div className="font-semibold mb-2">Recent Events</div>
+        {/* TODO: Replace with real events/alerts endpoint if available */}
+        <div className="bg-white rounded shadow p-4 text-gray-500">No recent events.</div>
       </div>
     </div>
   );

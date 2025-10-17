@@ -1,23 +1,10 @@
-// Common interfaces for API responses and data types
+// src/types/api.ts
 
-export interface Site {
-  id: number;
-  name: string;
-  location: string;
-  kpis: {
-    energy_kwh: number;
-    avg_power_kw: number;
-    peak_kw: number;
-    load_factor: number;
-  };
+export interface ApiError {
+  message: string;
+  status?: number;
+  details?: any;
 }
-
-export interface ApiResponse<T> {
-  data: T;
-  error?: string;
-}
-
-export interface Opportunity {
   id: number;
   name: string;
   description: string;
