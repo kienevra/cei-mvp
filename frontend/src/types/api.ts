@@ -5,6 +5,18 @@ export interface ApiError {
   status?: number;
   details?: any;
 }
+
+export interface Site {
+  id: number;
+  name: string;
+  description: string;
+  simple_roi_years: number;
+  est_co2_tons_saved_per_year: number;
+  est_annual_kwh_saved: number;
+  est_capex_eur: number;
+}
+
+export interface Opportunity {
   id: number;
   name: string;
   description: string;

@@ -1,6 +1,9 @@
 import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider } from "./hooks/useAuth";
+// import AuthProvider from the correct location
+// Update the import path below if AuthProvider is in a different folder, for example:
+import AuthProvider from "../components/AuthProvider";
+// Or, if the file does not exist, create it as shown below.
 import TopNav from "./components/TopNav";
 import Sidebar from "./components/Sidebar";
 import ProtectedRoute from "./components/ProtectedRoute";
