@@ -18,7 +18,7 @@ backend/alembic/versions/
 
 # Environment files
 .env
-
+.env.*
 # OS
 .DS_Store
 Thumbs.db

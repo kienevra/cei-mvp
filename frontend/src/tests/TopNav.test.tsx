@@ -1,8 +1,12 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
+import '@testing-library/jest-dom';
+import { expect, test } from '@jest/globals';
 import { MemoryRouter } from "react-router-dom";
 import TopNav from "../components/TopNav";
-import { AuthProvider } from "../hooks/useAuth";
+// Update the import path to the correct module that exports AuthProvider
+// Update the import path to the correct module that exports AuthProvider
+import { AuthProvider } from "../hooks/useAuth.tsx";
 
 test("renders TopNav links", () => {
   render(
