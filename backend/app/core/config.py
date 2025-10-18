@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     env: str = "development"
     debug: bool = True
     port: int = 8000
+    DATABASE_URL: str 
 
     # Add any other fields your app requires here
 
