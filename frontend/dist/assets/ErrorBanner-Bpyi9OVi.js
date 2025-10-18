@@ -1,1 +1,0 @@
-import{j as r}from"./index-C7K1swTl.js";const t=({error:e})=>r.jsx("div",{className:"bg-red-100 text-red-700 rounded px-4 py-2 mb-2",children:typeof e=="string"?e:e?.message||"An error occurred."});export{t as E};

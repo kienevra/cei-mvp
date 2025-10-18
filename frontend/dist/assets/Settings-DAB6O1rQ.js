@@ -1,1 +1,0 @@
-import{j as s}from"./index-C7K1swTl.js";import{P as e}from"./PageHeader-BimI-6XN.js";const o=()=>s.jsxs("div",{children:[s.jsx(e,{title:"Settings"}),s.jsx("div",{className:"bg-white rounded shadow p-4",children:"Settings page (coming soon)"})]});export{o as default};
