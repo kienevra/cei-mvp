@@ -1,39 +1,20 @@
-import React, { useEffect, useRef } from "react";
+import React from 'react';
 
-type ModalProps = {
+interface ModalProps {
   open: boolean;
-  onClose: () => void;
   title?: string;
   children: React.ReactNode;
-};
+  onClose: () => void;
+}
 
-const Modal: React.FC<ModalProps> = ({ open, onClose, title, children }) => {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (open) {
-      ref.current?.focus();
-    }
-  }, [open]);
-
+const Modal: React.FC<ModalProps> = ({ open, title, children, onClose }) => {
   if (!open) return null;
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30"
-      aria-modal="true"
-      role="dialog"
-      tabIndex={-1}
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded shadow p-6 min-w-[300px] max-w-[90vw]"
-        onClick={(e) => e.stopPropagation()}
-        ref={ref}
-        tabIndex={0}
-        aria-label={title}
-      >
+    <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div className="bg-white rounded shadow-lg p-6 min-w-[300px]">
         {title && <div className="font-bold mb-2">{title}</div>}
-        {children}
+        <div>{children}</div>
+        <button className="mt-4 px-4 py-2 bg-blue-600 text-white rounded" onClick={onClose}>Close</button>
       </div>
     </div>
   );

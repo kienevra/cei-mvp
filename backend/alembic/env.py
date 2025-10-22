@@ -13,6 +13,10 @@ database_url = os.environ.get('DATABASE_URL')
 if database_url:
     config.set_main_option('sqlalchemy.url', database_url)
 
+# HINT: Alembic will use settings.DATABASE_URL if present in the environment.
+# See: os.environ.get('DATABASE_URL') in env.py
+# Ensure your .env is loaded or DATABASE_URL is set before running migrations.
+
 # import your app's metadata object for 'autogenerate'
 # ensure backend is on sys.path when running alembic from project root
 import sys

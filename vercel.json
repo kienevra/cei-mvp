@@ -1,0 +1,14 @@
+{
+  "root": "frontend",
+  "builds": [
+    { "src": "frontend/package.json", "use": "@vercel/vite" }
+  ],
+  "outputDirectory": "dist",
+  "framework": {
+    "name": "Vite"
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

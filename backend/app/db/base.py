@@ -1,4 +1,5 @@
+# app/db/base.py
 from sqlalchemy.orm import declarative_base
 
-# Central Base for Alembic autogenerate
+# Single declarative Base shared by the application and Alembic
 Base = declarative_base()

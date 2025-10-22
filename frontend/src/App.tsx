@@ -18,10 +18,28 @@ const Account = lazy(() => import("./pages/Account"));
 const Settings = lazy(() => import("./pages/Settings"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
+function Layout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-screen">
+      <Sidebar />
+      <div className="flex-1 flex flex-col">
+        <TopNav />
+        <main className="p-4">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function NotFound() {
+  return <div className="text-center mt-20 text-xl">404 - Not Found</div>;
+}
+
 const App: React.FC = () => (
   <BrowserRouter>
     <AuthProvider>
-      <div className="min-h-screen flex flex-col">
+      <div className="flex flex-col">
         <TopNav />
         <div className="flex flex-1">
           <Sidebar />
@@ -29,14 +47,11 @@ const App: React.FC = () => (
             <Suspense fallback={<LoadingSpinner />}>
               <Routes>
                 <Route path="/login" element={<Login />} />
-                <Route element={<ProtectedRoute />}>
-                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/sites" element={<SitesList />} />
-                  <Route path="/sites/:id" element={<SiteView />} />
-                  <Route path="/account" element={<Account />} />
-                  <Route path="/settings" element={<Settings />} />
-                </Route>
+                <Route element={<Layout><ProtectedRoute><Dashboard /></ProtectedRoute></Layout>} path="/" />
+                <Route element={<Layout><ProtectedRoute><SitesList /></ProtectedRoute></Layout>} path="/sites" />
+                <Route element={<Layout><ProtectedRoute><SiteView /></ProtectedRoute></Layout>} path="/sites/:id" />
+                <Route element={<Layout><ProtectedRoute><CSVUpload /></ProtectedRoute></Layout>} path="/upload" />
+                <Route element={<Layout><ProtectedRoute><Settings /></ProtectedRoute></Layout>} path="/settings" />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>

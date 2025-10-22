@@ -1,59 +1,70 @@
 // src/hooks/useAuth.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 import api from '../services/api';
-import { getToken, setToken, removeToken, getRefreshToken, setRefreshToken, removeRefreshToken } from '../utils/storage';
-import { AuthResponse, LoginRequest } from '../types/auth';
 
 interface AuthContextType {
-  isAuthenticated: boolean;
-  token: string | null;
-  login: (data: LoginRequest) => Promise<void>;
+  accessToken: string | null;
+  refreshToken: string | null;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function getStoredTokens() {
+  return {
+    accessToken: localStorage.getItem('cei_token'),
+    refreshToken: localStorage.getItem('cei_refresh_token'),
+  };
+}
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [token, setTokenState] = useState<string | null>(getToken());
+  const [accessToken, setAccessToken] = useState<string | null>(getStoredTokens().accessToken);
+  const [refreshToken, setRefreshToken] = useState<string | null>(getStoredTokens().refreshToken);
   const navigate = useNavigate();
 
   useEffect(() => {
-    setTokenState(getToken());
+    // Keep tokens in sync with localStorage
+    setAccessToken(localStorage.getItem('cei_token'));
+    setRefreshToken(localStorage.getItem('cei_refresh_token'));
   }, []);
 
-  const login = async (data: LoginRequest) => {
-    const res = await api.post<AuthResponse>('/auth/login', data);
-    setToken(res.data.access_token);
-    setTokenState(res.data.access_token);
-    if (res.data.refresh_token) setRefreshToken(res.data.refresh_token);
+  const login = async (email: string, password: string) => {
+    const res = await api.post('/auth/login', { email, password });
+    const { access_token, refresh_token } = res.data;
+    localStorage.setItem('cei_token', access_token);
+    localStorage.setItem('cei_refresh_token', refresh_token);
+    setAccessToken(access_token);
+    setRefreshToken(refresh_token);
     navigate('/');
   };
 
   const logout = () => {
-    removeToken();
-    removeRefreshToken();
-    setTokenState(null);
+    localStorage.removeItem('cei_token');
+    localStorage.removeItem('cei_refresh_token');
+    setAccessToken(null);
+    setRefreshToken(null);
     navigate('/login');
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!token, token, login, logout }}>
+    <AuthContext.Provider value={{ accessToken, refreshToken, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
 };
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
+  const context = useContext(AuthContext);
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
+  return context;
 }
 
-export function useRequireAuth() {
-  const { isAuthenticated } = useAuth();
-  const navigate = useNavigate();
-  useEffect(() => {
-    if (!isAuthenticated) navigate('/login');
-  }, [isAuthenticated, navigate]);
+export function ProtectedRoute({ children }: { children: JSX.Element }) {
+  const { accessToken } = useAuth();
+  if (!accessToken) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
 }

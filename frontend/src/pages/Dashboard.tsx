@@ -1,65 +1,46 @@
-import React, { useEffect } from "react";
-import { useApi } from "../hooks/useApi";
-import { Card } from "../components/Card";
+import React, { useEffect, useState } from "react";
+import { useAuth } from "../hooks/useAuth";
+import KpiCard from "../components/KpiCard";
+import TimeSeriesChart from "../components/TimeSeriesChart";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
-import { useAuth } from "../hooks/useAuth";
-import { getSites } from "../services/sites";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import PageHeader from "../components/PageHeader";
+import { getSites } from "../services/api";
 
 const Dashboard: React.FC = () => {
-  const { data: health, loading: healthLoading, error: healthError } = useApi(() =>
-    fetch(`${import.meta.env.VITE_API_URL}/health`).then((r) => r.json())
-  );
-  const { data: sites, loading: sitesLoading } = useApi(getSites);
+  const { accessToken } = useAuth();
+  const [sites, setSites] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Example: get metrics for first site (or fallback)
-  const [metrics, setMetrics] = React.useState<any[]>([]);
   useEffect(() => {
-    if (sites && sites.length > 0) {
-      fetch(`${import.meta.env.VITE_API_URL}/sites/${sites[0].id}/metrics`)
-        .then((r) => r.json())
-        .then((d) => setMetrics(d.metrics || []))
-        .catch(() => setMetrics([]));
-    }
-  }, [sites]);
+    setLoading(true);
+    getSites()
+      .then((data) => setSites(data))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (!accessToken) {
+    window.location.href = "/login";
+    return null;
+  }
 
   return (
-    <div>
-      <PageHeader title="Dashboard" />
-      {healthLoading && <LoadingSpinner />}
-      {healthError && <ErrorBanner error={healthError} />}
-      {health && (
-        <div className="mb-4">
-          <span
-            className={`inline-block w-3 h-3 rounded-full mr-2 ${health.status === "ok" ? "bg-green-500" : "bg-red-500"}`}
-            aria-label={health.status === "ok" ? "Healthy" : "Unhealthy"}
-          />
-          <span className="text-sm">API Health: {health.status}</span>
-        </div>
-      )}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <Card label="Sites" value={sites?.length ?? "-"} />
-        <Card label="Active Alerts" value="TODO" />
-        <Card label="Weekly Savings" value="TODO" />
+    <div className="p-4">
+      <h1 className="text-2xl font-bold mb-4">Dashboard</h1>
+      {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
+      <div className="flex gap-4 mb-6">
+        <KpiCard label="Total Sites" value={sites.length} />
+        <KpiCard label="Avg. Efficiency" value="87%" />
+        <KpiCard label="Outstanding Opps" value={3} />
       </div>
-      <div className="bg-white rounded shadow p-4 mb-6">
-        <div className="font-semibold mb-2">Example Metrics</div>
-        <ResponsiveContainer width="100%" height={220}>
-          <LineChart data={metrics}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="timestamp" />
-            <YAxis />
-            <Tooltip />
-            <Line type="monotone" dataKey="value" stroke="#16a34a" dot={false} />
-          </LineChart>
-        </ResponsiveContainer>
+      <div className="mb-6">
+        <h2 className="text-lg font-semibold mb-2">Efficiency Over Time</h2>
+        <TimeSeriesChart data={[{ timestamp: "2025-01-01", value: 120 }]} />
       </div>
-      <div>
-        <div className="font-semibold mb-2">Recent Events</div>
-        {/* TODO: Replace with real events/alerts endpoint if available */}
-        <div className="bg-white rounded shadow p-4 text-gray-500">No recent events.</div>
+      {loading && <LoadingSpinner />}
+      <div className="bg-gray-100 p-4 rounded shadow text-gray-500 text-center">
+        [Opportunities Table Placeholder]
       </div>
     </div>
   );

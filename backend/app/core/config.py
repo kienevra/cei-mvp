@@ -1,19 +1,33 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional, List
 
 class Settings(BaseSettings):
-    pgsslmode: str = "disable"
-    jwt_secret: str = "inevergraduated"
-    allowed_origins: str = "http://127.0.0.1:3000,http://localhost:3000,https://cei-mvp.vercel.app,https://cei-mvp-git-main-leons-projects-d3d4c274.vercel.app,https://cei-28ywh4fmm-leons-projects-d3d4c274.vercel.app,https://cei-mvp.onrender.com"
-    supabase_url: str = "https://obkaghiuibrsmjwazphi.supabase.co"
-    supabase_service_role_key: str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ia2FnaGl1aWJyc21qd2F6cGhpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQwNDc5NiwiZXhwIjoyMDc0OTgwNzk2fQ.ShE1JOVIIA20wnyK7AKx6EzY6tTXNZBzTDle0HZ7gI4"
-    env: str = "development"
-    debug: bool = True
-    port: int = 8000
-    DATABASE_URL: str 
+    """
+    Application configuration loaded from environment variables or .env file.
+    Example .env:
+    DATABASE_URL=postgresql://user:pass@host:5432/dbname
+    PGSSLMODE=require
+    JWT_SECRET=supersecret
+    ALLOWED_ORIGINS=http://localhost:5173,https://cei-mvp.vercel.app
+    GATEWAY_SHARED_SECRET=sharedsecret
+    SUPABASE_URL=https://xyz.supabase.co
+    SUPABASE_KEY=your_supabase_key
+    REDIS_URL=redis://localhost:6379/0
+    """
+    DATABASE_URL: Optional[str] = None
+    PGSSLMODE: str = "require"
+    JWT_SECRET: str
+    ALLOWED_ORIGINS: str
+    GATEWAY_SHARED_SECRET: Optional[str] = None
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_KEY: Optional[str] = None
+    REDIS_URL: Optional[str] = None
 
-    # Add any other fields your app requires here
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
-    class Config:
-        extra = "forbid"  # Prevents extra fields; change to "allow" if you want to permit extras
+    @property
+    def origins_list(self) -> List[str]:
+        """Return allowed origins as a list, stripping whitespace."""
+        return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
 settings = Settings()

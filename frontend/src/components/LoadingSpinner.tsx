@@ -1,13 +1,12 @@
 import React from "react";
 
-const LoadingSpinner: React.FC<{ small?: boolean }> = ({ small }) => (
-  <div
-    className={`animate-spin rounded-full border-2 border-t-green-600 border-gray-200 ${
-      small ? "w-5 h-5" : "w-10 h-10"
-    }`}
-    role="status"
-    aria-label="Loading"
-  />
+/**
+ * Simple loading spinner.
+ */
+const LoadingSpinner: React.FC = () => (
+  <div className="flex justify-center items-center p-4">
+    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-600"></div>
+  </div>
 );
 
 export default LoadingSpinner;

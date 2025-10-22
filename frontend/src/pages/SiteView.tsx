@@ -1,58 +1,40 @@
-import React, { useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { useApi } from "../hooks/useApi";
-import { getSite } from "../services/sites";
-import LoadingSpinner from "../components/LoadingSpinner";
-import ErrorBanner from "../components/ErrorBanner";
-import PageHeader from "../components/PageHeader";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import React, { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { fetchSite } from '../services/sites';
+import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorBanner from '../components/ErrorBanner';
 
 const SiteView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { data: site, loading, error } = useApi(() => getSite(id!));
-  const [metrics, setMetrics] = React.useState<any[]>([]);
-  const navigate = useNavigate();
+  const [site, setSite] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (id) {
-      fetch(`${import.meta.env.VITE_API_URL}/sites/${id}/metrics`)
-        .then((r) => r.json())
-        .then((d) => setMetrics(d.metrics || []))
-        .catch(() => setMetrics([]));
-    }
+    if (!id) return;
+    setLoading(true);
+    fetchSite(id)
+      .then(data => setSite(data))
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
   }, [id]);
 
-  if (loading) return <LoadingSpinner />;
-  if (error) return <ErrorBanner error={error} />;
-  if (!site) return null;
-
   return (
-    <div>
-      <PageHeader title={site.name} />
-      <div className="mb-4">
-        <div className="text-gray-600">Location: {site.location}</div>
-        <div className="text-gray-600">Status: {site.status}</div>
-        <div className="text-gray-600">Last Updated: {site.updated_at}</div>
-      </div>
-      <div className="bg-white rounded shadow p-4 mb-6">
-        <div className="font-semibold mb-2">Metrics</div>
-        <ResponsiveContainer width="100%" height={220}>
-          <LineChart data={metrics}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="timestamp" />
-            <YAxis />
-            <Tooltip />
-            <Line type="monotone" dataKey="value" stroke="#16a34a" dot={false} />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-      <div>
-        <div className="font-semibold mb-2">Raw Data</div>
-        <pre className="bg-gray-100 rounded p-2 text-xs overflow-x-auto">{JSON.stringify(site, null, 2)}</pre>
-      </div>
-      <button className="mt-4 bg-gray-200 px-4 py-1 rounded" onClick={() => navigate(-1)}>
-        Back
-      </button>
+    <div className="p-4">
+      <h1 className="text-xl font-bold mb-4">Site Details</h1>
+      {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
+      {loading ? <LoadingSpinner /> : (
+        <div>
+          {site ? (
+            <div>
+              <div><strong>ID:</strong> {site.id}</div>
+              <div><strong>Name:</strong> {site.name}</div>
+              <div><strong>Location:</strong> {site.location}</div>
+              {/* Add more fields as needed */}
+            </div>
+          ) : <div>No site found.</div>}
+        </div>
+      )}
     </div>
   );
 };
