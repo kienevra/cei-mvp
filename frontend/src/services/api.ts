@@ -1,66 +1,54 @@
-import axios from 'axios';
+import axios from "axios";
 
-// Robust baseURL determination
-const envBase = (import.meta as any).env?.VITE_API_URL || "";
+const rawEnv = (import.meta as any).env || {};
+const envBase = rawEnv.VITE_API_URL || "";
 const base = envBase.replace(/\/+$/, "");
-const baseURL = base.endsWith("/api/v1") ? base : `${base}/api/v1`;
+const baseURL = base ? (base.endsWith("/api/v1") ? base : `${base}/api/v1`) : "/api/v1";
 
 const api = axios.create({
   baseURL,
   timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-  },
-  withCredentials: false,
 });
 
-// Request interceptor to attach token from localStorage
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('cei_token');
-  if (token && config.headers) {
-    config.headers['Authorization'] = `Bearer ${token}`;
+api.interceptors.request.use((cfg) => {
+  const token = localStorage.getItem("cei_token");
+  if (token) {
+    cfg.headers = cfg.headers || {};
+    cfg.headers.Authorization = `Bearer ${token}`;
   }
-  return config;
+  return cfg;
 });
 
-// Response interceptor for 401 handling and error logging
 api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response && error.response.status === 401) {
-      window.location.href = '/login';
+  (r) => r,
+  (err) => {
+    if (err?.response?.status === 401) {
+      // simple handling; route to /login in components using this service
+      localStorage.removeItem("cei_token");
+      // we can't navigate here (no router), caller should handle redirect
     }
-    console.error('API error:', error);
-    return Promise.reject(error);
+    return Promise.reject(err);
   }
 );
 
-// Typed helper functions
+// typed helper functions
 export async function getSites() {
-  // Example usage: const sites = await getSites();
-  const res = await api.get('/sites');
-  return res.data;
+  const r = await api.get("/sites").catch((e) => {
+    throw e;
+  });
+  return r.data;
 }
 
-export async function getSite(id: string) {
-  // Example usage: const site = await getSite('site-123');
-  const res = await api.get(`/sites/${id}`);
-  return res.data;
-}
-
-export async function postTimeseriesBatch(payload: any) {
-  // Example usage: await postTimeseriesBatch([{...}, {...}]);
-  const res = await api.post('/data/timeseries', payload);
-  return res.data;
+export async function postTimeseriesBatch(payload: any[]) {
+  const r = await api.post("/timeseries", payload);
+  return r.data;
 }
 
 export async function uploadCsv(formData: FormData) {
-  // Example usage: await uploadCsv(formData);
-  const res = await api.post('/upload-csv', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+  const r = await api.post("/upload-csv", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
   });
-  return res.data;
+  return r.data;
 }
 
 export default api;

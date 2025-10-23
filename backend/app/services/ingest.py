@@ -2,75 +2,76 @@ import os
 import json
 import logging
 from typing import Tuple, List, Dict, Any
-from sqlalchemy.orm import Session
-from app.core.config import settings
-
 logger = logging.getLogger(__name__)
 
-STAGING_FILE = os.path.join(os.path.dirname(__file__), "../api/v1/timeseries_staging.json")
 
 # --- Pure validation ---
-def validate_record(record: Dict[str, Any]) -> Tuple[bool, List[str]]:
-    errors = []
-    required = ["site_id", "meter_id", "timestamp", "value", "unit"]
-    for field in required:
-        if field not in record or record[field] is None:
-            errors.append(f"Missing field: {field}")
-    try:
-        float(record.get("value", ""))
-    except Exception:
-        errors.append("Value must be numeric")
-    if record.get("unit") != "kWh":
-        errors.append("Unit must be 'kWh'")
-    # Add more validation as needed
-    return (len(errors) == 0, errors)
 
 # --- IO functions ---
-def save_raw_timeseries(job_id: str, payload: Any):
-    try:
-        with open(STAGING_FILE, "a") as f:
-            json.dump({"job_id": job_id, "records": payload}, f, default=str)
-            f.write("\n")
-        logger.info(f"Saved raw timeseries for job {job_id}")
-    except Exception as e:
-        logger.error(f"Failed to save raw timeseries: {e}")
-        raise RuntimeError(f"Failed to save raw timeseries: {e}")
 
 # --- Processing ---
-def process_job(job_id: str, db: Session):
-    # Read staged records
-    try:
-        with open(STAGING_FILE, "r") as f:
-            for line in f:
-                entry = json.loads(line)
-                if entry.get("job_id") == job_id:
-                    records = entry.get("records", [])
-                    break
-            else:
-                raise RuntimeError(f"Job {job_id} not found in staging")
-    except Exception as e:
-        logger.error(f"Error reading staging file: {e}")
-        raise
-    # Normalize units and compute delta (placeholder)
-    normalized = []
-    for rec in records:
-        valid, errors = validate_record(rec)
-        if not valid:
-            logger.warning(f"Invalid record in job {job_id}: {errors}")
-            continue
-        # Example normalization: unit
-        rec["unit"] = "kWh"  # Only kWh supported for now
-        # Example delta computation for cumulative meters (placeholder)
-        # rec["delta"] = ...
-        normalized.append(rec)
-    # Write to main timeseries DB table (placeholder)
-    try:
-        for rec in normalized:
-            # Replace with your SQLAlchemy model and insert logic
-            # db.add(TimeseriesModel(**rec))
-            pass
-        db.commit()
-        logger.info(f"Processed job {job_id}: {len(normalized)} records written to DB")
-    except Exception as e:
-        logger.error(f"Failed to write records to DB: {e}")
-        raise RuntimeError(f"Failed to write records to DB: {e}")
+import os
+import uuid
+import json
+import logging
+from typing import Tuple, Dict, Any, List
+from datetime import datetime
+from decimal import Decimal
+
+STAGING_DIR = os.getenv("INGEST_STAGING_DIR", "/tmp/cei_staging")
+os.makedirs(STAGING_DIR, exist_ok=True)
+logger = logging.getLogger("app.services.ingest")
+
+
+def save_raw_timeseries(payload: List[Dict[str, Any]]) -> str:
+    job_id = uuid.uuid4().hex
+    path = os.path.join(STAGING_DIR, f"{job_id}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+    logger.info("saved staging payload %s", path)
+    return job_id
+
+
+def validate_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    errs = []
+    if not r.get("site_id"):
+        errs.append("site_id missing")
+    if not r.get("meter_id"):
+        errs.append("meter_id missing")
+    if "value" not in r:
+        errs.append("value missing")
+    else:
+        try:
+            Decimal(str(r["value"]))
+        except Exception:
+            errs.append("value not numeric")
+    if "timestamp" in r:
+        try:
+            datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00"))
+        except Exception:
+            errs.append("timestamp not ISO8601")
+    else:
+        errs.append("timestamp missing")
+    return (len(errs) == 0, errs)
+
+
+def process_job(job_id: str) -> int:
+    """
+    Simple process: read staging file, validate, and return count of accepted rows.
+    In real app, insert into DB using SQLAlchemy session (not done here to keep file small).
+    """
+    path = os.path.join(STAGING_DIR, f"{job_id}.json")
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    accepted = 0
+    for r in payload:
+        ok, errs = validate_record(r)
+        if ok:
+            # TODO: persist to DB
+            accepted += 1
+        else:
+            logger.warning("staging record %s failed validation: %s", r, errs)
+    logger.info("processed job %s accepted=%d total=%d", job_id, accepted, len(payload))
+    return accepted

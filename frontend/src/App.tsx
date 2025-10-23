@@ -16,6 +16,7 @@ const SiteView = lazy(() => import("./pages/SiteView"));
 const Login = lazy(() => import("./pages/Login"));
 const Account = lazy(() => import("./pages/Account"));
 const Settings = lazy(() => import("./pages/Settings"));
+const CSVUpload = lazy(() => import("./pages/CSVUpload"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -31,33 +32,22 @@ function Layout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
-function NotFound() {
-  return <div className="text-center mt-20 text-xl">404 - Not Found</div>;
-}
+// NotFound is lazy-loaded above.
 
 const App: React.FC = () => (
   <BrowserRouter>
     <AuthProvider>
-      <div className="flex flex-col">
-        <TopNav />
-        <div className="flex flex-1">
-          <Sidebar />
-          <main className="flex-1 p-4 bg-gray-50">
-            <Suspense fallback={<LoadingSpinner />}>
-              <Routes>
-                <Route path="/login" element={<Login />} />
-                <Route element={<Layout><ProtectedRoute><Dashboard /></ProtectedRoute></Layout>} path="/" />
-                <Route element={<Layout><ProtectedRoute><SitesList /></ProtectedRoute></Layout>} path="/sites" />
-                <Route element={<Layout><ProtectedRoute><SiteView /></ProtectedRoute></Layout>} path="/sites/:id" />
-                <Route element={<Layout><ProtectedRoute><CSVUpload /></ProtectedRoute></Layout>} path="/upload" />
-                <Route element={<Layout><ProtectedRoute><Settings /></ProtectedRoute></Layout>} path="/settings" />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </Suspense>
-          </main>
-        </div>
-      </div>
+      <Suspense fallback={<LoadingSpinner />}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route element={<Layout><ProtectedRoute><Dashboard /></ProtectedRoute></Layout>} path="/" />
+          <Route element={<Layout><ProtectedRoute><SitesList /></ProtectedRoute></Layout>} path="/sites" />
+          <Route element={<Layout><ProtectedRoute><SiteView /></ProtectedRoute></Layout>} path="/sites/:id" />
+          <Route element={<Layout><ProtectedRoute><CSVUpload /></ProtectedRoute></Layout>} path="/upload" />
+          <Route element={<Layout><ProtectedRoute><Settings /></ProtectedRoute></Layout>} path="/settings" />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
     </AuthProvider>
   </BrowserRouter>
 );
