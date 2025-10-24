@@ -35,11 +35,12 @@ def process_csv_job(job_id: str):
 @router.post("/upload-csv", status_code=status.HTTP_202_ACCEPTED)
 async def upload_csv(
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = Depends(),
+    background_tasks: BackgroundTasks,  # ✅ Removed Depends()
     skip_header: bool = Query(False, description="Skip first row as header"),
     timezone: Optional[str] = Query(None, description="Timezone for timestamps"),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
+
     """
     Upload a CSV file containing timeseries data. Validates first N rows and returns a preview.
     Requires Bearer token authentication.
