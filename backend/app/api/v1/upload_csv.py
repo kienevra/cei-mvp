@@ -34,8 +34,8 @@ def process_csv_job(job_id: str):
 
 @router.post("/upload-csv", status_code=status.HTTP_202_ACCEPTED)
 async def upload_csv(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks,  # ✅ Removed Depends()
     skip_header: bool = Query(False, description="Skip first row as header"),
     timezone: Optional[str] = Query(None, description="Timezone for timestamps"),
     current_user: dict = Depends(get_current_user),
