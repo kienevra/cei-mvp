@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None
     PGSSLMODE: str = "require"
     REDIS_URL: Optional[str] = None
+    VITE_API_URL: Optional[str] = None
 
     # Auth & security
     JWT_SECRET: str = Field(..., env="JWT_SECRET")
