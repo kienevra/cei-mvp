@@ -15,6 +15,19 @@ class Organization(Base):
     sites = relationship("Site", back_populates="organization", cascade="all, delete-orphan")
     users = relationship("User", back_populates="organization", cascade="all, delete-orphan")
 
+# Minimal User model — add this into backend/app/models.py
+class User(Base):
+    __tablename__ = "user"
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organization.id"), nullable=True, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    hashed_password = Column(String, nullable=False)
+    is_active = Column(Integer, default=1, nullable=False)  # 1/0 or use Boolean if supported
+    is_superuser = Column(Integer, default=0, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    organization = relationship("Organization", back_populates="users")
+
 class Site(Base):
     __tablename__ = "site"
     id = Column(Integer, primary_key=True, index=True)
