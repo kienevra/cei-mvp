@@ -1,7 +1,9 @@
 """
-# To include in app.main:
-# from app.api.v1.upload_csv import router as upload_csv_router
-# app.include_router(upload_csv_router)
+Upload CSV endpoint
+
+To include in app.main:
+from app.api.v1.upload_csv import router as upload_csv_router
+app.include_router(upload_csv_router)
 """
 
 from fastapi import (
@@ -12,13 +14,14 @@ from fastapi import (
     status,
     BackgroundTasks,
     Query,
+    Depends,
 )
-from typing import Optional
+from typing import Optional, Dict, Any
 from uuid import uuid4
 import csv
 import os
 
-# Replace with your actual auth dependency
+# Real auth dependency (must return current user dict or raise 401)
 from app.api.v1.auth import get_current_user
 
 router = APIRouter(tags=["Upload CSV"])
@@ -42,12 +45,12 @@ ALIASES = {
 def _normalize_fieldnames(fieldnames):
     if not fieldnames:
         return []
-    return [f.strip().lower() for f in fieldnames]
+    return [f.strip().lower() for f in fieldnames if f is not None]
 
 
 def _build_column_map(fieldnames_norm):
     """
-    Given normalized fieldnames (list), return a mapping canonical_col -> actual_header_name (original case)
+    Given normalized fieldnames (list), return a mapping canonical_col -> actual normalized header name
     This attempts to resolve aliases. Returns dict where value is the matched normalized name.
     """
     col_map = {}
@@ -60,30 +63,42 @@ def _build_column_map(fieldnames_norm):
 
 
 def process_csv_job(job_id: str):
-    # Placeholder for real processing logic
-    pass
+    """
+    Background worker placeholder.
+
+    Replace this with real ingestion logic that:
+    - reads the staged CSV from UPLOAD_DIR/<job_id>.csv
+    - writes rows to DB (staging table or timeseries table)
+    - marks staging upload status
+    - handles errors and idempotency
+    """
+    # Placeholder implementation; implement persistence logic here.
+    path = os.path.join(UPLOAD_DIR, f"{job_id}.csv")
+    if os.path.exists(path):
+        # TODO: replace with actual DB/session logic
+        print(f"[process_csv_job] would process {path}")
+    else:
+        print(f"[process_csv_job] file not found: {path}")
 
 
 @router.post("/upload-csv", status_code=status.HTTP_202_ACCEPTED)
 async def upload_csv(
+    background_tasks: BackgroundTasks,  # must come before parameters with defaults to avoid Python non-default-after-default error
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None,  # FastAPI injects this automatically; default None for safety
-    current_user: dict | None = None,  # ⚠️ DEV-ONLY: Authentication temporarily disabled for testing
     skip_header: bool = Query(False, description="Skip first row as header"),
     timezone: Optional[str] = Query(None, description="Timezone for timestamps"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     Upload a CSV file containing timeseries data. Validates first N rows and returns a preview.
-    Authentication temporarily disabled (DEV ONLY).
-    Revert before merging to production.
+
+    Requires Bearer token authentication (Depends on get_current_user).
 
     Example curl:
-    curl -X POST "https://cei-mvp.onrender.com/api/v1/upload-csv" \
+    curl -X POST "https://<your-host>/api/v1/upload-csv" \
+      -H "Authorization: Bearer <token>" \
       -F "file=@data.csv"
     """
-    if background_tasks is None:
-        background_tasks = BackgroundTasks()
-
     job_id = str(uuid4())
     accepted_rows = 0
     rejected_rows = 0
@@ -116,12 +131,12 @@ async def upload_csv(
             # Attempt to auto-fill missing canonical columns using aliases / sensor_id
             missing_after_map = REQUIRED_COLUMNS - set(col_map.keys())
 
-            # If unit missing, we will accept and populate empty string later (so remove from missing)
+            # If unit missing, accept and populate empty string later (so remove from missing)
             if "unit" in missing_after_map:
                 missing_after_map.remove("unit")  # allow missing unit; will default to ""
 
             if missing_after_map:
-                # Try a last-ditch: if 'sensor_id' exists in the file, map it to site_id & meter_id if either missing
+                # Last-ditch: if 'sensor_id' exists in the file, map it to site_id & meter_id if either missing
                 if "sensor_id" in fieldnames_norm:
                     sensor_key = "sensor_id"
                     if "site_id" not in col_map:
@@ -144,11 +159,14 @@ async def upload_csv(
 
                 # normalize keys & values
                 row_norm = {}
-                for k, v in (row.items()):
+                for k, v in row.items():
                     if k is None:
                         continue
                     kn = k.strip().lower()
-                    row_norm[kn] = v.strip() if isinstance(v, str) else v
+                    if isinstance(v, str):
+                        row_norm[kn] = v.strip()
+                    else:
+                        row_norm[kn] = v
 
                 # create canonical access dict
                 canonical_row = {}
@@ -156,7 +174,6 @@ async def upload_csv(
                     if canonical in col_map:
                         key = col_map[canonical]
                         val = row_norm.get(key, "")
-                        # if val is None convert to ""
                         canonical_row[canonical] = val if val is not None else ""
                     else:
                         # unit may be absent intentionally
@@ -164,10 +181,8 @@ async def upload_csv(
 
                 # Basic validations
                 row_errors = []
-                # timestamp
                 if not canonical_row.get("timestamp"):
                     row_errors.append("missing timestamp")
-                # site_id / meter_id / value
                 if not canonical_row.get("site_id"):
                     row_errors.append("missing site_id")
                 if not canonical_row.get("meter_id"):
@@ -182,12 +197,11 @@ async def upload_csv(
 
                 if row_errors:
                     rejected_rows += 1
-                    # adjust reported row number: CSV first data row number is 2 when header present
+                    # CSV first data row number is 2 when header present
                     reported_row = i + 2 if (not skip_header) else i + 1
                     errors.append({"row": reported_row, "message": "; ".join(row_errors)})
                 else:
                     accepted_rows += 1
-                    # include preview row if desired
                     preview_rows.append({k: canonical_row.get(k) for k in sorted(REQUIRED_COLUMNS)})
 
     except HTTPException:
@@ -195,7 +209,7 @@ async def upload_csv(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"CSV parse error: {e}")
 
-    # Schedule background job
+    # Schedule background job (background_tasks injected by FastAPI)
     background_tasks.add_task(process_csv_job, job_id)
 
     return {
