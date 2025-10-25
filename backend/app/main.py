@@ -10,7 +10,9 @@ logger = logging.getLogger("cei")
 
 # Decide whether docs should be exposed (default: False in prod)
 # settings.enable_docs should come from env (e.g. ENABLE_DOCS=true in dev/staging)
+
 enable_docs = getattr(settings, "enable_docs", False)
+logger.info(f"Startup: settings.ENABLE_DOCS={getattr(settings, 'ENABLE_DOCS', None)} enable_docs={enable_docs}")
 
 app = FastAPI(
     title="CEI API",
