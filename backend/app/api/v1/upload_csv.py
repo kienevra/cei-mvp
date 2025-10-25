@@ -4,9 +4,18 @@
 # app.include_router(upload_csv_router)
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends, BackgroundTasks, Query
+from fastapi import (
+    APIRouter,
+    UploadFile,
+    File,
+    HTTPException,
+    status,
+    Depends,
+    BackgroundTasks,
+    Query,
+)
 from fastapi.security import OAuth2PasswordBearer
-from typing import List, Optional
+from typing import Optional
 from uuid import uuid4
 import csv
 import os
@@ -22,6 +31,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 PREVIEW_ROWS = 10
 REQUIRED_COLUMNS = {"timestamp", "site_id", "meter_id", "value", "unit"}
 
+
 class PreviewResponseRowError:
     def __init__(self, row: int, message: str):
         self.row = row
@@ -32,22 +42,22 @@ def process_csv_job(job_id: str):
     # Placeholder for real processing logic
     pass
 
+
 @router.post("/upload-csv", status_code=status.HTTP_202_ACCEPTED)
 async def upload_csv(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = Depends(),
+    current_user: dict | None = None,  # ⚠️ DEV-ONLY: Authentication temporarily disabled for testing
     skip_header: bool = Query(False, description="Skip first row as header"),
     timezone: Optional[str] = Query(None, description="Timezone for timestamps"),
-    current_user: dict = Depends(get_current_user),
 ):
-
     """
     Upload a CSV file containing timeseries data. Validates first N rows and returns a preview.
-    Requires Bearer token authentication.
+    Authentication temporarily disabled (DEV ONLY). 
+    Revert before merging to production.
 
     Example curl:
-    curl -X POST "http://localhost:8000/api/v1/upload-csv" \
-      -H "Authorization: Bearer <token>" \
+    curl -X POST "https://cei-mvp.onrender.com/api/v1/upload-csv" \
       -F "file=@data.csv"
     """
     job_id = str(uuid4())
@@ -55,6 +65,7 @@ async def upload_csv(
     rejected_rows = 0
     errors = []
     preview_rows = []
+
     # Save uploaded file to staging area
     upload_path = os.path.join(UPLOAD_DIR, f"{job_id}.csv")
     try:
@@ -63,6 +74,7 @@ async def upload_csv(
             out_file.write(content)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+
     # Parse and validate first N rows
     try:
         delimiter = "," if file.filename.endswith(".csv") else "\t"
@@ -71,7 +83,10 @@ async def upload_csv(
             columns = set(reader.fieldnames or [])
             missing = REQUIRED_COLUMNS - columns
             if missing:
-                raise HTTPException(status_code=400, detail=f"Missing columns: {', '.join(missing)}")
+                raise HTTPException(
+                    status_code=400, detail=f"Missing columns: {', '.join(missing)}"
+                )
+
             for i, row in enumerate(reader):
                 if i >= PREVIEW_ROWS:
                     break
@@ -83,19 +98,28 @@ async def upload_csv(
                     float(row["value"])
                 except Exception:
                     row_errors.append("invalid value")
+
                 # Add more validation as needed
                 if row_errors:
                     rejected_rows += 1
-                    errors.append({"row": i+2 if skip_header else i+1, "message": "; ".join(row_errors)})
+                    errors.append(
+                        {
+                            "row": i + 2 if skip_header else i + 1,
+                            "message": "; ".join(row_errors),
+                        }
+                    )
                 else:
                     accepted_rows += 1
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"CSV parse error: {e}")
+
     # Schedule background job
     background_tasks.add_task(process_csv_job, job_id)
+
     return {
         "accepted_rows": accepted_rows,
         "rejected_rows": rejected_rows,
         "errors": errors,
-        "job_id": job_id
+        "job_id": job_id,
     }
