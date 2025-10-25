@@ -10,11 +10,9 @@ from fastapi import (
     File,
     HTTPException,
     status,
-    Depends,
     BackgroundTasks,
     Query,
 )
-from fastapi.security import OAuth2PasswordBearer
 from typing import Optional
 from uuid import uuid4
 import csv
@@ -46,20 +44,24 @@ def process_csv_job(job_id: str):
 @router.post("/upload-csv", status_code=status.HTTP_202_ACCEPTED)
 async def upload_csv(
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = Depends(),
+    background_tasks: BackgroundTasks = None,  # FastAPI injects this automatically; default None for safety
     current_user: dict | None = None,  # ⚠️ DEV-ONLY: Authentication temporarily disabled for testing
     skip_header: bool = Query(False, description="Skip first row as header"),
     timezone: Optional[str] = Query(None, description="Timezone for timestamps"),
 ):
     """
     Upload a CSV file containing timeseries data. Validates first N rows and returns a preview.
-    Authentication temporarily disabled (DEV ONLY). 
+    Authentication temporarily disabled (DEV ONLY).
     Revert before merging to production.
 
     Example curl:
     curl -X POST "https://cei-mvp.onrender.com/api/v1/upload-csv" \
       -F "file=@data.csv"
     """
+    # If FastAPI didn't provide BackgroundTasks for some reason, create a minimal no-op placeholder
+    if background_tasks is None:
+        background_tasks = BackgroundTasks()
+
     job_id = str(uuid4())
     accepted_rows = 0
     rejected_rows = 0
