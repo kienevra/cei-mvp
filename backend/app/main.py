@@ -43,6 +43,12 @@ def root():
         return RedirectResponse(url="/api/v1/docs")
     return {"status": "CEI API is running. See /health."}
 
+
+# Debug endpoint to check docs flag
+@app.get("/debug/docs-enabled", include_in_schema=False)
+def debug_docs_enabled():
+    return {"enable_docs": enable_docs}
+
 @app.get("/health", include_in_schema=False)
 def health():
     return {"status": "ok"}
