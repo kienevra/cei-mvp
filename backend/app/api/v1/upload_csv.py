@@ -14,7 +14,7 @@ import os
 # Replace with your actual auth dependency
 from app.api.v1.auth import get_current_user
 
-router = APIRouter(prefix="/api/v1", tags=["Upload CSV"])
+router = APIRouter(tags=["Upload CSV"])
 
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
