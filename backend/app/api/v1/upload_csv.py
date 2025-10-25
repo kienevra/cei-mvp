@@ -29,11 +29,34 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 PREVIEW_ROWS = 10
 REQUIRED_COLUMNS = {"timestamp", "site_id", "meter_id", "value", "unit"}
 
+# Aliases: if canonical column missing, try these alternatives (lower-cased)
+ALIASES = {
+    "site_id": ["site_id", "sensor_id", "site"],
+    "meter_id": ["meter_id", "sensor_id", "meter"],
+    "timestamp": ["timestamp", "time", "ts"],
+    "value": ["value", "reading", "val"],
+    "unit": ["unit", "units"],
+}
 
-class PreviewResponseRowError:
-    def __init__(self, row: int, message: str):
-        self.row = row
-        self.message = message
+
+def _normalize_fieldnames(fieldnames):
+    if not fieldnames:
+        return []
+    return [f.strip().lower() for f in fieldnames]
+
+
+def _build_column_map(fieldnames_norm):
+    """
+    Given normalized fieldnames (list), return a mapping canonical_col -> actual_header_name (original case)
+    This attempts to resolve aliases. Returns dict where value is the matched normalized name.
+    """
+    col_map = {}
+    for canonical, alias_list in ALIASES.items():
+        for a in alias_list:
+            if a in fieldnames_norm:
+                col_map[canonical] = a
+                break
+    return col_map
 
 
 def process_csv_job(job_id: str):
@@ -58,7 +81,6 @@ async def upload_csv(
     curl -X POST "https://cei-mvp.onrender.com/api/v1/upload-csv" \
       -F "file=@data.csv"
     """
-    # If FastAPI didn't provide BackgroundTasks for some reason, create a minimal no-op placeholder
     if background_tasks is None:
         background_tasks = BackgroundTasks()
 
@@ -79,40 +101,97 @@ async def upload_csv(
 
     # Parse and validate first N rows
     try:
-        delimiter = "," if file.filename.endswith(".csv") else "\t"
+        # choose delimiter based on extension (fall back to comma)
+        delimiter = "," if (file.filename and file.filename.lower().endswith(".csv")) else ","
         with open(upload_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f, delimiter=delimiter)
-            columns = set(reader.fieldnames or [])
-            missing = REQUIRED_COLUMNS - columns
-            if missing:
-                raise HTTPException(
-                    status_code=400, detail=f"Missing columns: {', '.join(missing)}"
-                )
+            fieldnames = reader.fieldnames
+            fieldnames_norm = _normalize_fieldnames(fieldnames)
 
+            if not fieldnames_norm:
+                raise HTTPException(status_code=400, detail="CSV has no header row or empty file.")
+
+            col_map = _build_column_map(fieldnames_norm)
+
+            # Attempt to auto-fill missing canonical columns using aliases / sensor_id
+            missing_after_map = REQUIRED_COLUMNS - set(col_map.keys())
+
+            # If unit missing, we will accept and populate empty string later (so remove from missing)
+            if "unit" in missing_after_map:
+                missing_after_map.remove("unit")  # allow missing unit; will default to ""
+
+            if missing_after_map:
+                # Try a last-ditch: if 'sensor_id' exists in the file, map it to site_id & meter_id if either missing
+                if "sensor_id" in fieldnames_norm:
+                    sensor_key = "sensor_id"
+                    if "site_id" not in col_map:
+                        col_map["site_id"] = sensor_key
+                    if "meter_id" not in col_map:
+                        col_map["meter_id"] = sensor_key
+                    # recompute missing
+                    missing_after_map = REQUIRED_COLUMNS - set(col_map.keys())
+                    if "unit" in missing_after_map:
+                        missing_after_map.remove("unit")
+
+            if missing_after_map:
+                # still missing required columns (other than unit)
+                raise HTTPException(status_code=400, detail=f"Missing columns: {', '.join(sorted(missing_after_map))}")
+
+            # iterate rows for preview
             for i, row in enumerate(reader):
                 if i >= PREVIEW_ROWS:
                     break
-                row_errors = []
-                for col in REQUIRED_COLUMNS:
-                    if not row.get(col):
-                        row_errors.append(f"missing {col}")
-                try:
-                    float(row["value"])
-                except Exception:
-                    row_errors.append("invalid value")
 
-                # Add more validation as needed
+                # normalize keys & values
+                row_norm = {}
+                for k, v in (row.items()):
+                    if k is None:
+                        continue
+                    kn = k.strip().lower()
+                    row_norm[kn] = v.strip() if isinstance(v, str) else v
+
+                # create canonical access dict
+                canonical_row = {}
+                for canonical in REQUIRED_COLUMNS:
+                    if canonical in col_map:
+                        key = col_map[canonical]
+                        val = row_norm.get(key, "")
+                        # if val is None convert to ""
+                        canonical_row[canonical] = val if val is not None else ""
+                    else:
+                        # unit may be absent intentionally
+                        canonical_row[canonical] = "" if canonical == "unit" else None
+
+                # Basic validations
+                row_errors = []
+                # timestamp
+                if not canonical_row.get("timestamp"):
+                    row_errors.append("missing timestamp")
+                # site_id / meter_id / value
+                if not canonical_row.get("site_id"):
+                    row_errors.append("missing site_id")
+                if not canonical_row.get("meter_id"):
+                    row_errors.append("missing meter_id")
+                if not canonical_row.get("value"):
+                    row_errors.append("missing value")
+                else:
+                    try:
+                        float(canonical_row["value"])
+                    except Exception:
+                        row_errors.append("invalid value")
+
                 if row_errors:
                     rejected_rows += 1
-                    errors.append(
-                        {
-                            "row": i + 2 if skip_header else i + 1,
-                            "message": "; ".join(row_errors),
-                        }
-                    )
+                    # adjust reported row number: CSV first data row number is 2 when header present
+                    reported_row = i + 2 if (not skip_header) else i + 1
+                    errors.append({"row": reported_row, "message": "; ".join(row_errors)})
                 else:
                     accepted_rows += 1
+                    # include preview row if desired
+                    preview_rows.append({k: canonical_row.get(k) for k in sorted(REQUIRED_COLUMNS)})
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"CSV parse error: {e}")
 
@@ -123,5 +202,6 @@ async def upload_csv(
         "accepted_rows": accepted_rows,
         "rejected_rows": rejected_rows,
         "errors": errors,
+        "preview_rows": preview_rows,
         "job_id": job_id,
     }
