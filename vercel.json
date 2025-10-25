@@ -1,5 +1,4 @@
 {
-  "root": "frontend",
   "builds": [
     { "src": "frontend/package.json", "use": "@vercel/vite" }
   ],
