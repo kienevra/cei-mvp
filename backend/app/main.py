@@ -33,10 +33,12 @@ app.add_middleware(
 )
 
 # include routers
-from app.api.v1 import data_timeseries, upload_csv  # noqa: E402
+from app.api.v1 import data_timeseries, upload_csv, auth  # noqa: E402
 
+# API routers under /api/v1 namespace
 app.include_router(data_timeseries.router, prefix="/api/v1")
 app.include_router(upload_csv.router, prefix="/api/v1")
+app.include_router(auth.router, prefix="/api/v1")  # new: exposes /api/v1/auth/*
 
 # Minimal landing — redirect to docs if docs are enabled (convenience)
 @app.get("/", include_in_schema=False)
@@ -50,6 +52,7 @@ def root():
 @app.get("/debug/docs-enabled", include_in_schema=False)
 def debug_docs_enabled():
     return {"enable_docs": enable_docs}
+
 
 @app.get("/health", include_in_schema=False)
 def health():
