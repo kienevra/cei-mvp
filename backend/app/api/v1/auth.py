@@ -9,11 +9,13 @@ from app.db.session import get_db
 from app.models import User
 import os
 
+
 SECRET_KEY = os.environ.get("JWT_SECRET", "supersecret")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use Argon2 for password hashing
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
@@ -40,14 +42,8 @@ router = APIRouter()
 
 @router.post("/auth/signup", response_model=Token)
 def signup(user: UserCreate, db: Session = Depends(get_db)):
-    # Ensure password is a string and within bcrypt limits
+    # Ensure password is a string
     password_str = str(user.password)
-    if len(password_str.encode('utf-8')) > 72:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password too long. Maximum allowed length is 72 characters."
-        )
-
     hashed_password = pwd_context.hash(password_str)
     db_user = User(
         email=user.email,
