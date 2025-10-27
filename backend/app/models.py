@@ -72,6 +72,16 @@ class Report(Base):
 
     site = relationship("Site", back_populates="reports")
 
+class Metric(Base):
+    __tablename__ = "metric"
+    id = Column(Integer, primary_key=True, index=True)
+    sensor_id = Column(Integer, ForeignKey("sensor.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    value = Column(Float, nullable=False)
+    timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    sensor = relationship("Sensor", back_populates="metrics")
+
 # Timeseries / ingestion tables (migrated in from db/models.py)
 class TimeseriesRecord(Base):
     __tablename__ = "timeseries_records"
