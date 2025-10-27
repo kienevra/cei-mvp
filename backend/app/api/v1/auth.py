@@ -40,14 +40,15 @@ router = APIRouter()
 
 @router.post("/auth/signup", response_model=Token)
 def signup(user: UserCreate, db: Session = Depends(get_db)):
-    # Ensure password is within bcrypt limits
-    if len(user.password.encode('utf-8')) > 72:
+    # Ensure password is a string and within bcrypt limits
+    password_str = str(user.password)
+    if len(password_str.encode('utf-8')) > 72:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password too long. Maximum allowed length is 72 characters."
         )
 
-    hashed_password = pwd_context.hash(user.password)
+    hashed_password = pwd_context.hash(password_str)
     db_user = User(
         email=user.email,
         hashed_password=hashed_password,
