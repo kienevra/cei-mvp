@@ -52,6 +52,26 @@ class Sensor(Base):
     site = relationship("Site", back_populates="sensors")
     metrics = relationship("Metric", back_populates="sensor", cascade="all, delete-orphan")
 
+class Opportunity(Base):
+    __tablename__ = "opportunity"
+    id = Column(Integer, primary_key=True, index=True)
+    site_id = Column(Integer, ForeignKey("site.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    site = relationship("Site", back_populates="opportunities")
+
+class Report(Base):
+    __tablename__ = "report"
+    id = Column(Integer, primary_key=True, index=True)
+    site_id = Column(Integer, ForeignKey("site.id"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    content = Column(Text)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    site = relationship("Site", back_populates="reports")
+
 # Timeseries / ingestion tables (migrated in from db/models.py)
 class TimeseriesRecord(Base):
     __tablename__ = "timeseries_records"
