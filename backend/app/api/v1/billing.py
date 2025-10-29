@@ -1,172 +1,122 @@
 # backend/app/api/v1/billing.py
-import os
-import stripe
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
-from typing import Dict
-from app.api.v1.auth import get_current_user
-from sqlalchemy.orm import Session
+from typing import Any, Optional
+import os
+import logging
+import stripe
+
+from app.api.v1.auth import get_current_user  # auth dependency
 from app.db.session import get_db
-from app.models import Subscription, BillingPlan, User
-from datetime import datetime
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+from app.models import Subscription, BillingPlan, User  # DB models for persistence (placeholders)
 
-# Configure Stripe from env
-stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")  # e.g. sk_test_...
-WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")  # set when using stripe CLI / dashboard
-
+logger = logging.getLogger("cei.billing")
 router = APIRouter(prefix="/billing", tags=["billing"])
 
+# initialize stripe
+stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
+PRICE_ID = os.environ.get("STRIPE_PRICE_ID_MONTHLY")  # should be set in env
+TRIAL_DAYS = int(os.environ.get("STRIPE_TRIAL_DAYS", "182"))  # default to ~6 months
+FRONTEND_URL = os.environ.get("FRONTEND_URL", os.environ.get("VITE_API_URL", "http://localhost:5173"))
 
 @router.post("/create-checkout-session")
-def create_checkout_session(
-    payload: Dict,
-    current_user: User = Depends(get_current_user),
-):
+def create_checkout_session(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """
-    Create a Stripe Checkout Session for a monthly subscription with a 6-month free trial.
+    Create a Stripe Checkout session for a subscription with a trial.
+    Returns a JSON with { "sessionId": "<stripe-session-id>" }.
 
-    Request JSON (example):
-    {
-      "price_id": "price_1Kxxxxxxx",          # required: a Stripe Price id (recurring monthly)
-      "success_url": "https://your-front/success",
-      "cancel_url": "https://your-front/cancel"
-    }
-
-    Note: Create a recurring Price in the Stripe Dashboard beforehand (monthly price).
+    Frontend should redirect to: https://checkout.stripe.com/pay/<sessionId>
     """
-    price_id = payload.get("price_id")
-    success_url = payload.get("success_url")
-    cancel_url = payload.get("cancel_url")
+    if not PRICE_ID:
+        logger.error("Stripe price ID not configured (STRIPE_PRICE_ID_MONTHLY).")
+        raise HTTPException(status_code=500, detail="Payment configuration not present")
 
-    if not price_id or not success_url or not cancel_url:
-        raise HTTPException(status_code=400, detail="price_id, success_url and cancel_url are required")
+    # Ensure user email available
+    email = getattr(current_user, "email", None) or None
+
+    # Create or fetch a Stripe Customer (for simplicity we create a customer here).
+    # In production, you'd store stripe_customer_id on the User or Subscription row and reuse it.
+    try:
+        customer = stripe.Customer.create(email=email, metadata={"user_id": str(getattr(current_user, "id", ""))})
+    except stripe.error.StripeError as e:
+        logger.exception("Failed to create Stripe customer")
+        raise HTTPException(status_code=502, detail=str(e))
 
     try:
-        # Create or reuse a Stripe Customer for this user (we use email and metadata)
-        # Best practice: store stripe_customer_id in your DB on Subscription or User record.
-        # For simplicity we create a customer here and let the webhook persist mapping.
-        customer = stripe.Customer.create(
-            email=current_user.email,
-            metadata={"user_id": str(current_user.id)}
-        )
-
-        # Create Checkout Session for subscription mode
         session = stripe.checkout.Session.create(
             customer=customer.id,
-            payment_method_types=["card"],
             mode="subscription",
-            line_items=[{"price": price_id, "quantity": 1}],
-            subscription_data={
-                # give 6 months free trial (approx 180 days)
-                "trial_period_days": 180,
-                # store metadata so webhook can link session -> user
-                "metadata": {"user_id": str(current_user.id)},
-            },
-            success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=cancel_url,
+            line_items=[{"price": PRICE_ID, "quantity": 1}],
+            subscription_data={"trial_period_days": TRIAL_DAYS},
+            metadata={"user_id": str(getattr(current_user, "id", ""))},
+            success_url=f"{FRONTEND_URL.rstrip('/')}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{FRONTEND_URL.rstrip('/')}/billing/cancel",
         )
-        return {"url": session.url, "id": session.id}
     except stripe.error.StripeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Stripe checkout session creation failed")
+        raise HTTPException(status_code=502, detail=str(e))
+
+    # Optionally, persist a staging subscription record in DB here (status = 'checkout_pending')
+    # Example (pseudo):
+    # db_sub = Subscription(user_id=current_user.id, stripe_customer_id=customer.id,
+    #                      stripe_subscription_id="", status="checkout_pending")
+    # db.add(db_sub); db.commit(); db.refresh(db_sub)
+
+    return {"sessionId": session.id}
 
 
-@router.post("/webhook", status_code=200)
-async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+@router.post("/webhook")
+async def stripe_webhook(request: Request):
     """
-    Stripe webhook endpoint. Configure this URL in Stripe dashboard or via stripe CLI.
-    Recommended events to subscribe:
-      - checkout.session.completed
-      - invoice.paid
-      - invoice.payment_failed
-      - customer.subscription.updated
-      - customer.subscription.deleted
+    Stripe webhook endpoint. Configure STRIPE_WEBHOOK_SECRET in env for signature verification.
     """
     payload = await request.body()
-    sig_header = request.headers.get("stripe-signature", "")
+    sig_header = request.headers.get("stripe-signature")
+    endpoint_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
+    event = None
 
-    # verify signature only if WEBHOOK_SECRET is set (recommended)
     try:
-        if WEBHOOK_SECRET:
-            event = stripe.Webhook.construct_event(payload, sig_header, WEBHOOK_SECRET)
+        if endpoint_secret:
+            event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
         else:
-            # Unsafe: fallback to parsing without verification (only for dev)
-            event = stripe.Event.construct_from(await request.json(), stripe.api_key)
-    except Exception as exc:
-        # signature verification failed or parse error
-        raise HTTPException(status_code=400, detail=f"Webhook error: {exc}")
+            # insecure fallback for dev only - log heavily if used
+            logger.warning("⚠️ STRIPE_WEBHOOK_SECRET not set — using insecure webhook parsing (dev only)")
+            event = stripe.Event.construct_from(stripe.util.json.loads(payload), stripe.api_key)
+    except ValueError:
+        logger.exception("Invalid payload from Stripe webhook")
+        return JSONResponse(status_code=400, content={"error": "Invalid payload"})
+    except stripe.error.SignatureVerificationError:
+        logger.exception("Stripe webhook signature verification failed")
+        return JSONResponse(status_code=400, content={"error": "Invalid signature"})
 
+    # Handle relevant events
+    typ = event.get("type")
+    logger.info("Received Stripe event: %s", typ)
+
+    # NOTE: implement DB write logic here (lookup by metadata, session.customer, or session.metadata)
     try:
-        typ = event["type"]
-        data = event["data"]["object"]
-
-        # 1) Completed checkout -> create local Subscription record (trial may be active)
         if typ == "checkout.session.completed":
-            session = data
-            # Session may contain subscription id or customer
-            stripe_subscription_id = session.get("subscription")
-            stripe_customer_id = session.get("customer")
-            metadata = session.get("metadata") or {}
-            user_id = metadata.get("user_id")
-
-            # Persist subscription in DB (if subscription not yet created, skip until customer.subscription.created)
-            if stripe_subscription_id and user_id:
-                # Example: store minimal subscription record
-                sub = Subscription(
-                    user_id=int(user_id),
-                    stripe_customer_id=stripe_customer_id,
-                    stripe_subscription_id=stripe_subscription_id,
-                    status="active",  # initial assumption; webhook updates will follow
-                )
-                db.add(sub)
-                db.commit()
-                db.refresh(sub)
-
-        # 2) subscription update events -> sync status & current_period_end
-        elif typ in ("customer.subscription.updated", "customer.subscription.created"):
-            subobj = data
-            stripe_subscription_id = subobj.get("id")
-            status_val = subobj.get("status")
-            current_period_end = subobj.get("current_period_end")
-            # Map to DB subscription
-            existing = db.query(Subscription).filter(Subscription.stripe_subscription_id == stripe_subscription_id).first()
-            if existing:
-                existing.status = status_val
-                if current_period_end:
-                    # convert epoch -> datetime
-                    existing.current_period_end = datetime.utcfromtimestamp(int(current_period_end))
-                db.add(existing)
-                db.commit()
-
-        # 3) invoice.payment_failed -> mark subscription (could implement email / retry)
-        elif typ == "invoice.payment_failed":
-            inv = data
-            sid = inv.get("subscription")
-            if sid:
-                existing = db.query(Subscription).filter(Subscription.stripe_subscription_id == sid).first()
-                if existing:
-                    existing.status = "past_due"
-                    db.add(existing)
-                    db.commit()
-
-        # 4) invoice.paid -> ensure subscription active
-        elif typ == "invoice.paid":
-            inv = data
-            sid = inv.get("subscription")
-            if sid:
-                existing = db.query(Subscription).filter(Subscription.stripe_subscription_id == sid).first()
-                if existing:
-                    existing.status = "active"
-                    db.add(existing)
-                    db.commit()
-
-        # ignore other events or add handlers as needed
-    except SQLAlchemyError as e:
-        # Log & return 200 to avoid webhook retries if you intentionally want that
-        return JSONResponse(status_code=200, content={"received": True, "db_error": str(e)})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+            session = event["data"]["object"]
+            # session.subscription contains the subscription id
+            # Use session.customer or session.metadata["user_id"] to locate CEI user
+            logger.info("Checkout session completed: %s", session.get("id"))
+            # TODO: write subscription record in DB using stripe subscription id
+        elif typ == "invoice.payment_succeeded":
+            invoice = event["data"]["object"]
+            logger.info("Invoice payment succeeded: %s", invoice.get("id"))
+            # TODO: mark subscription active / update status
+        elif typ == "customer.subscription.updated":
+            sub = event["data"]["object"]
+            logger.info("Subscription updated: %s", sub.get("id"))
+            # TODO: sync subscription status and current_period_end to DB
+        elif typ == "customer.subscription.deleted":
+            sub = event["data"]["object"]
+            logger.info("Subscription canceled/deleted: %s", sub.get("id"))
+            # TODO: mark subscription canceled in DB
+        else:
+            logger.debug("Unhandled Stripe event type: %s", typ)
+    except Exception:
+        logger.exception("Error handling Stripe webhook event")
 
     return JSONResponse(status_code=200, content={"received": True})

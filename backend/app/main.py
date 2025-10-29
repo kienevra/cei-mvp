@@ -10,10 +10,11 @@ from app.core.config import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cei")
 
-# --- App setup ---
+# Decide whether docs should be exposed (default: False in prod)
 enable_docs = getattr(settings, "enable_docs", False)
 logger.info(f"Startup: settings.ENABLE_DOCS={getattr(settings, 'ENABLE_DOCS', None)} enable_docs={enable_docs}")
 
+# --- App setup ---
 app = FastAPI(
     title="CEI API",
     openapi_url="/api/v1/openapi.json" if enable_docs else None,
@@ -23,7 +24,6 @@ app = FastAPI(
 
 # --- CORS setup ---
 origins = settings.origins_list() or ["http://localhost:5173"]
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -46,16 +46,17 @@ async def log_exceptions(request: Request, call_next):
             content={
                 "detail": "Internal Server Error",
                 "error": str(e),
-                "traceback": traceback.format_exc().splitlines()[-10:],  # last 10 lines for brevity
+                "traceback": traceback.format_exc().splitlines()[-10:],  # last 10 lines
             },
         )
 
-# --- Include routers ---
-from app.api.v1 import data_timeseries, upload_csv, auth  # noqa: E402
+# --- Include routers (after app creation) ---
+from app.api.v1 import data_timeseries, upload_csv, auth, billing  # noqa: E402
 
 app.include_router(data_timeseries.router, prefix="/api/v1")
 app.include_router(upload_csv.router, prefix="/api/v1")
-app.include_router(auth.router, prefix="/api/v1")  # exposes /api/v1/auth/*
+app.include_router(auth.router, prefix="/api/v1")      # exposes /api/v1/auth/*
+app.include_router(billing.router, prefix="/api/v1")   # exposes /api/v1/billing/*
 
 # --- Root and utilities ---
 @app.get("/", include_in_schema=False)
