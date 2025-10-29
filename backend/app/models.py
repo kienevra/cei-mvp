@@ -32,6 +32,32 @@ class User(Base):
 
     organization = relationship("Organization", back_populates="users")
 
+# Billing models (add to backend/app/models.py)
+
+class BillingPlan(Base):
+    __tablename__ = "billing_plan"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    stripe_price_id = Column(String, nullable=False, unique=True)  # e.g. price_...
+    description = Column(String, nullable=True)
+    amount_cents = Column(Integer, nullable=True)  # optional convenience field (in cents)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Subscription(Base):
+    __tablename__ = "subscription"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("user.id"), nullable=False, index=True)
+    stripe_customer_id = Column(String, nullable=True, index=True)
+    stripe_subscription_id = Column(String, nullable=True, unique=True, index=True)
+    status = Column(String, nullable=False, index=True)
+    current_period_end = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # relationship back to user
+    user = relationship("User", back_populates="subscriptions")
+
+
 
 class Site(Base):
     __tablename__ = "site"
