@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 
 # If DATABASE_URL is None, engine creation will fail later; callers should handle.
-DATABASE_URL = settings.DATABASE_URL or "sqlite:///./dev.db"
+DATABASE_URL = settings.database_url or "sqlite:///./dev.db"
 
 engine = create_engine(
     DATABASE_URL,
