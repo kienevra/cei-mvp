@@ -1,10 +1,8 @@
 import React from "react";
 
-export default function Card({ title, value }: { title: string; value: React.ReactNode }) {
-  return (
-    <div className="card">
-      <div className="card-title">{title}</div>
-      <div className="card-value">{value}</div>
-    </div>
-  );
-}
+export const Card: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+  <div className="bg-white rounded shadow p-4 flex flex-col items-center">
+    <div className="text-2xl font-bold">{value}</div>
+    <div className="text-gray-500 text-sm">{label}</div>
+  </div>
+);

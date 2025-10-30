@@ -1,16 +1,16 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
 import SitesList from "../pages/SitesList";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router-dom";
+import '@testing-library/jest-dom/extend-expect';
+// Add this import if your environment does not provide expect globally
+// ...existing code...
 
-test("renders SitesList heading", () => {
+test("renders SitesList page", () => {
   render(
-    <QueryClientProvider client={new QueryClient()}>
-      <BrowserRouter>
-        <SitesList />
-      </BrowserRouter>
-    </QueryClientProvider>
+    <MemoryRouter>
+      <SitesList />
+    </MemoryRouter>
   );
   expect(screen.getByText(/Sites/i)).toBeInTheDocument();
 });

@@ -1,55 +1,42 @@
-import React from "react";
-import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getSite } from "../services/sites";
-import LoadingSpinner from "../components/LoadingSpinner";
-import ErrorBanner from "../components/ErrorBanner";
-import Card from "../components/Card";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { Site } from "../types/site";
+import React, { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { fetchSite } from '../services/sites';
+import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorBanner from '../components/ErrorBanner';
 
-export default function SiteView() {
+const SiteView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { data: site, isLoading, error } = useQuery<Site, Error>({
-    queryKey: ["site", id],
-    queryFn: () => getSite(id!),
-    enabled: !!id,
-  });
+  const [site, setSite] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const chartData = [
-    { name: "Mon", value: 120 },
-    { name: "Tue", value: 210 },
-    { name: "Wed", value: 180 },
-    { name: "Thu", value: 260 },
-    { name: "Fri", value: 300 },
-    { name: "Sat", value: 200 },
-    { name: "Sun", value: 150 },
-  ];
+  useEffect(() => {
+    if (!id) return;
+    setLoading(true);
+    fetchSite(id)
+      .then(data => setSite(data))
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [id]);
 
   return (
-    <div>
-      {isLoading && <LoadingSpinner />}
-      {error && <ErrorBanner error={error} />}
-      {site && (
-        <>
-          <Card title={site.name} value={site.location ?? "Unknown location"} />
-          <section>
-            <h2>Metrics</h2>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={chartData}>
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Line type="monotone" dataKey="value" stroke="#2563eb" />
-              </LineChart>
-            </ResponsiveContainer>
-          </section>
-          <section>
-            <h2>Raw Data</h2>
-            <pre>{JSON.stringify(site, null, 2)}</pre>
-          </section>
-        </>
+    <div className="p-4">
+      <h1 className="text-xl font-bold mb-4">Site Details</h1>
+      {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
+      {loading ? <LoadingSpinner /> : (
+        <div>
+          {site ? (
+            <div>
+              <div><strong>ID:</strong> {site.id}</div>
+              <div><strong>Name:</strong> {site.name}</div>
+              <div><strong>Location:</strong> {site.location}</div>
+              {/* Add more fields as needed */}
+            </div>
+          ) : <div>No site found.</div>}
+        </div>
       )}
     </div>
   );
-}
+};
+
+export default SiteView;

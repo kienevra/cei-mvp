@@ -1,20 +1,19 @@
 import React from "react";
-import { Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
-export default function TopNav() {
-  const { isAuthenticated, logout } = useAuth();
+/**
+ * Top navigation bar for CEI app.
+ */
+const TopNav: React.FC = () => {
+  const { logout } = useAuth();
   return (
-    <nav className="top-nav">
-      <Link to="/">Dashboard</Link>
-      <Link to="/sites">Sites</Link>
-      <Link to="/account">Account</Link>
-      <Link to="/settings">Settings</Link>
-      {isAuthenticated ? (
-        <button onClick={logout}>Logout</button>
-      ) : (
-        <Link to="/login">Login</Link>
-      )}
-    </nav>
+    <header className="bg-white shadow flex items-center justify-between px-6 py-3">
+      <div className="font-bold text-lg">Carbon Efficiency Intelligence</div>
+      <button className="text-sm text-blue-600" onClick={logout}>
+        Logout
+      </button>
+    </header>
   );
-}
+};
+
+export default TopNav;

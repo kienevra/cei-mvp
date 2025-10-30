@@ -1,41 +1,34 @@
 import React, { useState } from "react";
 import { useAuth } from "../hooks/useAuth";
-import FormField from "../components/FormField";
-import ErrorBanner from "../components/ErrorBanner";
-import LoadingSpinner from "../components/LoadingSpinner";
-import { useNavigate } from "react-router-dom";
 
 export default function Login() {
-  const { login } = useAuth();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
+  const { login } = useAuth();
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
-    setError(null);
     try {
-      await login(username, password);
-      navigate("/");
-    } catch (err: any) {
-      setError(err?.message || "Login failed");
-    } finally {
-      setLoading(false);
+      await login({ username: email, password });
+    } catch (err) {
+      alert("Login failed");
     }
-  };
+  }
 
   return (
-    <form className="login-form" onSubmit={handleSubmit}>
+    <div style={{ padding: 20 }}>
       <h1>Login</h1>
-      <FormField label="Username" value={username} onChange={setUsername} required />
-      <FormField label="Password" type="password" value={password} onChange={setPassword} required />
-      {error && <ErrorBanner error={error} />}
-      <button type="submit" disabled={loading}>
-        {loading ? <LoadingSpinner /> : "Login"}
-      </button>
-    </form>
+      <form onSubmit={submit}>
+        <div>
+          <label>Email</label>
+          <input value={email} onChange={(e) => setEmail(e.target.value)} />
+        </div>
+        <div>
+          <label>Password</label>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </div>
+        <button type="submit">Login</button>
+      </form>
+    </div>
   );
 }

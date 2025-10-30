@@ -1,62 +1,36 @@
-import React from "react";
-import { useApi } from "../hooks/useApi";
-import Card from "../components/Card";
-import Table from "../components/Table";
-import LoadingSpinner from "../components/LoadingSpinner";
-import ErrorBanner from "../components/ErrorBanner";
-import { useQuery } from "@tanstack/react-query";
-import { getSites } from "../services/sites";
-import { Site } from "../types/site";
-import { HealthIndicator } from "../components/HealthIndicator";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import React, { useEffect, useState } from "react";
+import TimeSeriesChart from "../components/TimeSeriesChart";
+import { getSites } from "../services/api";
+import { useAuth } from "../hooks/useAuth";
 
 export default function Dashboard() {
-  const { data: sites, isLoading: sitesLoading, error: sitesError } = useQuery<Site[], Error>({
-    queryKey: ["sites"],
-    queryFn: getSites,
-  });
+  const [loading, setLoading] = useState(false);
+  const [sites, setSites] = useState<any[]>([]);
+  const { isAuthenticated } = useAuth();
 
-  const { data: health, isLoading: healthLoading, error: healthError } = useApi<{ status: string }>("/health");
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    setLoading(true);
+    getSites()
+      .then((d) => setSites(d?.sites || []))
+      .catch(() => setSites([]))
+      .finally(() => setLoading(false));
+  }, [isAuthenticated]);
 
-  const metrics = [
-    { label: "Sites", value: sites?.length ?? 0 },
-    { label: "Active Alerts", value: 2 }, // TODO: call /alerts endpoint
-    { label: "Weekly Savings", value: "$1,200" }, // TODO: call /metrics endpoint
-  ];
-
-  const chartData = [
-    { name: "Mon", value: 120 },
-    { name: "Tue", value: 210 },
-    { name: "Wed", value: 180 },
-    { name: "Thu", value: 260 },
-    { name: "Fri", value: 300 },
-    { name: "Sat", value: 200 },
-    { name: "Sun", value: 150 },
+  const sampleData = [
+    { timestamp: "2025-10-01T00:00:00Z", value: 10 },
+    { timestamp: "2025-10-01T01:00:00Z", value: 12 },
+    { timestamp: "2025-10-01T02:00:00Z", value: 8 },
   ];
 
   return (
-    <div>
-      <HealthIndicator status={health?.status} loading={healthLoading} error={healthError} />
-      <div className="dashboard-cards">
-        {metrics.map((m) => (
-          <Card key={m.label} title={m.label} value={m.value} />
-        ))}
+    <div style={{ padding: 20 }}>
+      <h1>Dashboard</h1>
+      {loading ? <div>Loading...</div> : <div>Sites: {sites.length}</div>}
+      <div style={{ marginTop: 20 }}>
+        <h2>Sample Timeseries</h2>
+        <TimeSeriesChart data={sampleData} />
       </div>
-      <section>
-        <h2>Weekly Metrics</h2>
-        <ResponsiveContainer width="100%" height={200}>
-          <LineChart data={chartData}>
-            <XAxis dataKey="name" />
-            <YAxis />
-            <Tooltip />
-            <Line type="monotone" dataKey="value" stroke="#2563eb" />
-          </LineChart>
-        </ResponsiveContainer>
-      </section>
-      <section>
-        <h2>Recent Alerts</h2>
-        {sitesLoading ? <LoadingSpinner /> : sitesError ? <ErrorBanner error={sitesError} /> : <Table data={sites ?? []} columns={[]} />}
-      </section>
     </div>
   );
 }

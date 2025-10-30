@@ -1,44 +1,56 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 
-interface AuthContextType {
-  token: string | null;
-  login: (username: string, password: string) => Promise<void>;
-  logout: () => void;
+type LoginRequest = {
+  username: string;
+  password: string;
+};
+
+type AuthContextType = {
   isAuthenticated: boolean;
-}
+  token: string | null;
+  login: (data: LoginRequest) => Promise<void>;
+  logout: () => void;
+};
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem("access_token"));
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const [token, setTokenState] = useState<string | null>(localStorage.getItem("cei_token"));
+  const navigate = useNavigate();
 
   useEffect(() => {
-    if (token) localStorage.setItem("access_token", token);
-    else localStorage.removeItem("access_token");
-  }, [token]);
+    setTokenState(localStorage.getItem("cei_token"));
+  }, []);
 
-  const login = async (username: string, password: string) => {
-    const res = await api.post<{ access_token: string }>("/auth/login", { username, password });
-    setToken(res.data.access_token);
+  const login = async (data: LoginRequest) => {
+    const res = await api.post("/auth/login", data);
+    const acc = res.data?.access_token;
+    if (acc) {
+      localStorage.setItem("cei_token", acc);
+      setTokenState(acc);
+      navigate("/");
+    } else {
+      throw new Error("Invalid login response");
+    }
   };
 
   const logout = () => {
-    setToken(null);
+    localStorage.removeItem("cei_token");
+    setTokenState(null);
+    navigate("/login");
   };
 
-  const value: AuthContextType = {
-    token,
-    login,
-    logout,
-    isAuthenticated: !!token,
-  };
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ isAuthenticated: !!token, token, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
 };
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (ctx === undefined) throw new Error("useAuth must be used within AuthProvider");
+  if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
   return ctx;
 }

@@ -1,9 +1,8 @@
-# CEI Frontend
+## CEI Frontend
 
-Production-ready React + TypeScript frontend for Carbon Efficiency Intelligence (CEI).
-
-## Getting Started
+### Local Development
 
 ```bash
+cd frontend
 npm install
 npm run dev

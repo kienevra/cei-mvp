@@ -1,13 +1,10 @@
 import React from "react";
-import { useAuth } from "../hooks/useAuth";
 
-export default function Account() {
-  const { token, logout } = useAuth();
-  return (
-    <div>
-      <h1>Account</h1>
-      <p>Token: <code>{token}</code></p>
-      <button onClick={logout}>Logout</button>
-    </div>
-  );
-}
+const Account: React.FC = () => (
+  <div className="p-4">
+    <h1 className="text-xl font-bold mb-4">Account</h1>
+    <div>[Account details placeholder]</div>
+  </div>
+);
+
+export default Account;

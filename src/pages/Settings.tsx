@@ -1,10 +1,10 @@
 import React from "react";
 
-export default function Settings() {
-  return (
-    <div>
-      <h1>Settings</h1>
-      <p>Settings page content goes here.</p>
-    </div>
-  );
-}
+const Settings: React.FC = () => (
+  <div className="p-4">
+    <h1 className="text-xl font-bold mb-4">Settings</h1>
+    <div>[Settings form placeholder]</div>
+  </div>
+);
+
+export default Settings;

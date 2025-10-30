@@ -1,5 +1,15 @@
-import React from "react";
+import React from 'react';
 
-export default function PageHeader({ title }: { title: string }) {
-  return <h1 className="page-header">{title}</h1>;
+interface PageHeaderProps {
+  title: string;
+  actions?: React.ReactNode;
 }
+
+const PageHeader: React.FC<PageHeaderProps> = ({ title, actions }) => (
+  <div className="flex items-center justify-between mb-4">
+    <h2 className="text-xl font-semibold">{title}</h2>
+    {actions}
+  </div>
+);
+
+export default PageHeader;
