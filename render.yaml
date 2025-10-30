@@ -1,0 +1,11 @@
+services:
+  cei-backend:
+    type: web
+    env:
+      DATABASE_URL: "<your_database_url>"
+      JWT_SECRET: "<your_jwt_secret>"
+      ALLOWED_ORIGINS: "http://localhost:5173,https://cei-mvp.vercel.app"
+    startCommand: bash start.sh
+    buildCommand: ""
+    plan: starter
+    autoDeploy: true

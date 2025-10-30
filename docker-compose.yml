@@ -1,0 +1,14 @@
+﻿services:
+  backend:
+    build:
+      context: ./backend
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL
+      - JWT_SECRET
+      - PGSSLMODE
+    ports:
+      - '8000:8000'

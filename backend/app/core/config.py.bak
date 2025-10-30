@@ -1,0 +1,32 @@
+# app/core/config.py
+from pydantic import BaseSettings, Field
+from typing import List, Optional
+
+class Settings(BaseSettings):
+    # DB & infra
+    DATABASE_URL: Optional[str] = None
+    PGSSLMODE: str = "require"
+    REDIS_URL: Optional[str] = None
+
+    # Auth & security
+    JWT_SECRET: str = Field(..., env="JWT_SECRET")
+    SECRET_KEY: Optional[str] = None
+
+    # Origins for CORS, comma-separated
+    ALLOWED_ORIGINS: str = "http://localhost:5173"
+
+    # Gateway secrets (optional)
+    GATEWAY_SHARED_SECRET: Optional[str] = None
+
+    # Optional supabase
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_KEY: Optional[str] = None
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
+
+    def origins_list(self) -> List[str]:
+        return [o.strip() for o in (self.ALLOWED_ORIGINS or "").split(",") if o.strip()]
+
+settings = Settings()

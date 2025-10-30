@@ -1,0 +1,89 @@
+name: Safe migrations + DB backup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'   # match your runtime (3.13 may also work, but 3.10/3.11 are safest)
+
+      - name: Install system deps (pg_dump)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client gcc
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Export DB URL env var
+        env:
+          DB_URL: ${{ secrets.DATABASE_URL_MIGRATE }}
+        run: |
+          if [ -z "$DB_URL" ]; then
+            echo "DATABASE_URL_MIGRATE secret not set"; exit 1
+          fi
+          echo "DB URL present (masked): ${DB_URL:0:10}***"
+          export PGPASSWORD=$(echo "$DB_URL" | sed -n 's/.*:\(.*\)@.*:.*/\1/p' || true)
+          # parse host, port, dbname (simple parsing)
+          host=$(echo "$DB_URL" | sed -n 's|.*@\(.*\):\([0-9]*\)/.*|\1|p' || echo "")
+          port=$(echo "$DB_URL" | sed -n 's|.*@.*:\([0-9]*\)/.*|\1|p' || echo "5432")
+          dbname=$(echo "$DB_URL" | sed -n 's|.*/\([^?]*\).*|\1|p' || echo "")
+          user=$(echo "$DB_URL" | sed -n 's|.*//\([^:]*\):.*@.*|\1|p' || echo "")
+          echo "Host: $host DB: $dbname"
+
+          # Backup filename
+          stamp=$(date -u +"%Y%m%dT%H%M%SZ")
+          backup_file="db-backup-${stamp}.sql.gz"
+          echo "Running pg_dump -> $backup_file"
+          pg_dump "$DB_URL" | gzip > "$backup_file"
+          ls -lh "$backup_file"
+          echo "Backup created"
+
+          # Save path to use later in step output
+          echo "backup_file=$backup_file" >> $GITHUB_OUTPUT
+
+      - name: Show alembic current & heads
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_MIGRATE }}
+        run: |
+          alembic -c backend/alembic.ini current || true
+          alembic -c backend/alembic.ini heads || true
+
+      - name: Decide & run migrations if needed
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_MIGRATE }}
+        run: |
+          cur=$(alembic -c backend/alembic.ini current | sed -n 's/.*: //p' | tr -d '\r\n' || true)
+          heads=$(alembic -c backend/alembic.ini heads | tr '\n' ' ' | sed -E 's/.*([0-9a-f]{6,40}).*/\1/ I' || true)
+          echo "current=$cur"
+          echo "heads=$heads"
+          if [ -z "$cur" ] || [ "$cur" = "<none>" ]; then
+            echo "No DB revision -> running migrations"
+            alembic -c backend/alembic.ini upgrade head
+          elif [ -z "$heads" ]; then
+            echo "Could not determine heads; skipping migrations"
+          elif [ "$cur" != "$heads" ]; then
+            echo "DB out-of-date -> running migrations"
+            alembic -c backend/alembic.ini upgrade head
+          else
+            echo "DB up-to-date -> skipping migrations"
+          fi
+
+      - name: Upload DB backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup
+          path: db-backup-*.sql.gz
