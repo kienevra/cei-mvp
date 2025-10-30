@@ -1,61 +1,56 @@
-﻿# backend/app/core/config.py
-from __future__ import annotations
-from typing import List, Optional
-from pydantic import Field
-from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
+# backend/app/core/config.py
+
 import os
+from functools import lru_cache
+from pydantic_settings import BaseSettings
+
 
 class Settings(BaseSettings):
     """
-    Application settings loaded from environment variables.
-    Add new top-level env keys here so pydantic validation doesn't fail.
+    Global application settings loaded from environment variables (.env or Render/Vercel).
     """
 
-    # Pydantic v2 settings config
-    model_config = ConfigDict(
-        env_file=os.path.join(os.path.dirname(__file__), "..", "..", ".env"),
-        env_file_encoding="utf-8",
-        # keep strict by default. We explicitly declare the env vars we expect.
-        extra="forbid",
-    )
+    # --- Core app configuration ---
+    database_url: str
+    pgsslmode: str = "require"
+    jwt_secret: str
+    secret_key: str
+    allowed_origins: str = "*"
 
-    # General
-    ENABLE_DOCS: bool = Field(False, env="ENABLE_DOCS")
-    VITE_API_URL: str = Field("http://localhost:5173", env="VITE_API_URL")
-    ALLOWED_ORIGINS: Optional[str] = Field(None, env="ALLOWED_ORIGINS")
+    # --- Stripe configuration ---
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
 
-    # Database
-    DATABASE_URL: Optional[str] = Field(None, env="DATABASE_URL")
-    PGSSLMODE: Optional[str] = Field(None, env="PGSSLMODE")
+    # --- Supabase configuration ---
+    supabase_url: str | None = None
+    supabase_service_role_key: str | None = None
 
-    # Auth / JWT
-    JWT_SECRET: str = Field("supersecret", env="JWT_SECRET")
-    SECRET_KEY: Optional[str] = Field(None, env="SECRET_KEY")
+    # --- Misc environment info ---
+    env: str = "production"
+    port: int = 8000
 
-    # Stripe / Billing
-    STRIPE_SECRET_KEY: Optional[str] = Field(None, env="STRIPE_SECRET_KEY")
-    STRIPE_WEBHOOK_SECRET: Optional[str] = Field(None, env="STRIPE_WEBHOOK_SECRET")
-    STRIPE_PRICE_ID_MONTHLY: Optional[str] = Field(None, env="STRIPE_PRICE_ID_MONTHLY")
-    STRIPE_TRIAL_DAYS: int = Field(182, env="STRIPE_TRIAL_DAYS")
+    # --- Optional frontend key (for client-side Stripe) ---
+    vite_stripe_public_key: str | None = None
 
-    # Frontend keys (exposed to frontend in build)
-    VITE_STRIPE_PUBLIC_KEY: Optional[str] = Field(None, env="VITE_STRIPE_PUBLIC_KEY")
-
-    # Other app-specific toggles
-    DEBUG: bool = Field(False, env="DEBUG")
-
-    def origins_list(self) -> List[str]:
+    # --- Utility methods ---
+    def origins_list(self) -> list[str]:
         """
-        Parse ALLOWED_ORIGINS environment variable into a list.
-        Accepts comma-separated string or returns a default local origin.
+        Converts comma-separated origins string into a list for CORS.
         """
-        if self.ALLOWED_ORIGINS:
-            # strip spaces and skip empty parts
-            parts = [p.strip() for p in self.ALLOWED_ORIGINS.split(",") if p.strip()]
-            return parts
-        # sensible defaults for local dev
-        return ["http://localhost:5173", "http://127.0.0.1:5173"]
+        return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
 
-# instantiate global settings once
-settings = Settings()
+    class Config:
+        env_file = ".env"
+        extra = "ignore"  # allows Render/Vercel to define extra env vars safely
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    """
+    Cached settings instance (used throughout the app).
+    """
+    return Settings()
+
+
+# Global settings instance
+settings = get_settings()
