@@ -1,37 +1,61 @@
 ﻿# backend/app/core/config.py
-from pydantic_settings import BaseSettings
-from pydantic import Field
+from __future__ import annotations
 from typing import List, Optional
+from pydantic import Field
+from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
+import os
 
 class Settings(BaseSettings):
-    # DB & infra
-    DATABASE_URL: Optional[str] = None
-    PGSSLMODE: str = "require"
-    REDIS_URL: Optional[str] = None
-    VITE_API_URL: Optional[str] = None
+    """
+    Application settings loaded from environment variables.
+    Add new top-level env keys here so pydantic validation doesn't fail.
+    """
 
-    # Enable/disable OpenAPI docs (control for production)
-    ENABLE_DOCS: bool = False
+    # Pydantic v2 settings config
+    model_config = ConfigDict(
+        env_file=os.path.join(os.path.dirname(__file__), "..", "..", ".env"),
+        env_file_encoding="utf-8",
+        # keep strict by default. We explicitly declare the env vars we expect.
+        extra="forbid",
+    )
 
-    # Auth & security
-    JWT_SECRET: str = Field(..., env="JWT_SECRET")
-    SECRET_KEY: Optional[str] = None
+    # General
+    ENABLE_DOCS: bool = Field(False, env="ENABLE_DOCS")
+    VITE_API_URL: str = Field("http://localhost:5173", env="VITE_API_URL")
+    ALLOWED_ORIGINS: Optional[str] = Field(None, env="ALLOWED_ORIGINS")
 
-    # Origins for CORS, comma-separated
-    ALLOWED_ORIGINS: str = "http://localhost:5173"
+    # Database
+    DATABASE_URL: Optional[str] = Field(None, env="DATABASE_URL")
+    PGSSLMODE: Optional[str] = Field(None, env="PGSSLMODE")
 
-    # Gateway secrets (optional)
-    GATEWAY_SHARED_SECRET: Optional[str] = None
+    # Auth / JWT
+    JWT_SECRET: str = Field("supersecret", env="JWT_SECRET")
+    SECRET_KEY: Optional[str] = Field(None, env="SECRET_KEY")
 
-    # Optional supabase
-    SUPABASE_URL: Optional[str] = None
-    SUPABASE_KEY: Optional[str] = None
+    # Stripe / Billing
+    STRIPE_SECRET_KEY: Optional[str] = Field(None, env="STRIPE_SECRET_KEY")
+    STRIPE_WEBHOOK_SECRET: Optional[str] = Field(None, env="STRIPE_WEBHOOK_SECRET")
+    STRIPE_PRICE_ID_MONTHLY: Optional[str] = Field(None, env="STRIPE_PRICE_ID_MONTHLY")
+    STRIPE_TRIAL_DAYS: int = Field(182, env="STRIPE_TRIAL_DAYS")
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    # Frontend keys (exposed to frontend in build)
+    VITE_STRIPE_PUBLIC_KEY: Optional[str] = Field(None, env="VITE_STRIPE_PUBLIC_KEY")
+
+    # Other app-specific toggles
+    DEBUG: bool = Field(False, env="DEBUG")
 
     def origins_list(self) -> List[str]:
-        return [o.strip() for o in (self.ALLOWED_ORIGINS or "").split(",") if o.strip()]
+        """
+        Parse ALLOWED_ORIGINS environment variable into a list.
+        Accepts comma-separated string or returns a default local origin.
+        """
+        if self.ALLOWED_ORIGINS:
+            # strip spaces and skip empty parts
+            parts = [p.strip() for p in self.ALLOWED_ORIGINS.split(",") if p.strip()]
+            return parts
+        # sensible defaults for local dev
+        return ["http://localhost:5173", "http://127.0.0.1:5173"]
 
+# instantiate global settings once
 settings = Settings()
