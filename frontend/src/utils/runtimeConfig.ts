@@ -1,10 +1,12 @@
 // src/utils/runtimeConfig.ts
 
-interface ImportMeta {
-  env: {
-    VITE_API_URL?: string;
-    [key: string]: any;
-  };
+declare global {
+  interface ImportMeta {
+    env: {
+      VITE_API_URL?: string;
+      [key: string]: any;
+    };
+  }
 }
 
 export function getApiBaseUrl(): string {
