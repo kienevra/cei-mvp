@@ -13,15 +13,15 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   showToast,
   message,
 }) => {
-  const { accessToken } = useAuth();
+  const { token } = useAuth();
 
   useEffect(() => {
-    if (!accessToken && showToast && message) {
+    if (!token && showToast && message) {
       showToast(message);
     }
-  }, [accessToken, showToast, message]);
+  }, [token, showToast, message]);
 
-  if (!accessToken) {
+  if (!token) {
     return <Navigate to="/login" replace />;
   }
   return children;
