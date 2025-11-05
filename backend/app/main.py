@@ -143,3 +143,7 @@ def debug_docs_enabled():
 @app.get("/health", include_in_schema=False)
 def health():
     return {"status": "ok"}
+# compatibility: expose health at /api/v1/health for frontend
+@app.get("/api/v1/health", include_in_schema=False)
+def api_v1_health():
+    return {"status": "ok"}
