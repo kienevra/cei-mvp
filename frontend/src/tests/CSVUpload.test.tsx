@@ -2,6 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import CSVUpload from '../pages/CSVUpload';
 import api from '../services/api';
+import '@testing-library/jest-dom';
 
 jest.mock('../services/api');
 
@@ -39,3 +40,12 @@ describe('CSVUpload', () => {
     await waitFor(() => expect(screen.getByText(/Job accepted: job-123/i)).toBeInTheDocument());
   });
 });
+
+function beforeEach(arg0: () => void) {
+  throw new Error('Function not implemented.');
+}
+
+function expect(arg0: any) {
+  throw new Error('Function not implemented.');
+}
+

@@ -48,3 +48,9 @@ coverage/
 # package-lock.json
 # yarn.lock
 # pnpm-lock.yaml
+frontend-build.log
+postcss.config.js.bak
+*.log
+.parcel-cache/
+.vite/
+postcss.config.js.bak

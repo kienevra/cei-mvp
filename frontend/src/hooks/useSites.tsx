@@ -1,13 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api";
-import { Site, SiteListResponse } from "../types/site";
+import { Site, SitesListResponse } from "../types/site";
 
 // Fix: react-query v4 expects queryKey as array, and mutationFn should match types
 export function useSites(params?: { page?: number; per_page?: number; search?: string }) {
   return useQuery<Site[], Error>({
     queryKey: ["sites", params],
     queryFn: async () => {
-      const res = await api.get<SiteListResponse>("/sites", { params });
+      const res = await api.get<SitesListResponse>("/sites", { params });
       // Defensive: handle both array and { items: [...] }
       if (Array.isArray(res.data)) return res.data;
       if ("items" in res.data && Array.isArray(res.data.items)) return res.data.items;
