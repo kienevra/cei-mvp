@@ -1,11 +1,7 @@
 {
-  "builds": [
-    { "src": "frontend/package.json", "use": "@vercel/vite" }
-  ],
+  "framework": "vite",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "framework": {
-    "name": "Vite"
-  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
