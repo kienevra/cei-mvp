@@ -1,0 +1,17 @@
+﻿{
+  "root": "frontend/dist",
+  "clean_urls": false,
+  "https_only": true,
+  "routes": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Credentials", "value": "true" }
+      ]
+    }
+  ]
+}
