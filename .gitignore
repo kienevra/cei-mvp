@@ -2,8 +2,7 @@
 node_modules/
 frontend/node_modules/
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+yarn-*.log*
 
 # Build output
 dist/
@@ -13,14 +12,12 @@ frontend/dist/
 .env
 .env.*
 
-# OS / Editor files
-.DS_Store
-Thumbs.db
+# Editors / OS
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db
 
-# Logs
+# Backups / misc
 *.log
-
-# Backup files
 *.bak
