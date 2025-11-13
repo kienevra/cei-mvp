@@ -1,1 +1,1 @@
-web: bash -lc 'erb config/nginx.conf.erb > config/nginx.conf && nginx -c config/nginx.conf -g "daemon off;"'
+web: npm start
