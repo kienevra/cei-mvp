@@ -1,9 +1,6 @@
 import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-// import AuthProvider from the correct location
-// Update the import path below if AuthProvider is in a different folder, for example:
 import { AuthProvider } from "./hooks/useAuth";
-// Or, if the file does not exist, create it as shown below.
 import TopNav from "./components/TopNav";
 import Sidebar from "./components/Sidebar";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -25,26 +22,97 @@ function Layout({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div className="flex-1 flex flex-col">
         <TopNav />
-        <main className="p-4">
-          {children}
-        </main>
+        <main className="p-4">{children}</main>
       </div>
     </div>
   );
 }
-// NotFound is lazy-loaded above.
 
 const App: React.FC = () => (
   <BrowserRouter>
     <AuthProvider>
       <Suspense fallback={<LoadingSpinner />}>
         <Routes>
+          {/* Public */}
           <Route path="/login" element={<Login />} />
-          <Route element={<Layout><ProtectedRoute><Dashboard /></ProtectedRoute></Layout>} path="/" />
-          <Route element={<Layout><ProtectedRoute><SitesList /></ProtectedRoute></Layout>} path="/sites" />
-          <Route element={<Layout><ProtectedRoute><SiteView /></ProtectedRoute></Layout>} path="/sites/:id" />
-          <Route element={<Layout><ProtectedRoute><CSVUpload /></ProtectedRoute></Layout>} path="/upload" />
-          <Route element={<Layout><ProtectedRoute><Settings /></ProtectedRoute></Layout>} path="/settings" />
+
+          {/* Root: redirect to /dashboard after login */}
+          <Route
+            path="/"
+            element={<Navigate to="/dashboard" replace />}
+          />
+
+          {/* Dashboard */}
+          <Route
+            path="/dashboard"
+            element={
+              <Layout>
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          {/* Sites */}
+          <Route
+            path="/sites"
+            element={
+              <Layout>
+                <ProtectedRoute>
+                  <SitesList />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          <Route
+            path="/sites/:id"
+            element={
+              <Layout>
+                <ProtectedRoute>
+                  <SiteView />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          {/* Upload */}
+          <Route
+            path="/upload"
+            element={
+              <Layout>
+                <ProtectedRoute>
+                  <CSVUpload />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          {/* Account / Settings (optional now, but wired) */}
+          <Route
+            path="/account"
+            element={
+              <Layout>
+                <ProtectedRoute>
+                  <Account />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          <Route
+            path="/settings"
+            element={
+              <Layout>
+                <ProtectedRoute>
+                  <Settings />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          {/* 404 */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
