@@ -23,9 +23,8 @@ api.interceptors.response.use(
   (r) => r,
   (err) => {
     if (err?.response?.status === 401) {
-      // simple handling; route to /login in components using this service
       localStorage.removeItem("cei_token");
-      // we can't navigate here (no router), caller should handle redirect
+      // UI should handle redirect to /login
     }
     return Promise.reject(err);
   }
@@ -33,11 +32,28 @@ api.interceptors.response.use(
 
 // typed helper functions
 export async function getSites() {
-  const r = await api.get("/sites").catch((e) => {
+  try {
+    const r = await api.get("/sites");
+    return r.data;
+  } catch (e: any) {
+    // If the backend doesn't have /sites yet, treat 404 as "no sites"
+    if (e?.response?.status === 404) {
+      return [];
+    }
     throw e;
-  });
+  }
+}
+
+export async function createSite(payload: { name: string; location?: string }) {
+  const r = await api.post("/sites", payload);
   return r.data;
 }
+
+export async function getSite(id: number | string) {
+  const r = await api.get(`/sites/${id}`);
+  return r.data;
+}
+
 
 export async function postTimeseriesBatch(payload: any[]) {
   const r = await api.post("/timeseries", payload);

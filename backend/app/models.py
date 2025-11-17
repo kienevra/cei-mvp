@@ -60,7 +60,7 @@ class Subscription(Base):
 class Site(Base):
     __tablename__ = "site"
     id = Column(Integer, primary_key=True, index=True)
-    org_id = Column(Integer, ForeignKey("organization.id"), nullable=False, index=True)
+    org_id = Column(Integer, ForeignKey("organization.id"), nullable=True, index=True)
     name = Column(String, nullable=False)
     location = Column(String)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

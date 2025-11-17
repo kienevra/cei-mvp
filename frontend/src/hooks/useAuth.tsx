@@ -1,4 +1,10 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  ReactNode,
+  useEffect,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 
@@ -17,23 +23,41 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [token, setTokenState] = useState<string | null>(localStorage.getItem("cei_token"));
+  const [token, setTokenState] = useState<string | null>(
+    typeof window !== "undefined" ? localStorage.getItem("cei_token") : null
+  );
   const navigate = useNavigate();
 
   useEffect(() => {
-    setTokenState(localStorage.getItem("cei_token"));
+    if (typeof window !== "undefined") {
+      setTokenState(localStorage.getItem("cei_token"));
+    }
   }, []);
 
   const login = async (data: LoginRequest) => {
-    const res = await api.post("/auth/login", data);
+    // Backend expects OAuth2PasswordRequestForm:
+    // Content-Type: application/x-www-form-urlencoded
+    // Fields: username, password
+    const form = new URLSearchParams();
+    form.append("username", data.username);
+    form.append("password", data.password);
+
+    const res = await api.post("/auth/login", form, {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    });
+
     const acc = res.data?.access_token;
-    if (acc) {
-      localStorage.setItem("cei_token", acc);
-      setTokenState(acc);
-      navigate("/");
-    } else {
-      throw new Error("Invalid login response");
+    if (!acc) {
+      throw new Error("Invalid login response: no access_token");
     }
+
+    localStorage.setItem("cei_token", acc);
+    setTokenState(acc);
+
+    // Land on dashboard after login
+    navigate("/dashboard");
   };
 
   const logout = () => {
@@ -43,7 +67,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!token, token, login, logout }}>
+    <AuthContext.Provider
+      value={{
+        isAuthenticated: !!token,
+        token,
+        login,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -51,6 +82,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
+  if (!ctx) {
+    throw new Error("useAuth must be used inside AuthProvider");
+  }
   return ctx;
 }

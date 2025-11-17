@@ -7,6 +7,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
 from app.core.config import settings
+from app.api.v1 import sites as sites_api
+
 
 # --- Logging setup ---
 logging.basicConfig(level=logging.INFO)
@@ -78,6 +80,8 @@ app.include_router(data_timeseries.router, prefix="/api/v1")
 app.include_router(upload_csv.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(billing.router, prefix="/api/v1")
+app.include_router(sites_api.router, prefix="/api/v1")
+
 
 # --- Root + health endpoints ---
 @app.get("/", include_in_schema=False)

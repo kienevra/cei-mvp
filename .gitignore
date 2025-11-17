@@ -21,3 +21,19 @@ Thumbs.db
 # Backups / misc
 *.log
 *.bak
+# Python artifacts
+__pycache__/
+*.py[cod]
+
+# Node modules
+node_modules/
+
+# Local env files
+.env
+*.env
+backend/.env
+frontend/.env
+
+# Local DBs
+*.db
+dev.db

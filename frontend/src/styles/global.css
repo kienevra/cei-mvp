@@ -1,22 +1,307 @@
+/* frontend/src/styles/global.css */
+
+/* === Design tokens === */
 :root {
-  --color-bg: #f9fafb;
-  --color-primary: #16a34a;
-  --color-text: #111827;
-  --color-muted: #6b7280;
+  --cei-bg: #020617;
+  --cei-bg-elevated: #020617;
+  --cei-surface: #0b1120;
+  --cei-surface-soft: #020617;
+  --cei-border-subtle: #111827;
+  --cei-border-strong: #1f2937;
+
+  --cei-text-main: #e5e7eb;
+  --cei-text-muted: #9ca3af;
+  --cei-text-accent: #38bdf8;
+  --cei-text-danger: #f97373;
+
+  --cei-accent: #22c55e;
+  --cei-accent-soft: rgba(34, 197, 94, 0.08);
+  --cei-accent-strong: #16a34a;
+
+  --cei-danger: #ef4444;
+  --cei-danger-soft: rgba(239, 68, 68, 0.09);
+
+  --cei-radius-sm: 0.375rem;
+  --cei-radius-md: 0.75rem;
+  --cei-radius-lg: 1rem;
+  --cei-radius-xl: 1.25rem;
+
+  --cei-shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --cei-shadow-subtle: 0 8px 20px rgba(15, 23, 42, 0.7);
+
+  --cei-spacing-xs: 0.4rem;
+  --cei-spacing-sm: 0.6rem;
+  --cei-spacing-md: 0.9rem;
+  --cei-spacing-lg: 1.4rem;
+  --cei-spacing-xl: 2rem;
+
+  --cei-font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
 }
 
-html, body, #root {
-  height: 100%;
-  margin: 0;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  background: var(--color-bg);
-  color: var(--color-text);
+/* === Global reset / base === */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--cei-font-sans);
+  background: radial-gradient(circle at top left, #082f49 0, #020617 40%, #000 100%);
+  color: var(--cei-text-main);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #111827;
+  border-radius: 999px;
+}
+
+/* Root layout containers */
+
+.app-root {
+  min-height: 100vh;
+  display: flex;
+  background: transparent;
+}
+
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Make App.tsx main area look like a proper content pane */
+main {
+  padding: var(--cei-spacing-lg);
+  max-width: 1280px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* === Typography === */
+
+h1,
+h2,
+h3,
+h4,
+h5 {
+  margin: 0;
+  font-weight: 600;
+}
+
+p {
+  margin: 0;
+}
+
+/* Links */
 
 a {
-  color: var(--color-primary);
+  color: var(--cei-text-accent);
   text-decoration: none;
 }
 a:hover {
   text-decoration: underline;
+}
+
+/* === Generic card / surface === */
+
+.cei-card {
+  background: radial-gradient(circle at top left, #0f172a 0, #020617 50%);
+  border-radius: var(--cei-radius-lg);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: var(--cei-shadow-soft);
+  padding: var(--cei-spacing-lg);
+}
+
+/* === Buttons === */
+
+button {
+  font-family: inherit;
+}
+
+.cei-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 1.1rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease-out;
+  background: #111827;
+  color: var(--cei-text-main);
+}
+
+.cei-btn-primary {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: #020617;
+  border-color: rgba(34, 197, 94, 0.2);
+}
+.cei-btn-primary:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+  box-shadow: var(--cei-shadow-subtle);
+}
+
+.cei-btn-ghost {
+  background: transparent;
+  border-color: rgba(156, 163, 175, 0.3);
+}
+.cei-btn-ghost:hover {
+  background: rgba(15, 23, 42, 0.9);
+}
+
+/* === Forms === */
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--cei-text-main);
+  background: rgba(15, 23, 42, 0.85);
+  border-radius: var(--cei-radius-md);
+  border: 1px solid rgba(55, 65, 81, 0.9);
+  padding: 0.55rem 0.7rem;
+  outline: none;
+  width: 100%;
+  transition: border-color 0.12s ease-out, box-shadow 0.12s ease-out,
+    background 0.12s ease-out;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--cei-accent);
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.7);
+  background: rgba(15, 23, 42, 1);
+}
+
+label {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cei-text-muted);
+  margin-bottom: 0.25rem;
+  display: inline-block;
+}
+
+/* === Tables === */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  border-radius: var(--cei-radius-md);
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.9);
+}
+
+thead {
+  background: rgba(15, 23, 42, 1);
+}
+
+thead th {
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.6rem 0.75rem;
+  color: var(--cei-text-muted);
+  border-bottom: 1px solid rgba(31, 41, 55, 1);
+}
+
+tbody td {
+  font-size: 0.86rem;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid rgba(31, 41, 55, 0.7);
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: rgba(15, 23, 42, 0.7);
+}
+
+/* === Simple utility layout classes (for now) === */
+
+.dashboard-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cei-spacing-lg);
+}
+
+.dashboard-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--cei-spacing-md);
+}
+
+.dashboard-main-grid {
+  display: grid;
+  gap: var(--cei-spacing-md);
+}
+
+@media (min-width: 1024px) {
+  .dashboard-main-grid {
+    grid-template-columns: 2fr 1.2fr;
+  }
+}
+
+/* === Auth page === */
+
+.auth-page {
+  min-height: calc(100vh - 40px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--cei-spacing-xl) var(--cei-spacing-lg);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  background: radial-gradient(circle at top left, #0f172a 0, #020617 55%);
+  border-radius: var(--cei-radius-xl);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  box-shadow: var(--cei-shadow-soft);
+  padding: var(--cei-spacing-xl) var(--cei-spacing-lg);
+}
+
+.auth-title {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+
+.auth-subtitle {
+  font-size: 0.85rem;
+  color: var(--cei-text-muted);
+  margin-bottom: var(--cei-spacing-lg);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cei-spacing-md);
 }
