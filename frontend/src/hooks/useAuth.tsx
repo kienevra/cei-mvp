@@ -2,8 +2,8 @@ import React, {
   createContext,
   useContext,
   useState,
-  ReactNode,
   useEffect,
+  ReactNode,
 } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
@@ -23,47 +23,44 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [token, setTokenState] = useState<string | null>(
+  const [token, setToken] = useState<string | null>(
     typeof window !== "undefined" ? localStorage.getItem("cei_token") : null
   );
   const navigate = useNavigate();
 
+  // Keep token in sync with localStorage on initial load
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      setTokenState(localStorage.getItem("cei_token"));
+    const existing = localStorage.getItem("cei_token");
+    if (existing && !token) {
+      setToken(existing);
     }
-  }, []);
+  }, [token]);
 
-  const login = async (data: LoginRequest) => {
-    // Backend expects OAuth2PasswordRequestForm:
-    // Content-Type: application/x-www-form-urlencoded
-    // Fields: username, password
-    const form = new URLSearchParams();
-    form.append("username", data.username);
-    form.append("password", data.password);
+  const login = async ({ username, password }: LoginRequest) => {
+    const body = new URLSearchParams();
+    body.append("username", username);
+    body.append("password", password);
 
-    const res = await api.post("/auth/login", form, {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
+    const res = await api.post("/auth/login", body, {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
     });
 
-    const acc = res.data?.access_token;
-    if (!acc) {
-      throw new Error("Invalid login response: no access_token");
+    const accessToken = res.data?.access_token;
+    if (!accessToken) {
+      throw new Error("Invalid login response");
     }
 
-    localStorage.setItem("cei_token", acc);
-    setTokenState(acc);
+    localStorage.setItem("cei_token", accessToken);
+    setToken(accessToken);
 
-    // Land on dashboard after login
-    navigate("/dashboard");
+    // ✅ Always go to dashboard root after login
+    navigate("/", { replace: true });
   };
 
   const logout = () => {
     localStorage.removeItem("cei_token");
-    setTokenState(null);
-    navigate("/login");
+    setToken(null);
+    navigate("/login", { replace: true });
   };
 
   return (

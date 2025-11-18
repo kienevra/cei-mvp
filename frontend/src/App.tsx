@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./hooks/useAuth";
 import TopNav from "./components/TopNav";
 import Sidebar from "./components/Sidebar";
@@ -14,6 +14,8 @@ const Login = lazy(() => import("./pages/Login"));
 const Account = lazy(() => import("./pages/Account"));
 const Settings = lazy(() => import("./pages/Settings"));
 const CSVUpload = lazy(() => import("./pages/CSVUpload"));
+const Alerts = lazy(() => import("./pages/Alerts"));
+const Reports = lazy(() => import("./pages/Reports"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -22,7 +24,7 @@ function Layout({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div className="flex-1 flex flex-col">
         <TopNav />
-        <main className="p-4">{children}</main>
+        <main>{children}</main>
       </div>
     </div>
   );
@@ -33,18 +35,10 @@ const App: React.FC = () => (
     <AuthProvider>
       <Suspense fallback={<LoadingSpinner />}>
         <Routes>
-          {/* Public */}
           <Route path="/login" element={<Login />} />
 
-          {/* Root: redirect to /dashboard after login */}
           <Route
             path="/"
-            element={<Navigate to="/dashboard" replace />}
-          />
-
-          {/* Dashboard */}
-          <Route
-            path="/dashboard"
             element={
               <Layout>
                 <ProtectedRoute>
@@ -54,7 +48,6 @@ const App: React.FC = () => (
             }
           />
 
-          {/* Sites */}
           <Route
             path="/sites"
             element={
@@ -77,7 +70,32 @@ const App: React.FC = () => (
             }
           />
 
-          {/* Upload */}
+          <Route
+            path="/alerts"
+            element>
+            <Route
+              index
+              element={
+                <Layout>
+                  <ProtectedRoute>
+                    <Alerts />
+                  </ProtectedRoute>
+                </Layout>
+              }
+            />
+          </Route>
+
+          <Route
+            path="/reports"
+            element={
+              <Layout>
+                <ProtectedRoute>
+                  <Reports />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
           <Route
             path="/upload"
             element={
@@ -89,7 +107,6 @@ const App: React.FC = () => (
             }
           />
 
-          {/* Account / Settings (optional now, but wired) */}
           <Route
             path="/account"
             element={
@@ -112,7 +129,6 @@ const App: React.FC = () => (
             }
           />
 
-          {/* 404 */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>

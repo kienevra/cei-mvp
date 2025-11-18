@@ -5,16 +5,25 @@ import ErrorBanner from "../components/ErrorBanner";
 
 type UploadStatus = "idle" | "uploading" | "success" | "error";
 
+type UploadResult = {
+  rows_received: number;
+  rows_ingested: number;
+  rows_failed: number;
+  errors?: string[];
+  sample_site_ids?: string[];
+  sample_meter_ids?: string[];
+};
+
 const CSVUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<UploadStatus>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [serverMessage, setServerMessage] = useState<string | null>(null);
+  const [result, setResult] = useState<UploadResult | null>(null);
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files && e.target.files[0];
     setFile(f || null);
-    setServerMessage(null);
+    setResult(null);
     setError(null);
     setStatus("idle");
   };
@@ -29,20 +38,15 @@ const CSVUpload: React.FC = () => {
 
     setStatus("uploading");
     setError(null);
-    setServerMessage(null);
+    setResult(null);
 
     try {
       const formData = new FormData();
       formData.append("file", file);
-      // If backend requires extra fields (e.g., site_id), we can add them here later.
 
       const res = await uploadCsv(formData);
+      setResult(res as UploadResult);
       setStatus("success");
-      setServerMessage(
-        typeof res === "string"
-          ? res
-          : "File uploaded successfully. Processing may continue in the background."
-      );
     } catch (err: any) {
       setStatus("error");
       setError(err?.message || "Upload failed. Please try again.");
@@ -105,9 +109,8 @@ const CSVUpload: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                Supported formats typically include timestamp, value, unit, and
-                optional meter/site identifiers. We’ll enforce a strict schema
-                later.
+                Required columns: <code>timestamp</code>, <code>value</code>,{" "}
+                <code>unit</code>, <code>site_id</code>, <code>meter_id</code>.
               </div>
             </div>
           </div>
@@ -118,7 +121,7 @@ const CSVUpload: React.FC = () => {
             </div>
           )}
 
-          {serverMessage && status === "success" && (
+          {status === "success" && result && (
             <div
               style={{
                 marginBottom: "0.75rem",
@@ -129,7 +132,63 @@ const CSVUpload: React.FC = () => {
                 fontSize: "0.8rem",
               }}
             >
-              {serverMessage}
+              <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>
+                Ingestion summary
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "0.75rem",
+                  marginBottom: "0.4rem",
+                }}
+              >
+                <div>
+                  <span style={{ opacity: 0.7 }}>Rows received:</span>{" "}
+                  <strong>{result.rows_received}</strong>
+                </div>
+                <div>
+                  <span style={{ opacity: 0.7 }}>Rows ingested:</span>{" "}
+                  <strong>{result.rows_ingested}</strong>
+                </div>
+                <div>
+                  <span style={{ opacity: 0.7 }}>Rows failed:</span>{" "}
+                  <strong>{result.rows_failed}</strong>
+                </div>
+              </div>
+
+              {(result.sample_site_ids?.length || 0) > 0 && (
+                <div style={{ marginBottom: "0.25rem" }}>
+                  <span style={{ opacity: 0.7 }}>Sites seen:</span>{" "}
+                  <code>{result.sample_site_ids!.join(", ")}</code>
+                </div>
+              )}
+
+              {(result.sample_meter_ids?.length || 0) > 0 && (
+                <div style={{ marginBottom: "0.25rem" }}>
+                  <span style={{ opacity: 0.7 }}>Meters seen:</span>{" "}
+                  <code>{result.sample_meter_ids!.join(", ")}</code>
+                </div>
+              )}
+
+              {(result.errors?.length || 0) > 0 && (
+                <div style={{ marginTop: "0.4rem" }}>
+                  <div style={{ fontWeight: 500, marginBottom: "0.2rem" }}>
+                    Sample errors (first {result.errors!.length}):
+                  </div>
+                  <ul
+                    style={{
+                      margin: 0,
+                      paddingLeft: "1.1rem",
+                      fontSize: "0.78rem",
+                    }}
+                  >
+                    {result.errors!.map((msg, idx) => (
+                      <li key={idx}>{msg}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
 
@@ -163,8 +222,12 @@ const CSVUpload: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                Make sure your CSV has a header row and clean timestamps. If
-                you’re unsure, start with a small sample file.
+                Make sure your CSV has a header row and clean timestamps
+                (ISO8601 or{" "}
+                <code style={{ fontSize: "0.78rem" }}>
+                  YYYY-MM-DD HH:MM:SS
+                </code>
+                ). If you&apos;re unsure, start with a small sample file.
               </div>
 
               <div
@@ -184,7 +247,13 @@ const CSVUpload: React.FC = () => {
                   {isUploading ? "Uploading…" : "Upload file"}
                 </button>
                 {isUploading && (
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.25rem",
+                    }}
+                  >
                     <LoadingSpinner />
                     <span
                       style={{

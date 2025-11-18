@@ -1,30 +1,26 @@
-import React, { useEffect } from "react";
-import { Navigate } from "react-router-dom";
+import React from "react";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
-interface ProtectedRouteProps {
-  children: JSX.Element;
-  showToast?: (msg: string) => void;
-  message?: string;
-}
+type Props = {
+  children: React.ReactNode;
+};
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
-  children,
-  showToast,
-  message,
-}) => {
-  const { token } = useAuth();
+const ProtectedRoute: React.FC<Props> = ({ children }) => {
+  const { isAuthenticated } = useAuth();
+  const location = useLocation();
 
-  useEffect(() => {
-    if (!token && showToast && message) {
-      showToast(message);
-    }
-  }, [token, showToast, message]);
-
-  if (!token) {
-    return <Navigate to="/login" replace />;
+  if (!isAuthenticated) {
+    return (
+      <Navigate
+        to="/login"
+        state={{ from: location }}
+        replace
+      />
+    );
   }
-  return children;
+
+  return <>{children}</>;
 };
 
 export default ProtectedRoute;

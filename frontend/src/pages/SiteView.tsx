@@ -1,99 +1,73 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { getSite } from "../services/api";
+import {
+  getSite,
+  getTimeseriesSummary,
+  getTimeseriesSeries,
+} from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 
 type SiteRecord = {
-  id: number;
+  id: number | string;
   name: string;
   location?: string | null;
+  [key: string]: any;
 };
 
-type SiteKpi = {
+type SummaryResponse = {
+  site_id: string | null;
+  meter_id: string | null;
+  window_hours: number;
+  total_value: number;
+  points: number;
+  from_timestamp: string | null;
+  to_timestamp: string | null;
+};
+
+type SeriesPoint = {
+  ts: string;
+  value: number;
+};
+
+type SeriesResponse = {
+  site_id: string | null;
+  meter_id: string | null;
+  window_hours: number;
+  resolution: string;
+  points: SeriesPoint[];
+};
+
+type TrendPoint = {
   label: string;
-  value: string;
-  sublabel?: string;
-};
-
-type Opportunity = {
-  id: number;
-  title: string;
-  impact: "High" | "Medium" | "Low";
-  estSavings: string;
-  status: string;
+  value: number;
 };
 
 const SiteView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
 
   const [site, setSite] = useState<SiteRecord | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [siteLoading, setSiteLoading] = useState(false);
+  const [siteError, setSiteError] = useState<string | null>(null);
 
-  // Mocked KPIs / trend / opportunities until we wire real analytics
-  const kpis: SiteKpi[] = [
-    {
-      label: "Energy (Last 24h)",
-      value: "32,100 kWh",
-      sublabel: "+1.8% vs baseline",
-    },
-    {
-      label: "CO₂ Emissions",
-      value: "12.4 tCO₂e",
-      sublabel: "-3.1% vs last week",
-    },
-    {
-      label: "Active Opportunities",
-      value: "3",
-      sublabel: "1 high-impact action",
-    },
-  ];
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
-  const opportunities: Opportunity[] = [
-    {
-      id: 1,
-      title: "Weekend base load review",
-      impact: "High",
-      estSavings: "5–8% site-wide",
-      status: "Open",
-    },
-    {
-      id: 2,
-      title: "Adjust HVAC schedules",
-      impact: "Medium",
-      estSavings: "3–5% electric",
-      status: "In analysis",
-    },
-    {
-      id: 3,
-      title: "Update compressor controls",
-      impact: "Medium",
-      estSavings: "4–6% electric",
-      status: "Open",
-    },
-  ];
+  const [series, setSeries] = useState<SeriesResponse | null>(null);
+  const [seriesLoading, setSeriesLoading] = useState(false);
+  const [seriesError, setSeriesError] = useState<string | null>(null);
 
-  const trend = [
-    { ts: "Mon", value: 90 },
-    { ts: "Tue", value: 95 },
-    { ts: "Wed", value: 110 },
-    { ts: "Thu", value: 120 },
-    { ts: "Fri", value: 130 },
-    { ts: "Sat", value: 80 },
-    { ts: "Sun", value: 75 },
-  ];
+  // Map numeric route ID -> timeseries site key (e.g. "site-1")
+  const siteKey = id ? `site-${id}` : undefined;
 
   useEffect(() => {
-    if (!id) {
-      setError("Missing site id.");
-      return;
-    }
-
+    if (!id) return;
     let isMounted = true;
-    setLoading(true);
-    setError(null);
 
+    // Site metadata
+    setSiteLoading(true);
+    setSiteError(null);
     getSite(id)
       .then((data) => {
         if (!isMounted) return;
@@ -101,94 +75,108 @@ const SiteView: React.FC = () => {
       })
       .catch((e: any) => {
         if (!isMounted) return;
-        if (e?.response?.status === 404) {
-          setError("Site not found.");
-        } else {
-          setError(e?.message || "Failed to load site.");
-        }
+        setSiteError(e?.message || "Failed to load site.");
       })
       .finally(() => {
         if (!isMounted) return;
-        setLoading(false);
+        setSiteLoading(false);
+      });
+
+    if (!siteKey) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    // Per-site summary
+    setSummaryLoading(true);
+    setSummaryError(null);
+    getTimeseriesSummary({ site_id: siteKey, window_hours: 24 })
+      .then((data) => {
+        if (!isMounted) return;
+        setSummary(data as SummaryResponse);
+      })
+      .catch((e: any) => {
+        if (!isMounted) return;
+        setSummaryError(e?.message || "Failed to load energy summary.");
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setSummaryLoading(false);
+      });
+
+    // Per-site series
+    setSeriesLoading(true);
+    setSeriesError(null);
+    getTimeseriesSeries({
+      site_id: siteKey,
+      window_hours: 24,
+      resolution: "hour",
+    })
+      .then((data) => {
+        if (!isMounted) return;
+        console.log("Timeseries series for site", siteKey, data);
+        setSeries(data as SeriesResponse);
+      })
+      .catch((e: any) => {
+        if (!isMounted) return;
+        setSeriesError(e?.message || "Failed to load energy trend.");
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setSeriesLoading(false);
       });
 
     return () => {
       isMounted = false;
     };
-  }, [id]);
+  }, [id, siteKey]);
 
-  if (loading) {
-    return (
-      <div
-        style={{
-          height: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <LoadingSpinner />
-      </div>
-    );
+  const hasSummaryData = summary && summary.points > 0;
+  const totalKwh = hasSummaryData ? summary!.total_value : 0;
+  const formattedKwh = hasSummaryData
+    ? totalKwh >= 1000
+      ? `${(totalKwh / 1000).toFixed(2)} MWh`
+      : `${totalKwh.toFixed(1)} kWh`
+    : "—";
+
+  // Build trend points from API data
+  let trendPoints: TrendPoint[] = [];
+  if (series && series.points && series.points.length > 0) {
+    trendPoints = series.points.map((p) => {
+      const d = new Date(p.ts);
+      const label = d.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      return { label, value: p.value };
+    });
   }
 
-  if (error) {
-    return (
-      <div className="dashboard-page">
-        <div className="cei-card">
-          <ErrorBanner message={error} onClose={() => {}} />
-          <div
-            style={{
-              marginTop: "0.7rem",
-              fontSize: "0.8rem",
-            }}
-          >
-            <Link to="/sites" style={{ color: "var(--cei-text-accent)" }}>
-              Back to sites list
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!site) {
-    // Should not normally happen if no error, but be defensive
-    return (
-      <div className="dashboard-page">
-        <div className="cei-card">
-          <p style={{ fontSize: "0.85rem" }}>No site data available.</p>
-        </div>
-      </div>
-    );
-  }
-
-  const siteName = site.name || `Site ${site.id}`;
-  const siteLocation = site.location || "Unknown location";
+  const anyError = siteError || summaryError || seriesError;
 
   return (
     <div className="dashboard-page">
-      {/* Header / breadcrumb */}
+      {/* Header */}
       <section
         style={{
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "flex-start",
+          alignItems: "flex-end",
           gap: "1rem",
         }}
       >
         <div>
           <div
             style={{
-              fontSize: "0.8rem",
-              marginBottom: "0.2rem",
+              fontSize: "0.75rem",
               color: "var(--cei-text-muted)",
+              marginBottom: "0.2rem",
             }}
           >
             <Link to="/sites" style={{ color: "var(--cei-text-accent)" }}>
-              Sites
-            </Link>{" "}
-            / <span>{siteName}</span>
+              ← Back to sites
+            </Link>
           </div>
           <h1
             style={{
@@ -197,72 +185,164 @@ const SiteView: React.FC = () => {
               letterSpacing: "-0.02em",
             }}
           >
-            {siteName}
+            {siteLoading ? "Loading…" : site?.name || "Site"}
           </h1>
           <p
             style={{
-              marginTop: "0.25rem",
+              marginTop: "0.3rem",
               fontSize: "0.85rem",
               color: "var(--cei-text-muted)",
             }}
           >
-            Location: {siteLocation}
+            Per-site performance view. Energy metrics are filtered by{" "}
+            <code>site_id = {siteKey ?? "?"}</code> in the timeseries table.
           </p>
         </div>
-        <div style={{ display: "flex", gap: "0.5rem" }}>
-          <button
-            type="button"
-            className="cei-btn cei-btn-ghost"
-            onClick={() => {
-              alert("Site edit flow not implemented yet.");
-            }}
-          >
-            Edit site
-          </button>
+        <div
+          style={{
+            textAlign: "right",
+            fontSize: "0.8rem",
+            color: "var(--cei-text-muted)",
+          }}
+        >
+          {site?.location && (
+            <div>
+              <span style={{ fontWeight: 500 }}>Location:</span>{" "}
+              {site.location}
+            </div>
+          )}
+          <div>
+            <span style={{ fontWeight: 500 }}>Site ID:</span> {id}
+          </div>
         </div>
       </section>
+
+      {/* Error banner */}
+      {anyError && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <ErrorBanner
+            message={anyError}
+            onClose={() => {
+              setSiteError(null);
+              setSummaryError(null);
+              setSeriesError(null);
+            }}
+          />
+        </section>
+      )}
 
       {/* KPI row */}
       <section className="dashboard-row">
-        {kpis.map((kpi) => (
-          <div key={kpi.label} className="cei-card">
-            <div
-              style={{
-                fontSize: "0.75rem",
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              {kpi.label}
-            </div>
-            <div
-              style={{
-                marginTop: "0.35rem",
-                fontSize: "1.25rem",
-                fontWeight: 600,
-              }}
-            >
-              {kpi.value}
-            </div>
-            {kpi.sublabel && (
-              <div
-                style={{
-                  marginTop: "0.2rem",
-                  fontSize: "0.8rem",
-                  color: "var(--cei-text-accent)",
-                }}
-              >
-                {kpi.sublabel}
-              </div>
+        <div className="cei-card">
+          <div
+            style={{
+              fontSize: "0.75rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Energy – last 24 hours
+          </div>
+          <div
+            style={{
+              marginTop: "0.35rem",
+              fontSize: "1.6rem",
+              fontWeight: 600,
+            }}
+          >
+            {summaryLoading ? "…" : formattedKwh}
+          </div>
+          <div
+            style={{
+              marginTop: "0.25rem",
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            {hasSummaryData ? (
+              <>
+                Aggregated from{" "}
+                <strong>{summary!.points.toLocaleString()} readings</strong> in
+                the last {summary!.window_hours} hours for this site.
+              </>
+            ) : summaryLoading ? (
+              "Loading per-site energy data…"
+            ) : (
+              <>
+                No recent data for this site. Ensure your uploaded timeseries
+                includes <code>site_id = {siteKey}</code>.
+              </>
             )}
           </div>
-        ))}
+        </div>
+
+        <div className="cei-card">
+          <div
+            style={{
+              fontSize: "0.75rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Data coverage
+          </div>
+          <div
+            style={{
+              marginTop: "0.35rem",
+              fontSize: "1.4rem",
+              fontWeight: 600,
+            }}
+          >
+            {hasSummaryData ? summary!.points.toLocaleString() : "—"}
+          </div>
+          <div
+            style={{
+              marginTop: "0.25rem",
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Number of records for this site in the selected window.
+          </div>
+        </div>
+
+        <div className="cei-card">
+          <div
+            style={{
+              fontSize: "0.75rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Status
+          </div>
+          <div
+            style={{
+              marginTop: "0.35rem",
+              fontSize: "1.2rem",
+              fontWeight: 600,
+            }}
+          >
+            {hasSummaryData ? "Active" : "No recent data"}
+          </div>
+          <div
+            style={{
+              marginTop: "0.25rem",
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Simple heuristic status based on whether we see any recent
+            timeseries for this site.
+          </div>
+        </div>
       </section>
 
-      {/* Main grid: trend + opportunities */}
+      {/* Main grid: trend + metadata */}
       <section className="dashboard-main-grid">
-        {/* Trend card */}
         <div className="cei-card">
           <div
             style={{
@@ -278,7 +358,7 @@ const SiteView: React.FC = () => {
                   fontWeight: 600,
                 }}
               >
-                Site energy trend – last 7 days
+                Site energy trend – last 24 hours
               </div>
               <div
                 style={{
@@ -287,7 +367,8 @@ const SiteView: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                Once wired, this will show actual metered load for this site.
+                Per-site series aggregated by hour. Uses{" "}
+                <code>site_id = {siteKey}</code> from timeseries.
               </div>
             </div>
             <div
@@ -296,68 +377,136 @@ const SiteView: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              kWh · daily
+              kWh · hourly
             </div>
           </div>
 
-          <div
-            style={{
-              marginTop: "0.75rem",
-              display: "flex",
-              alignItems: "flex-end",
-              gap: "0.5rem",
-              height: "170px",
-            }}
-          >
-            {trend.map((p) => {
-              const max = Math.max(...trend.map((t) => t.value));
-              const heightPct = (p.value / max) * 100;
-              return (
+          {seriesLoading && (
+            <div
+              style={{
+                padding: "1.2rem 0.5rem",
+                display: "flex",
+                justifyContent: "center",
+              }}
+            >
+              <LoadingSpinner />
+            </div>
+          )}
+
+          {/* Ultra-simple bar chart */}
+          {!seriesLoading && trendPoints.length === 0 ? (
+            <div
+              style={{
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              No recent per-site series data. Once your timeseries has matching{" "}
+              <code>site_id = {siteKey}</code>, this chart will light up.
+            </div>
+          ) : (
+            <>
+              <div
+                style={{
+                  marginTop: "0.75rem",
+                  padding: "0.75rem",
+                  borderRadius: "0.75rem",
+                  border: "1px solid rgba(148, 163, 184, 0.5)",
+                  background:
+                    "radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.95))",
+                }}
+              >
                 <div
-                  key={p.ts}
                   style={{
-                    flex: 1,
                     display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "flex-end",
-                    gap: "0.35rem",
+                    alignItems: "flex-end",
+                    justifyContent: "space-between",
+                    gap: "0.75rem",
+                    height: "180px",
                   }}
                 >
-                  <div
-                    style={{
-                      width: "100%",
-                      borderRadius: "999px",
-                      background:
-                        "linear-gradient(to top, rgba(34, 197, 94, 0.9), rgba(34, 197, 94, 0.1))",
-                      height: `${heightPct}%`,
-                      boxShadow: "0 4px 12px rgba(34, 197, 94, 0.25)",
-                    }}
-                  />
-                  <span
-                    style={{
-                      fontSize: "0.7rem",
-                      color: "var(--cei-text-muted)",
-                    }}
-                  >
-                    {p.ts}
-                  </span>
+                  {trendPoints.map((p) => {
+                    const values = trendPoints.map((t) =>
+                      typeof t.value === "number" ? t.value : 0
+                    );
+                    const max = Math.max(...values, 1); // avoid divide-by-zero
+                    const rawPct = (p.value / max) * 100;
+                    const heightPct = Math.max(rawPct, 10); // at least 10% tall
+
+                    return (
+                      <div
+                        key={p.label + p.value}
+                        style={{
+                          flex: 1,
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "flex-end",
+                          gap: "0.4rem",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: "18px",
+                            borderRadius: "999px",
+                            background:
+                              "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
+                            height: `${heightPct}%`,
+                            boxShadow: "0 6px 18px rgba(56, 189, 248, 0.45)",
+                            border: "1px solid rgba(226, 232, 240, 0.8)",
+                          }}
+                        />
+                        <span
+                          style={{
+                            fontSize: "0.7rem",
+                            color: "var(--cei-text-muted)",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {p.label}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
-          </div>
+              </div>
+
+              {/* Debug list of raw points – remove later if you want */}
+              <div
+                style={{
+                  marginTop: "0.75rem",
+                  fontSize: "0.75rem",
+                  color: "var(--cei-text-muted)",
+                }}
+              >
+                <div style={{ marginBottom: "0.3rem" }}>
+                  Raw points (debug view):
+                </div>
+                <ul style={{ listStyle: "disc", paddingLeft: "1.2rem" }}>
+                  {series?.points.map((p, idx) => (
+                    <li key={idx}>
+                      {p.ts} – {p.value}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </>
+          )}
         </div>
 
-        {/* Opportunities */}
         <div className="cei-card">
-          <div style={{ marginBottom: "0.6rem" }}>
+          <div
+            style={{
+              marginBottom: "0.6rem",
+            }}
+          >
             <div
               style={{
                 fontSize: "0.9rem",
                 fontWeight: 600,
               }}
             >
-              Opportunities at this site
+              Site metadata
             </div>
             <div
               style={{
@@ -366,87 +515,61 @@ const SiteView: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Items that could reduce energy use and CO₂ if implemented.
+              Basic descriptive information for this site. We&apos;ll extend
+              this with tags, baseline, and other fields later.
             </div>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
-            {opportunities.map((opp) => (
-              <div
-                key={opp.id}
-                style={{
-                  borderRadius: "0.75rem",
-                  border: "1px solid rgba(148, 163, 184, 0.35)",
-                  background:
-                    "linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.7))",
-                  padding: "0.6rem 0.7rem",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: "0.5rem",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: "0.85rem",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {opp.title}
-                  </div>
-                  <span
-                    style={{
-                      fontSize: "0.7rem",
-                      padding: "0.15rem 0.55rem",
-                      borderRadius: "999px",
-                      fontWeight: 600,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.06em",
-                      background:
-                        opp.impact === "High"
-                          ? "rgba(248, 113, 113, 0.18)"
-                          : opp.impact === "Medium"
-                          ? "rgba(234, 179, 8, 0.15)"
-                          : "rgba(148, 163, 184, 0.18)",
-                      color:
-                        opp.impact === "High"
-                          ? "#fecaca"
-                          : opp.impact === "Medium"
-                          ? "#facc15"
-                          : "#e5e7eb",
-                    }}
-                  >
-                    {opp.impact}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    marginTop: "0.25rem",
-                    fontSize: "0.78rem",
-                    color: "var(--cei-text-muted)",
-                  }}
-                >
-                  Est. savings: {opp.estSavings}
-                </div>
-                <div
-                  style={{
-                    marginTop: "0.2rem",
-                    fontSize: "0.72rem",
-                    color: "var(--cei-text-muted)",
-                  }}
-                >
-                  Status:{" "}
-                  <span style={{ color: "var(--cei-text-main)" }}>
-                    {opp.status}
-                  </span>
-                </div>
+          {siteLoading && (
+            <div
+              style={{
+                padding: "1.2rem 0.5rem",
+                display: "flex",
+                justifyContent: "center",
+              }}
+            >
+              <LoadingSpinner />
+            </div>
+          )}
+
+          {!siteLoading && site && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr)",
+                rowGap: "0.4rem",
+                fontSize: "0.85rem",
+              }}
+            >
+              <div>
+                <span style={{ color: "var(--cei-text-muted)" }}>Name:</span>{" "}
+                <span>{site.name}</span>
               </div>
-            ))}
-          </div>
+              <div>
+                <span style={{ color: "var(--cei-text-muted)" }}>
+                  Location:
+                </span>{" "}
+                <span>{site.location || "—"}</span>
+              </div>
+              <div>
+                <span style={{ color: "var(--cei-text-muted)" }}>
+                  Internal ID:
+                </span>{" "}
+                <span>{site.id}</span>
+              </div>
+            </div>
+          )}
+
+          {!siteLoading && !site && !siteError && (
+            <div
+              style={{
+                fontSize: "0.85rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Site not found.
+            </div>
+          )}
         </div>
       </section>
     </div>

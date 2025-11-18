@@ -1,203 +1,159 @@
 # backend/app/api/v1/upload_csv.py
-"""
-Upload CSV endpoint (with real authentication).
-Include in app.main as:
-    from app.api.v1.upload_csv import router as upload_csv_router
-    app.include_router(upload_csv_router, prefix="/api/v1")
-"""
+from typing import List, Set
 
-from fastapi import (
-    APIRouter,
-    UploadFile,
-    File,
-    HTTPException,
-    status,
-    BackgroundTasks,
-    Query,
-    Depends,
-)
-from typing import Optional
-from uuid import uuid4
 import csv
-import os
+import io
+import logging
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
-# real auth dependency
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
 from app.api.v1.auth import get_current_user
+from app.db.session import get_db
+from app.models import TimeseriesRecord
 
-router = APIRouter(tags=["Upload CSV"])
+logger = logging.getLogger("cei")
 
-UPLOAD_DIR = "/tmp/uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-PREVIEW_ROWS = 10
-REQUIRED_COLUMNS = {"timestamp", "site_id", "meter_id", "value", "unit"}
-
-# Aliases: if canonical column missing, try these alternatives (lower-cased)
-ALIASES = {
-    "site_id": ["site_id", "sensor_id", "site"],
-    "meter_id": ["meter_id", "sensor_id", "meter"],
-    "timestamp": ["timestamp", "time", "ts"],
-    "value": ["value", "reading", "val"],
-    "unit": ["unit", "units"],
-}
+router = APIRouter(prefix="/upload-csv", tags=["upload"])
 
 
-def _normalize_fieldnames(fieldnames):
-    if not fieldnames:
-        return []
-    return [f.strip().lower() for f in fieldnames]
+class CsvUploadResult(BaseModel):
+    rows_received: int
+    rows_ingested: int
+    rows_failed: int
+    errors: List[str] = []
+    sample_site_ids: List[str] = []
+    sample_meter_ids: List[str] = []
 
 
-def _build_column_map(fieldnames_norm):
-    """
-    Given normalized fieldnames (list), return a mapping canonical_col -> actual_header_name (normalized)
-    This attempts to resolve aliases. Returns dict where value is the matched normalized name.
-    """
-    col_map = {}
-    for canonical, alias_list in ALIASES.items():
-        for a in alias_list:
-            if a in fieldnames_norm:
-                col_map[canonical] = a
-                break
-    return col_map
-
-
-def process_csv_job(job_id: str):
-    # Placeholder for real processing logic
-    # You should implement job queue / DB ingestion here.
-    pass
-
-
-@router.post("/upload-csv", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/", response_model=CsvUploadResult, status_code=status.HTTP_200_OK)
 async def upload_csv(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user),
-    skip_header: bool = Query(False, description="Skip first row as header"),
-    timezone: Optional[str] = Query(None, description="Timezone for timestamps"),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """
-    Upload a CSV file containing timeseries data. Validates first N rows and returns a preview.
-    Requires Bearer token authentication (Depends(get_current_user)).
+    Upload a CSV of timeseries data and ingest into TimeseriesRecord.
 
-    Example curl:
-    curl -X POST "https://<your-backend>/api/v1/upload-csv" \
-      -H "Authorization: Bearer <token>" \
-      -F "file=@data.csv"
+    Expected columns (header row):
+      - timestamp  (ISO8601 or 'YYYY-MM-DD HH:MM:SS')
+      - value      (numeric)
+      - unit       (e.g. kWh)
+      - site_id    (string; optional but strongly recommended)
+      - meter_id   (string; optional but strongly recommended)
     """
-    job_id = str(uuid4())
-    accepted_rows = 0
-    rejected_rows = 0
-    errors = []
-    preview_rows = []
 
-    # Save uploaded file to staging area
-    upload_path = os.path.join(UPLOAD_DIR, f"{job_id}.csv")
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only .csv files are supported")
+
+    # Decode bytes -> text
+    raw_bytes = await file.read()
     try:
-        with open(upload_path, "wb") as out_file:
-            content = await file.read()
-            out_file.write(content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+        text = raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw_bytes.decode("latin-1")
 
-    # Parse and validate first N rows
+    reader = csv.DictReader(io.StringIO(text))
+
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV file has no header row")
+
+    required_cols = ["timestamp", "value", "unit", "site_id", "meter_id"]
+    missing = [c for c in required_cols if c not in reader.fieldnames]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Missing required columns: {', '.join(missing)}. "
+                f"Expected at least: {', '.join(required_cols)}"
+            ),
+        )
+
+    rows_received = 0
+    rows_ingested = 0
+    rows_failed = 0
+    errors: List[str] = []
+    site_ids: Set[str] = set()
+    meter_ids: Set[str] = set()
+    records: List[TimeseriesRecord] = []
+
+    for row in reader:
+        rows_received += 1
+        try:
+            raw_ts = (row.get("timestamp") or "").strip()
+            raw_value = (row.get("value") or "").strip()
+            raw_unit = (row.get("unit") or "").strip()
+            raw_site = (row.get("site_id") or "").strip()
+            raw_meter = (row.get("meter_id") or "").strip()
+
+            if not raw_ts or not raw_value or not raw_unit:
+                raise ValueError("timestamp, value, and unit are required")
+
+            # Parse timestamp
+            ts = _parse_timestamp(raw_ts)
+
+            # Parse numeric value
+            try:
+                val = Decimal(raw_value)
+            except InvalidOperation:
+                raise ValueError(f"Invalid numeric value: {raw_value}")
+
+            site_id = raw_site or "default"
+            meter_id = raw_meter or "default"
+
+            rec = TimeseriesRecord(
+                site_id=site_id,
+                meter_id=meter_id,
+                timestamp=ts,
+                value=val,
+                unit=raw_unit,
+            )
+            records.append(rec)
+
+            site_ids.add(site_id)
+            meter_ids.add(meter_id)
+            rows_ingested += 1
+
+        except Exception as e:
+            rows_failed += 1
+            # Cap error messages to avoid massive responses on big files
+            if len(errors) < 20:
+                errors.append(f"Row {rows_received}: {e}")
+            logger.exception("Failed to ingest CSV row %s", rows_received)
+
+    # Persist in one transaction
+    if records:
+        db.add_all(records)
+        db.commit()
+
+    return CsvUploadResult(
+        rows_received=rows_received,
+        rows_ingested=rows_ingested,
+        rows_failed=rows_failed,
+        errors=errors,
+        sample_site_ids=sorted(site_ids)[:10],
+        sample_meter_ids=sorted(meter_ids)[:10],
+    )
+
+
+def _parse_timestamp(raw: str) -> datetime:
+    """
+    Try a couple of sane timestamp formats for MVP.
+    """
+    raw = raw.strip()
+    # Try ISO first
     try:
-        # choose delimiter based on extension (fall back to comma)
-        delimiter = "," if (file.filename and file.filename.lower().endswith(".csv")) else ","
-        with open(upload_path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f, delimiter=delimiter)
-            fieldnames = reader.fieldnames
-            fieldnames_norm = _normalize_fieldnames(fieldnames)
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        pass
 
-            if not fieldnames_norm:
-                raise HTTPException(status_code=400, detail="CSV has no header row or empty file.")
+    # Try 'YYYY-MM-DD HH:MM:SS'
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        pass
 
-            col_map = _build_column_map(fieldnames_norm)
-
-            # Attempt to auto-fill missing canonical columns using aliases / sensor_id
-            missing_after_map = REQUIRED_COLUMNS - set(col_map.keys())
-
-            # If unit missing, we will accept and populate empty string later (so remove from missing)
-            if "unit" in missing_after_map:
-                missing_after_map.remove("unit")  # allow missing unit; will default to ""
-
-            if missing_after_map:
-                # Try a last-ditch: if 'sensor_id' exists in the file, map it to site_id & meter_id if either missing
-                if "sensor_id" in fieldnames_norm:
-                    sensor_key = "sensor_id"
-                    if "site_id" not in col_map:
-                        col_map["site_id"] = sensor_key
-                    if "meter_id" not in col_map:
-                        col_map["meter_id"] = sensor_key
-                    # recompute missing
-                    missing_after_map = REQUIRED_COLUMNS - set(col_map.keys())
-                    if "unit" in missing_after_map:
-                        missing_after_map.remove("unit")
-
-            if missing_after_map:
-                # still missing required columns (other than unit)
-                raise HTTPException(status_code=400, detail=f"Missing columns: {', '.join(sorted(missing_after_map))}")
-
-            # iterate rows for preview
-            for i, row in enumerate(reader):
-                if i >= PREVIEW_ROWS:
-                    break
-
-                # normalize keys & values
-                row_norm = {}
-                for k, v in row.items():
-                    if k is None:
-                        continue
-                    kn = k.strip().lower()
-                    row_norm[kn] = v.strip() if isinstance(v, str) else v
-
-                # create canonical access dict
-                canonical_row = {}
-                for canonical in REQUIRED_COLUMNS:
-                    if canonical in col_map:
-                        key = col_map[canonical]
-                        val = row_norm.get(key, "")
-                        canonical_row[canonical] = val if val is not None else ""
-                    else:
-                        # unit may be absent intentionally
-                        canonical_row[canonical] = "" if canonical == "unit" else None
-
-                # Basic validations
-                row_errors = []
-                if not canonical_row.get("timestamp"):
-                    row_errors.append("missing timestamp")
-                if not canonical_row.get("site_id"):
-                    row_errors.append("missing site_id")
-                if not canonical_row.get("meter_id"):
-                    row_errors.append("missing meter_id")
-                if not canonical_row.get("value"):
-                    row_errors.append("missing value")
-                else:
-                    try:
-                        float(canonical_row["value"])
-                    except Exception:
-                        row_errors.append("invalid value")
-
-                if row_errors:
-                    rejected_rows += 1
-                    reported_row = i + 2 if (not skip_header) else i + 1
-                    errors.append({"row": reported_row, "message": "; ".join(row_errors)})
-                else:
-                    accepted_rows += 1
-                    preview_rows.append({k: canonical_row.get(k) for k in sorted(REQUIRED_COLUMNS)})
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"CSV parse error: {e}")
-
-    # Schedule background job
-    background_tasks.add_task(process_csv_job, job_id)
-
-    return {
-        "accepted_rows": accepted_rows,
-        "rejected_rows": rejected_rows,
-        "errors": errors,
-        "preview_rows": preview_rows,
-        "job_id": job_id,
-    }
+    raise ValueError(f"Invalid timestamp format: {raw}")

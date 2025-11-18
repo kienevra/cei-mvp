@@ -44,6 +44,27 @@ export async function getSites() {
   }
 }
 
+export async function getTimeseriesSeries(params?: {
+  site_id?: string;
+  meter_id?: string;
+  window_hours?: number;
+  resolution?: "hour" | "day";
+}) {
+  const r = await api.get("/timeseries/series", { params });
+  return r.data;
+}
+
+
+export async function getTimeseriesSummary(params?: {
+  site_id?: string;
+  meter_id?: string;
+  window_hours?: number;
+}) {
+  const r = await api.get("/timeseries/summary", { params });
+  return r.data;
+}
+
+
 export async function createSite(payload: { name: string; location?: string }) {
   const r = await api.post("/sites", payload);
   return r.data;
