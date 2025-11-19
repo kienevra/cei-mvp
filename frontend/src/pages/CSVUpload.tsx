@@ -1,208 +1,146 @@
 import React, { useState } from "react";
-import { uploadCsv } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
+import { uploadCsv } from "../services/api";
 
-type UploadStatus = "idle" | "uploading" | "success" | "error";
-
-type UploadResult = {
-  rows_received: number;
-  rows_ingested: number;
-  rows_failed: number;
-  errors?: string[];
-  sample_site_ids?: string[];
-  sample_meter_ids?: string[];
-};
+type UploadResult = any;
 
 const CSVUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
-  const [status, setStatus] = useState<UploadStatus>("idle");
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<UploadResult | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
 
-  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files && e.target.files[0];
-    setFile(f || null);
-    setResult(null);
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0] || null;
+    setFile(f);
     setError(null);
-    setStatus("idle");
+    setSuccess(false);
+    setResult(null);
   };
 
-  const onSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) {
-      setError("Please select a CSV file to upload.");
-      setStatus("error");
+      setError("Please select a CSV file before uploading.");
       return;
     }
 
-    setStatus("uploading");
+    const formData = new FormData();
+    formData.append("file", file);
+
+    setUploading(true);
     setError(null);
+    setSuccess(false);
     setResult(null);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
       const res = await uploadCsv(formData);
-      setResult(res as UploadResult);
-      setStatus("success");
+      setResult(res);
+      setSuccess(true);
     } catch (err: any) {
-      setStatus("error");
-      setError(err?.message || "Upload failed. Please try again.");
+      const backendDetail =
+        err?.response?.data?.detail ||
+        err?.response?.data?.error ||
+        err?.message;
+      setError(backendDetail || "Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
     }
   };
 
-  const isUploading = status === "uploading";
+  // Try to normalize common result shapes without assuming too much
+  const rowsInserted =
+    (result as any)?.rows_inserted ??
+    (result as any)?.rows_ingested ??
+    (result as any)?.inserted ??
+    null;
+  const rowsFailed =
+    (result as any)?.rows_failed ?? (result as any)?.failed ?? null;
+  const jobId = (result as any)?.job_id ?? (result as any)?.jobId ?? null;
 
   return (
     <div className="dashboard-page">
       {/* Header */}
-      <section>
-        <h1
-          style={{
-            fontSize: "1.3rem",
-            fontWeight: 600,
-            letterSpacing: "-0.02em",
-          }}
-        >
-          CSV upload
-        </h1>
-        <p
-          style={{
-            marginTop: "0.3rem",
-            fontSize: "0.85rem",
-            color: "var(--cei-text-muted)",
-            maxWidth: "40rem",
-          }}
-        >
-          Ingest meter, sensor, or utility data from CSV files. CEI will parse
-          and map records into timeseries for analytics.
-        </p>
+      <section
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-end",
+          gap: "1rem",
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              fontSize: "1.3rem",
+              fontWeight: 600,
+              letterSpacing: "-0.02em",
+            }}
+          >
+            CSV upload
+          </h1>
+          <p
+            style={{
+              marginTop: "0.3rem",
+              fontSize: "0.85rem",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Upload batch timeseries data into CEI. This is ideal for pilots,
+            historical backfills, and analyst-driven imports.
+          </p>
+        </div>
       </section>
 
-      {/* Upload card */}
-      <section>
+      {/* Instructions + form */}
+      <section className="dashboard-row">
         <div className="cei-card">
           <div
             style={{
-              marginBottom: "0.8rem",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: "0.75rem",
+              fontSize: "0.9rem",
+              fontWeight: 600,
+              marginBottom: "0.5rem",
             }}
           >
-            <div>
-              <div
-                style={{
-                  fontSize: "0.9rem",
-                  fontWeight: 600,
-                }}
-              >
-                Upload CSV file
-              </div>
-              <div
-                style={{
-                  marginTop: "0.2rem",
-                  fontSize: "0.8rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
-                Required columns: <code>timestamp</code>, <code>value</code>,{" "}
-                <code>unit</code>, <code>site_id</code>, <code>meter_id</code>.
-              </div>
-            </div>
+            File requirements
           </div>
+          <ul
+            style={{
+              margin: 0,
+              paddingLeft: "1.1rem",
+              fontSize: "0.84rem",
+              color: "var(--cei-text-muted)",
+              lineHeight: 1.5,
+            }}
+          >
+            <li>Format: CSV, UTF-8 encoded.</li>
+            <li>
+              Required columns (case-sensitive):{" "}
+              <code>site_id</code>, <code>meter_id</code>,{" "}
+              <code>timestamp</code>, <code>value</code>, <code>unit</code>.
+            </li>
+            <li>
+              Timestamps should be ISO-like, e.g.{" "}
+              <code>2025-11-18T07:00:00</code> or{" "}
+              <code>2025-11-18 07:00:00</code>.
+            </li>
+            <li>
+              <code>value</code> must be numeric; invalid rows may be rejected
+              server-side.
+            </li>
+          </ul>
+        </div>
 
-          {error && (
-            <div style={{ marginBottom: "0.75rem" }}>
-              <ErrorBanner message={error} onClose={() => setError(null)} />
-            </div>
-          )}
-
-          {status === "success" && result && (
+        <div className="cei-card">
+          <form onSubmit={handleSubmit}>
             <div
               style={{
-                marginBottom: "0.75rem",
-                borderRadius: "0.75rem",
-                border: "1px solid rgba(34, 197, 94, 0.5)",
-                background: "rgba(22, 163, 74, 0.18)",
-                padding: "0.7rem 0.8rem",
-                fontSize: "0.8rem",
-              }}
-            >
-              <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>
-                Ingestion summary
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "0.75rem",
-                  marginBottom: "0.4rem",
-                }}
-              >
-                <div>
-                  <span style={{ opacity: 0.7 }}>Rows received:</span>{" "}
-                  <strong>{result.rows_received}</strong>
-                </div>
-                <div>
-                  <span style={{ opacity: 0.7 }}>Rows ingested:</span>{" "}
-                  <strong>{result.rows_ingested}</strong>
-                </div>
-                <div>
-                  <span style={{ opacity: 0.7 }}>Rows failed:</span>{" "}
-                  <strong>{result.rows_failed}</strong>
-                </div>
-              </div>
-
-              {(result.sample_site_ids?.length || 0) > 0 && (
-                <div style={{ marginBottom: "0.25rem" }}>
-                  <span style={{ opacity: 0.7 }}>Sites seen:</span>{" "}
-                  <code>{result.sample_site_ids!.join(", ")}</code>
-                </div>
-              )}
-
-              {(result.sample_meter_ids?.length || 0) > 0 && (
-                <div style={{ marginBottom: "0.25rem" }}>
-                  <span style={{ opacity: 0.7 }}>Meters seen:</span>{" "}
-                  <code>{result.sample_meter_ids!.join(", ")}</code>
-                </div>
-              )}
-
-              {(result.errors?.length || 0) > 0 && (
-                <div style={{ marginTop: "0.4rem" }}>
-                  <div style={{ fontWeight: 500, marginBottom: "0.2rem" }}>
-                    Sample errors (first {result.errors!.length}):
-                  </div>
-                  <ul
-                    style={{
-                      margin: 0,
-                      paddingLeft: "1.1rem",
-                      fontSize: "0.78rem",
-                    }}
-                  >
-                    {result.errors!.map((msg, idx) => (
-                      <li key={idx}>{msg}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-
-          <form onSubmit={onSubmit}>
-            <div
-              style={{
-                borderRadius: "0.9rem",
-                border: "1px dashed rgba(148, 163, 184, 0.6)",
-                padding: "1rem",
-                background:
-                  "radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.95))",
                 display: "flex",
                 flexDirection: "column",
-                gap: "0.6rem",
+                gap: "0.75rem",
               }}
             >
               <div>
@@ -211,63 +149,178 @@ const CSVUpload: React.FC = () => {
                   id="csvFile"
                   type="file"
                   accept=".csv,text/csv"
-                  onChange={onFileChange}
+                  onChange={handleFileChange}
                 />
               </div>
-
               <div
                 style={{
-                  marginTop: "0.3rem",
-                  fontSize: "0.78rem",
+                  fontSize: "0.8rem",
                   color: "var(--cei-text-muted)",
                 }}
               >
-                Make sure your CSV has a header row and clean timestamps
-                (ISO8601 or{" "}
-                <code style={{ fontSize: "0.78rem" }}>
-                  YYYY-MM-DD HH:MM:SS
-                </code>
-                ). If you&apos;re unsure, start with a small sample file.
+                Select a CSV file and click <strong>Upload &amp; ingest</strong>
+                . Once processed, metrics will appear on the dashboard and site
+                views.
               </div>
-
-              <div
-                style={{
-                  marginTop: "0.5rem",
-                  display: "flex",
-                  justifyContent: "flex-start",
-                  alignItems: "center",
-                  gap: "0.75rem",
-                }}
-              >
+              <div>
                 <button
                   type="submit"
                   className="cei-btn cei-btn-primary"
-                  disabled={isUploading}
+                  disabled={!file || uploading}
                 >
-                  {isUploading ? "Uploading…" : "Upload file"}
+                  {uploading ? "Uploading…" : "Upload & ingest"}
                 </button>
-                {isUploading && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.25rem",
-                    }}
-                  >
-                    <LoadingSpinner />
-                    <span
-                      style={{
-                        fontSize: "0.8rem",
-                        color: "var(--cei-text-muted)",
-                      }}
-                    >
-                      Sending file to CEI…
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
           </form>
+        </div>
+      </section>
+
+      {/* Feedback area */}
+      <section>
+        <div className="cei-card">
+          {error && (
+            <div style={{ marginBottom: "0.75rem" }}>
+              <ErrorBanner message={error} onClose={() => setError(null)} />
+            </div>
+          )}
+
+          {uploading && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                padding: "1rem 0",
+              }}
+            >
+              <LoadingSpinner />
+            </div>
+          )}
+
+          {!uploading && success && (
+            <div
+              style={{
+                marginBottom: "0.75rem",
+                fontSize: "0.85rem",
+                color: "var(--cei-text-main)",
+              }}
+            >
+              <div
+                style={{
+                  marginBottom: "0.3rem",
+                  fontWeight: 500,
+                }}
+              >
+                Upload complete.
+              </div>
+              <div style={{ color: "var(--cei-text-muted)" }}>
+                CEI successfully processed the file. You should see the impact
+                reflected in recent energy KPIs and time series charts.
+              </div>
+            </div>
+          )}
+
+          {!uploading && (rowsInserted !== null || rowsFailed !== null) && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "1rem",
+                marginTop: "0.4rem",
+                fontSize: "0.82rem",
+              }}
+            >
+              <div>
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    color: "var(--cei-text-muted)",
+                    display: "block",
+                  }}
+                >
+                  Rows ingested
+                </span>
+                <span style={{ fontWeight: 600 }}>
+                  {rowsInserted !== null ? rowsInserted : "—"}
+                </span>
+              </div>
+              <div>
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    color: "var(--cei-text-muted)",
+                    display: "block",
+                  }}
+                >
+                  Rows failed
+                </span>
+                <span style={{ fontWeight: 600 }}>
+                  {rowsFailed !== null ? rowsFailed : "—"}
+                </span>
+              </div>
+              {jobId && (
+                <div>
+                  <span
+                    style={{
+                      fontSize: "0.75rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      color: "var(--cei-text-muted)",
+                      display: "block",
+                    }}
+                  >
+                    Job id
+                  </span>
+                  <span style={{ fontFamily: "monospace" }}>{jobId}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!uploading && result && (
+            <div style={{ marginTop: "0.9rem" }}>
+              <button
+                type="button"
+                className="cei-btn cei-btn-ghost"
+                onClick={() => setShowRaw((prev) => !prev)}
+              >
+                {showRaw ? "Hide raw response" : "Show raw response"}
+              </button>
+              {showRaw && (
+                <pre
+                  style={{
+                    marginTop: "0.6rem",
+                    maxHeight: "260px",
+                    overflow: "auto",
+                    fontSize: "0.78rem",
+                    background: "rgba(15, 23, 42, 0.9)",
+                    padding: "0.7rem",
+                    borderRadius: "0.6rem",
+                    border: "1px solid rgba(31, 41, 55, 0.8)",
+                  }}
+                >
+                  {JSON.stringify(result, null, 2)}
+                </pre>
+              )}
+            </div>
+          )}
+
+          {!uploading && !error && !result && !success && (
+            <div
+              style={{
+                fontSize: "0.82rem",
+                color: "var(--cei-text-muted)",
+                marginTop: "0.3rem",
+              }}
+            >
+              No upload performed yet. Select a CSV file and run an ingest to
+              populate the CEI engine with data.
+            </div>
+          )}
         </div>
       </section>
     </div>

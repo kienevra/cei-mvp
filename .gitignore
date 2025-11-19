@@ -33,7 +33,12 @@ node_modules/
 *.env
 backend/.env
 frontend/.env
+frontend/.env.*
 
 # Local DBs
 *.db
 dev.db
+# Local debug / data artifacts
+debug_*.py
+sample_*.csv
+
