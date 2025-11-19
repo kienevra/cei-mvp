@@ -1,3 +1,4 @@
+// frontend/src/services/api.ts
 import axios from "axios";
 
 const rawEnv = (import.meta as any).env || {};
@@ -26,37 +27,15 @@ api.interceptors.request.use((cfg) => {
 api.interceptors.response.use(
   (r) => r,
   (err) => {
-    const status = err?.response?.status;
-
-    if (status === 401) {
-      // Kill the session
+    if (err?.response?.status === 401) {
+      // simple handling; route to /login in components using this service
       localStorage.removeItem("cei_token");
-
-      // Best-effort redirect to login with a reason tag
-      if (typeof window !== "undefined") {
-        const currentPath = window.location.pathname || "";
-
-        // Avoid redirect loops
-        if (!currentPath.startsWith("/login")) {
-          try {
-            const url = new URL(window.location.href);
-            url.pathname = "/login";
-            url.searchParams.set("reason", "session_expired");
-            window.location.href = url.toString();
-          } catch {
-            // Fallback if URL parsing ever explodes
-            window.location.href = "/login?reason=session_expired";
-          }
-        }
-      }
     }
-
     return Promise.reject(err);
   }
 );
 
-
-// === typed helper functions ===
+// --- Sites ---
 
 export async function getSites() {
   const r = await api.get("/sites");
@@ -67,6 +46,12 @@ export async function createSite(payload: { name: string; location?: string }) {
   const r = await api.post("/sites", payload);
   return r.data;
 }
+
+export async function deleteSite(id: number | string) {
+  await api.delete(`/sites/${id}`);
+}
+
+// --- Timeseries ---
 
 export async function getTimeseriesSummary(params: {
   site_id?: string;
@@ -92,11 +77,19 @@ export async function postTimeseriesBatch(payload: any[]) {
   return r.data;
 }
 
+// --- CSV upload ---
+
 export async function uploadCsv(formData: FormData) {
   const r = await api.post("/upload-csv", formData, {
     headers: { "Content-Type": "multipart/form-data" },
   });
   return r.data;
+}
+
+// --- Account ---
+
+export async function deleteAccount() {
+  await api.delete("/auth/me");
 }
 
 export default api;

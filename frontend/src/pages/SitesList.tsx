@@ -1,6 +1,7 @@
+// frontend/src/pages/SitesList.tsx
 import React, { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { getSites, createSite } from "../services/api";
+import { useNavigate } from "react-router-dom";
+import { getSites, createSite, deleteSite } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 
@@ -8,7 +9,6 @@ type SiteRecord = {
   id: number | string;
   name: string;
   location?: string | null;
-  created_at?: string | null;
   [key: string]: any;
 };
 
@@ -22,42 +22,34 @@ const SitesList: React.FC = () => {
   const [newLocation, setNewLocation] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-
   const navigate = useNavigate();
 
   useEffect(() => {
     let isMounted = true;
+    setLoading(true);
+    setError(null);
 
-    async function loadSites() {
-      setLoading(true);
-      setError(null);
-
-      try {
-        const data = await getSites();
+    getSites()
+      .then((data) => {
         if (!isMounted) return;
-
-        const normalized = Array.isArray(data) ? (data as SiteRecord[]) : [];
-        setSites(normalized);
-      } catch (e: any) {
+        const normalized = Array.isArray(data) ? data : [];
+        setSites(normalized as SiteRecord[]);
+      })
+      .catch((e: any) => {
         if (!isMounted) return;
-        const msg =
-          e?.response?.data?.detail ||
-          e?.response?.data?.error ||
-          e?.message ||
-          "Failed to load sites.";
-        setError(msg);
-      } finally {
+        setError(e?.message || "Failed to load sites.");
+      })
+      .finally(() => {
         if (!isMounted) return;
         setLoading(false);
-      }
-    }
-
-    loadSites();
+      });
 
     return () => {
       isMounted = false;
     };
   }, []);
+
+  const hasSites = sites && sites.length > 0;
 
   const resetCreateForm = () => {
     setNewName("");
@@ -68,37 +60,51 @@ const SitesList: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    setCreateError(null);
-
     if (!newName.trim()) {
       setCreateError("Site name is required.");
       return;
     }
 
     setCreating(true);
+    setCreateError(null);
 
     try {
-      const created = (await createSite({
+      const created = await createSite({
         name: newName.trim(),
         location: newLocation.trim() || undefined,
-      })) as SiteRecord;
+      });
 
       setSites((prev) => [...prev, created]);
       resetCreateForm();
       setShowCreate(false);
-    } catch (e: any) {
-      const msg =
-        e?.response?.data?.detail ||
-        e?.response?.data?.error ||
-        e?.message ||
-        "Failed to create site.";
-      setCreateError(msg);
+    } catch (err: any) {
+      setCreateError(err?.message || "Failed to create site.");
     } finally {
       setCreating(false);
     }
   };
 
-  const hasSites = sites.length > 0;
+  const handleDelete = async (site: SiteRecord) => {
+    const name = site.name || `Site ${site.id}`;
+    if (
+      !window.confirm(
+        `Delete site "${name}"? This action cannot be undone in this MVP.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await deleteSite(site.id);
+      setSites((prev) => prev.filter((s) => s.id !== site.id));
+    } catch (err: any) {
+      setError(err?.message || "Failed to delete site.");
+    }
+  };
+
+  const goToSite = (id: number | string) => {
+    navigate(`/sites/${id}`);
+  };
 
   return (
     <div className="dashboard-page">
@@ -128,8 +134,8 @@ const SitesList: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Your monitored plants, facilities, and assets. Each site can ingest
-            timeseries data and feed into CEI analytics.
+            Your monitored plants, facilities, and sites participating in CEI
+            analytics.
           </p>
         </div>
         <div>
@@ -177,17 +183,17 @@ const SitesList: React.FC = () => {
           >
             {sites.length === 0
               ? "No sites configured yet."
-              : "Sites currently configured for energy and CO₂ monitoring."}
+              : "Sites currently tracked for energy and CO₂ performance."}
           </div>
         </div>
       </section>
 
-      {/* Main list card */}
+      {/* Main content card: create form + table / empty / loading / error */}
       <section>
         <div className="cei-card">
           <div
             style={{
-              marginBottom: "0.7rem",
+              marginBottom: "0.6rem",
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
@@ -210,8 +216,8 @@ const SitesList: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                Registry of all monitored sites. Use this as the anchor for
-                per-site dashboards and analytics.
+                Basic registry of each monitored site. We’ll layer analytics and
+                drill-down views on top of this.
               </div>
             </div>
           </div>
@@ -238,7 +244,8 @@ const SitesList: React.FC = () => {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "minmax(0, 2fr) minmax(0, 2fr) auto",
+                    gridTemplateColumns:
+                      "minmax(0, 2fr) minmax(0, 2fr) auto",
                     gap: "0.6rem",
                     alignItems: "flex-end",
                   }}
@@ -249,7 +256,7 @@ const SitesList: React.FC = () => {
                       id="siteName"
                       value={newName}
                       onChange={(e) => setNewName(e.target.value)}
-                      placeholder="e.g. Lamborghini – Sant’Agata"
+                      placeholder="e.g. Turin Plant A"
                     />
                   </div>
                   <div>
@@ -286,7 +293,7 @@ const SitesList: React.FC = () => {
             </div>
           )}
 
-          {/* Table / loading / empty state */}
+          {/* Table / empty / loading */}
           {loading ? (
             <div
               style={{
@@ -297,56 +304,82 @@ const SitesList: React.FC = () => {
             >
               <LoadingSpinner />
             </div>
-          ) : !hasSites ? (
-            <div
-              style={{
-                fontSize: "0.85rem",
-                color: "var(--cei-text-muted)",
-                paddingTop: "0.5rem",
-              }}
-            >
-              No sites configured yet. Use the <strong>“Add site”</strong> action
-              above to register your first facility.
-            </div>
-          ) : (
+          ) : hasSites ? (
             <div style={{ overflowX: "auto" }}>
               <table>
                 <thead>
                   <tr>
-                    <th>ID</th>
+                    <th style={{ width: "80px" }}>ID</th>
                     <th>Name</th>
                     <th>Location</th>
-                    <th></th>
+                    <th style={{ width: "220px" }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {sites.map((site) => (
-                    <tr
-                      key={site.id}
-                      onClick={() => navigate(`/sites/${site.id}`)}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <td>{site.id}</td>
-                      <td>{site.name}</td>
+                    <tr key={site.id}>
+                      <td
+                        className="cell-link"
+                        onClick={() => goToSite(site.id)}
+                      >
+                        {site.id}
+                      </td>
+                      <td
+                        className="cell-link"
+                        onClick={() => goToSite(site.id)}
+                      >
+                        {site.name}
+                      </td>
                       <td>{site.location || "—"}</td>
                       <td
-                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          display: "flex",
+                          justifyContent: "flex-end",
+                          gap: "0.5rem",
+                        }}
                       >
-                        <Link
-                          to={`/sites/${site.id}`}
-                          style={{
-                            fontSize: "0.8rem",
-                            color: "var(--cei-text-accent)",
-                            textDecoration: "none",
-                          }}
+                        <button
+                          type="button"
+                          className="cei-btn cei-btn-ghost"
+                          onClick={() => goToSite(site.id)}
                         >
                           View site →
-                        </Link>
+                        </button>
+                        <button
+                          type="button"
+                          className="cei-btn"
+                          style={{
+                            background: "transparent",
+                            borderColor: "rgba(248,113,113,0.7)",
+                            color: "#fecaca",
+                          }}
+                          onClick={() => handleDelete(site)}
+                        >
+                          Delete
+                        </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          ) : (
+            <div
+              style={{
+                padding: "1rem 0.2rem 0.3rem",
+                fontSize: "0.85rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              <p>
+                No sites are configured yet. Once sites are onboarded, you’ll
+                see them listed here with basic metadata and can drill into
+                per-site dashboards.
+              </p>
+              <p style={{ marginTop: "0.4rem" }}>
+                Use the <strong>“Add site”</strong> action above to register
+                your first plant or facility.
+              </p>
             </div>
           )}
         </div>
