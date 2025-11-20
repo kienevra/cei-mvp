@@ -1,5 +1,5 @@
+// frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { getTimeseriesSummary, getTimeseriesSeries } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
@@ -32,18 +32,8 @@ type TrendPoint = {
   value: number;
 };
 
-const fallbackTrend: TrendPoint[] = [
-  { label: "Mon", value: 90 },
-  { label: "Tue", value: 95 },
-  { label: "Wed", value: 110 },
-  { label: "Thu", value: 120 },
-  { label: "Fri", value: 130 },
-  { label: "Sat", value: 80 },
-  { label: "Sun", value: 75 },
-];
-
 const Dashboard: React.FC = () => {
-  const [summary24h, setSummary24h] = useState<SummaryResponse | null>(null);
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
@@ -51,54 +41,33 @@ const Dashboard: React.FC = () => {
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [seriesError, setSeriesError] = useState<string | null>(null);
 
-  const opportunities = [
-    {
-      id: 1,
-      title: "Base load optimization",
-      impact: "High",
-      estSavings: "5–10% energy",
-      site: "Multi-site",
-    },
-    {
-      id: 2,
-      title: "Peak-shaving strategy",
-      impact: "Medium",
-      estSavings: "3–5% demand charges",
-      site: "Turin Plant A",
-    },
-    {
-      id: 3,
-      title: "Weekend shutdown policy",
-      impact: "Medium",
-      estSavings: "2–4% weekly",
-      site: "Line-level",
-    },
-  ];
-
   useEffect(() => {
     let isMounted = true;
 
-    // Summary
+    // Portfolio summary (all sites, last 24h)
     setSummaryLoading(true);
     setSummaryError(null);
     getTimeseriesSummary({ window_hours: 24 })
       .then((data) => {
         if (!isMounted) return;
-        setSummary24h(data as SummaryResponse);
+        setSummary(data as SummaryResponse);
       })
       .catch((e: any) => {
         if (!isMounted) return;
-        setSummaryError(e?.message || "Failed to load energy summary.");
+        setSummaryError(e?.message || "Failed to load portfolio summary.");
       })
       .finally(() => {
         if (!isMounted) return;
         setSummaryLoading(false);
       });
 
-    // Series (for trend)
+    // Portfolio series (all sites, last 24h, hourly)
     setSeriesLoading(true);
     setSeriesError(null);
-    getTimeseriesSeries({ window_hours: 24, resolution: "hour" })
+    getTimeseriesSeries({
+      window_hours: 24,
+      resolution: "hour",
+    })
       .then((data) => {
         if (!isMounted) return;
         setSeries(data as SeriesResponse);
@@ -117,36 +86,24 @@ const Dashboard: React.FC = () => {
     };
   }, []);
 
-  const hasSummaryData = summary24h && summary24h.points > 0;
-  const totalKwh = hasSummaryData ? summary24h!.total_value : 0;
+  const hasSummaryData = summary && summary.points > 0;
+  const totalKwh = hasSummaryData ? summary!.total_value : 0;
   const formattedKwh = hasSummaryData
     ? totalKwh >= 1000
       ? `${(totalKwh / 1000).toFixed(2)} MWh`
       : `${totalKwh.toFixed(1)} kWh`
-    : "--";
+    : "—";
 
-  // Normalize series -> TrendPoint[]
-  let trendPoints: TrendPoint[] = fallbackTrend;
+  // Build trend points for the bar chart
+  let trendPoints: TrendPoint[] = [];
   if (series && series.points && series.points.length > 0) {
     trendPoints = series.points.map((p) => {
       const d = new Date(p.ts);
-      let label: string;
-      if (series.resolution === "day") {
-        label = d.toLocaleDateString(undefined, {
-          month: "short",
-          day: "numeric",
-        });
-      } else {
-        // hour
-        label = d.toLocaleTimeString(undefined, {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-      }
-      return {
-        label,
-        value: p.value,
-      };
+      const label = d.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      return { label, value: p.value };
     });
   }
 
@@ -171,24 +128,22 @@ const Dashboard: React.FC = () => {
               letterSpacing: "-0.02em",
             }}
           >
-            Overview
+            Portfolio overview
           </h1>
           <p
             style={{
               marginTop: "0.3rem",
               fontSize: "0.85rem",
               color: "var(--cei-text-muted)",
-              maxWidth: "40rem",
             }}
           >
-            High-level view of energy and CO₂ performance across all monitored
-            sites. Key metrics on this card are powered directly by your{" "}
-            <strong>timeseries_records</strong> data.
+            High-level picture of energy and data health across all connected
+            sites in the last 24 hours.
           </p>
         </div>
       </section>
 
-      {/* Error banner if any dashboard call failed */}
+      {/* Error banner (summary or series) */}
       {anyError && (
         <section style={{ marginTop: "0.75rem" }}>
           <ErrorBanner
@@ -203,7 +158,6 @@ const Dashboard: React.FC = () => {
 
       {/* KPI row */}
       <section className="dashboard-row">
-        {/* Real KPI – last 24h energy */}
         <div className="cei-card">
           <div
             style={{
@@ -231,32 +185,14 @@ const Dashboard: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            {hasSummaryData ? (
-              <>
-                Aggregated from{" "}
-                <strong>
-                  {summary24h!.points.toLocaleString()} readings
-                </strong>{" "}
-                in the last {summary24h!.window_hours} hours.
-              </>
-            ) : summaryLoading ? (
-              "Loading data from the last 24 hours…"
-            ) : (
-              <>
-                No data in the last 24 hours. Try uploading a CSV on the{" "}
-                <Link
-                  to="/upload"
-                  style={{ color: "var(--cei-text-accent)" }}
-                >
-                  data upload page
-                </Link>
-                .
-              </>
-            )}
+            {summaryLoading
+              ? "Loading portfolio energy data…"
+              : hasSummaryData
+              ? `Aggregated from ${summary!.points.toLocaleString()} readings across all sites.`
+              : "No recent timeseries data in the last 24 hours. Upload a CSV or connect a live feed to see this move."}
           </div>
         </div>
 
-        {/* Placeholder KPI – CO₂ (future) */}
         <div className="cei-card">
           <div
             style={{
@@ -266,16 +202,16 @@ const Dashboard: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            CO₂ emissions (estimated)
+            Data coverage
           </div>
           <div
             style={{
               marginTop: "0.35rem",
-              fontSize: "1.6rem",
+              fontSize: "1.4rem",
               fontWeight: 600,
             }}
           >
-            —
+            {hasSummaryData ? summary!.points.toLocaleString() : "—"}
           </div>
           <div
             style={{
@@ -284,12 +220,10 @@ const Dashboard: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            We&apos;ll derive CO₂e from metered energy using your emission
-            factors once those are configured. For now this is a placeholder.
+            Number of timeseries records available in the selected window.
           </div>
         </div>
 
-        {/* Placeholder KPI – Opportunities */}
         <div className="cei-card">
           <div
             style={{
@@ -299,16 +233,16 @@ const Dashboard: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Active opportunities
+            Status
           </div>
           <div
             style={{
               marginTop: "0.35rem",
-              fontSize: "1.6rem",
+              fontSize: "1.2rem",
               fontWeight: 600,
             }}
           >
-            3
+            {hasSummaryData ? "Active data" : "Waiting for data"}
           </div>
           <div
             style={{
@@ -317,15 +251,15 @@ const Dashboard: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Placeholder count from the mock opportunity list. We&apos;ll wire
-            this to a real opportunities endpoint as the engine matures.
+            Simple heuristic status based on whether we see any portfolio
+            readings in the last 24 hours.
           </div>
         </div>
       </section>
 
-      {/* Main grid: trend + opportunities */}
+      {/* Main grid – trend + roadmap card */}
       <section className="dashboard-main-grid">
-        {/* Trend card */}
+        {/* Trend chart */}
         <div className="cei-card">
           <div
             style={{
@@ -350,8 +284,8 @@ const Dashboard: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                If data is available, this chart is based on your actual
-                timeseries records. Otherwise we show a fallback pattern.
+                All sites combined, bucketed by hour. Uses the{" "}
+                <code>/timeseries/series</code> endpoint.
               </div>
             </div>
             <div
@@ -360,204 +294,163 @@ const Dashboard: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              kWh · per bucket
+              kWh · hourly
             </div>
-          </div>
-
-          <div
-            style={{
-              marginTop: "0.75rem",
-              display: "flex",
-              alignItems: "flex-end",
-              gap: "0.5rem",
-              height: "170px",
-            }}
-          >
-            {trendPoints.map((p) => {
-              const max = Math.max(...trendPoints.map((t) => t.value || 0.0001));
-              const heightPct = max > 0 ? (p.value / max) * 100 : 0;
-              return (
-                <div
-                  key={p.label + p.value}
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "flex-end",
-                    gap: "0.35rem",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: "100%",
-                      borderRadius: "999px",
-                      background:
-                        "linear-gradient(to top, rgba(56, 189, 248, 0.85), rgba(56, 189, 248, 0.12))",
-                      height: `${heightPct}%`,
-                      boxShadow: "0 4px 12px rgba(56, 189, 248, 0.3)",
-                    }}
-                  />
-                  <span
-                    style={{
-                      fontSize: "0.7rem",
-                      color: "var(--cei-text-muted)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {p.label}
-                  </span>
-                </div>
-              );
-            })}
           </div>
 
           {seriesLoading && (
             <div
               style={{
-                marginTop: "0.6rem",
-                fontSize: "0.78rem",
-                color: "var(--cei-text-muted)",
+                padding: "1.2rem 0.5rem",
+                display: "flex",
+                justifyContent: "center",
               }}
             >
-              Updating trend from latest readings…
+              <LoadingSpinner />
             </div>
           )}
-        </div>
 
-        {/* Opportunities card */}
-        <div className="cei-card">
-          <div style={{ marginBottom: "0.6rem" }}>
+          {!seriesLoading && trendPoints.length === 0 ? (
             <div
               style={{
-                fontSize: "0.9rem",
-                fontWeight: 600,
-              }}
-            >
-              Portfolio opportunities
-            </div>
-            <div
-              style={{
-                marginTop: "0.2rem",
                 fontSize: "0.8rem",
                 color: "var(--cei-text-muted)",
               }}
             >
-              High-level view of where CEI expects savings potential.
-              Currently mocked until the analytics engine is wired in.
+              No recent portfolio series data. Once you upload timeseries with
+              timestamps in the last 24 hours, this chart will light up.
             </div>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
-            {opportunities.map((opp) => (
-              <div
-                key={opp.id}
-                style={{
-                  borderRadius: "0.75rem",
-                  border: "1px solid rgba(148, 163, 184, 0.35)",
-                  background:
-                    "linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.7))",
-                  padding: "0.6rem 0.7rem",
-                }}
-              >
+          ) : (
+            !seriesLoading && (
+              <>
                 <div
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: "0.5rem",
+                    marginTop: "0.75rem",
+                    padding: "0.75rem",
+                    borderRadius: "0.75rem",
+                    border: "1px solid rgba(148, 163, 184, 0.5)",
+                    background:
+                      "radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.95))",
                   }}
                 >
                   <div
                     style={{
-                      fontSize: "0.85rem",
-                      fontWeight: 500,
+                      display: "flex",
+                      alignItems: "flex-end",
+                      justifyContent: "space-between",
+                      gap: "0.75rem",
+                      height: "180px",
                     }}
                   >
-                    {opp.title}
-                  </div>
-                  <span
-                    style={{
-                      fontSize: "0.7rem",
-                      padding: "0.15rem 0.55rem",
-                      borderRadius: "999px",
-                      fontWeight: 600,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.06em",
-                      background:
-                        opp.impact === "High"
-                          ? "rgba(248, 113, 113, 0.18)"
-                          : opp.impact === "Medium"
-                          ? "rgba(234, 179, 8, 0.15)"
-                          : "rgba(148, 163, 184, 0.18)",
-                      color:
-                        opp.impact === "High"
-                          ? "#fecaca"
-                          : opp.impact === "Medium"
-                          ? "#facc15"
-                          : "#e5e7eb",
-                    }}
-                  >
-                    {opp.impact}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    marginTop: "0.25rem",
-                    fontSize: "0.78rem",
-                    color: "var(--cei-text-muted)",
-                  }}
-                >
-                  Est. savings: {opp.estSavings}
-                </div>
-                <div
-                  style={{
-                    marginTop: "0.2rem",
-                    fontSize: "0.72rem",
-                    color: "var(--cei-text-muted)",
-                  }}
-                >
-                  Site scope:{" "}
-                  <span style={{ color: "var(--cei-text-main)" }}>
-                    {opp.site}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+                    {trendPoints.map((p) => {
+                      const values = trendPoints.map((t) =>
+                        typeof t.value === "number" ? t.value : 0
+                      );
+                      const max = Math.max(...values, 1); // avoid divide-by-zero
+                      const rawPct = (p.value / max) * 100;
+                      const heightPct = Math.max(rawPct, 10); // at least 10% tall
 
-      {/* Loader pill on initial load */}
-      {(summaryLoading || seriesLoading) && !summary24h && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            pointerEvents: "none",
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "flex-end",
-            padding: "1.5rem",
-          }}
-        >
+                      return (
+                        <div
+                          key={p.label + p.value}
+                          style={{
+                            flex: 1,
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            gap: "0.4rem",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: "18px",
+                              borderRadius: "999px",
+                              background:
+                                "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
+                              height: `${heightPct}%`,
+                              boxShadow: "0 6px 18px rgba(56, 189, 248, 0.45)",
+                              border: "1px solid rgba(226, 232, 240, 0.8)",
+                            }}
+                          />
+                          <span
+                            style={{
+                              fontSize: "0.7rem",
+                              color: "var(--cei-text-muted)",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {p.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Optional debug list – leave for now while we’re validating */}
+                <div
+                  style={{
+                    marginTop: "0.75rem",
+                    fontSize: "0.75rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  <div style={{ marginBottom: "0.3rem" }}>
+                    Raw points (debug view):
+                  </div>
+                  <ul style={{ listStyle: "disc", paddingLeft: "1.2rem" }}>
+                    {series?.points.map((p, idx) => (
+                      <li key={idx}>
+                        {p.ts} – {p.value}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </>
+            )
+          )}
+        </div>
+
+        {/* Roadmap / explanation card */}
+        <div className="cei-card">
           <div
             style={{
-              backgroundColor: "rgba(15,23,42,0.9)",
-              borderRadius: "999px",
-              padding: "0.3rem 0.8rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.35rem",
-              fontSize: "0.78rem",
-              color: "var(--cei-text-muted)",
+              fontSize: "0.9rem",
+              fontWeight: 600,
+              marginBottom: "0.3rem",
             }}
           >
-            <LoadingSpinner />
-            <span>Refreshing latest energy metrics…</span>
+            What this view will evolve into
           </div>
+          <p
+            style={{
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+              lineHeight: 1.5,
+            }}
+          >
+            This dashboard is currently wired to real data from your uploaded
+            CSVs. Next iterations will:
+          </p>
+          <ul
+            style={{
+              marginTop: "0.5rem",
+              paddingLeft: "1.1rem",
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+              lineHeight: 1.5,
+            }}
+          >
+            <li>Break down energy and CO₂ by site and asset class.</li>
+            <li>Surface anomalies and inefficiencies directly from analytics.</li>
+            <li>
+              Tie alerts and reports back into this view so it becomes the
+              single pane of glass for operations.
+            </li>
+          </ul>
         </div>
-      )}
+      </section>
     </div>
   );
 };

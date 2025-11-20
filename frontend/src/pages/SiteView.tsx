@@ -1,7 +1,8 @@
+// frontend/src/pages/SiteView.tsx
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
-  getSites,
+  getSite,
   getTimeseriesSummary,
   getTimeseriesSeries,
 } from "../services/api";
@@ -38,91 +39,124 @@ type SeriesResponse = {
   points: SeriesPoint[];
 };
 
+type TrendPoint = {
+  label: string;
+  value: number;
+};
+
 const SiteView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const [site, setSite] = useState<SiteRecord | null>(null);
+  const [siteLoading, setSiteLoading] = useState(false);
+  const [siteError, setSiteError] = useState<string | null>(null);
+
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+
   const [series, setSeries] = useState<SeriesResponse | null>(null);
+  const [seriesLoading, setSeriesLoading] = useState(false);
+  const [seriesError, setSeriesError] = useState<string | null>(null);
+
+  // Map numeric route ID -> timeseries site key (e.g. "site-1")
+  const siteKey = id ? `site-${id}` : undefined;
 
   useEffect(() => {
-    if (!id) {
-      setError("Missing site id in URL.");
-      return;
-    }
-
+    if (!id) return;
     let isMounted = true;
 
-    async function load() {
-      setLoading(true);
-      setError(null);
+    // 1) Site metadata
+    setSiteLoading(true);
+    setSiteError(null);
 
-      try {
-        // 1) Load all sites and find the one that matches the route param
-        const siteList = await getSites();
+    getSite(id)
+      .then((data) => {
         if (!isMounted) return;
-
-        const normalized = Array.isArray(siteList)
-          ? (siteList as SiteRecord[])
-          : [];
-        const found =
-          normalized.find((s) => String(s.id) === String(id)) || null;
-        setSite(found);
-
-        const siteKey = `site-${String(id)}`;
-
-        // 2) Load 24h summary and hourly series for this site
-        const [summaryResp, seriesResp] = await Promise.all([
-          getTimeseriesSummary({ site_id: siteKey, window_hours: 24 }),
-          getTimeseriesSeries({
-            site_id: siteKey,
-            window_hours: 24,
-            resolution: "hour",
-          }),
-        ]);
-
+        setSite(data as SiteRecord);
+      })
+      .catch((e: any) => {
         if (!isMounted) return;
+        setSiteError(e?.message || "Failed to load site.");
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setSiteLoading(false);
+      });
 
-        setSummary(summaryResp as SummaryResponse);
-        setSeries(seriesResp as SeriesResponse);
-      } catch (e: any) {
-        if (!isMounted) return;
-        const msg =
-          e?.response?.data?.detail ||
-          e?.response?.data?.error ||
-          e?.message ||
-          "Failed to load site data.";
-        setError(msg);
-      } finally {
-        if (!isMounted) return;
-        setLoading(false);
-      }
+    if (!siteKey) {
+      return () => {
+        isMounted = false;
+      };
     }
 
-    load();
+    // 2) Per-site summary – last 24h
+    setSummaryLoading(true);
+    setSummaryError(null);
+
+    getTimeseriesSummary({ site_id: siteKey, window_hours: 24 })
+      .then((data) => {
+        if (!isMounted) return;
+        setSummary(data as SummaryResponse);
+      })
+      .catch((e: any) => {
+        if (!isMounted) return;
+        setSummaryError(e?.message || "Failed to load energy summary.");
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setSummaryLoading(false);
+      });
+
+    // 3) Per-site series – last 24h, hourly
+    setSeriesLoading(true);
+    setSeriesError(null);
+
+    getTimeseriesSeries({
+      site_id: siteKey,
+      window_hours: 24,
+      resolution: "hour",
+    })
+      .then((data) => {
+        if (!isMounted) return;
+        setSeries(data as SeriesResponse);
+      })
+      .catch((e: any) => {
+        if (!isMounted) return;
+        setSeriesError(e?.message || "Failed to load energy trend.");
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setSeriesLoading(false);
+      });
 
     return () => {
       isMounted = false;
     };
-  }, [id]);
+  }, [id, siteKey]);
 
-  const siteName = site?.name || (id ? `Site ${id}` : "Site");
-  const siteLocation = site?.location || null;
+  const hasSummaryData = summary && summary.points > 0;
+  const totalKwh = hasSummaryData ? summary!.total_value : 0;
+  const formattedKwh = hasSummaryData
+    ? totalKwh >= 1000
+      ? `${(totalKwh / 1000).toFixed(2)} MWh`
+      : `${totalKwh.toFixed(1)} kWh`
+    : "—";
 
-  const totalKwh24h = summary?.total_value ?? 0;
-  const points24h = summary?.points ?? 0;
+  // Build trend points from series
+  let trendPoints: TrendPoint[] = [];
+  if (series && series.points && series.points.length > 0) {
+    trendPoints = series.points.map((p) => {
+      const d = new Date(p.ts);
+      const label = d.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      return { label, value: p.value };
+    });
+  }
 
-  const formattedTotalKwh24h =
-    totalKwh24h === 0
-      ? "—"
-      : totalKwh24h >= 1000
-      ? `${(totalKwh24h / 1000).toFixed(2)} MWh`
-      : `${totalKwh24h.toFixed(1)} kWh`;
-
-  const hasSeries = series?.points && series.points.length > 0;
+  const anyError = siteError || summaryError || seriesError;
 
   return (
     <div className="dashboard-page">
@@ -154,7 +188,7 @@ const SiteView: React.FC = () => {
               letterSpacing: "-0.02em",
             }}
           >
-            {siteName}
+            {siteLoading ? "Loading…" : site?.name || "Site"}
           </h1>
           <p
             style={{
@@ -163,39 +197,40 @@ const SiteView: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Site-level view built directly on CEI timeseries. This is your
-            per-plant operational lens for energy and carbon performance.
+            Per-site performance view. Energy metrics are filtered by{" "}
+            <code>site_id = {siteKey ?? "?"}</code> in the timeseries table.
           </p>
-          {siteLocation && (
-            <p
-              style={{
-                marginTop: "0.15rem",
-                fontSize: "0.8rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              Location: <strong>{siteLocation}</strong>
-            </p>
-          )}
         </div>
         <div
           style={{
+            textAlign: "right",
             fontSize: "0.8rem",
             color: "var(--cei-text-muted)",
-            textAlign: "right",
           }}
         >
-          <div>Window: last 24 hours</div>
+          {site?.location && (
+            <div>
+              <span style={{ fontWeight: 500 }}>Location:</span>{" "}
+              {site.location}
+            </div>
+          )}
           <div>
-            <span style={{ fontWeight: 500 }}>Site ID:</span> {id ?? "?"}
+            <span style={{ fontWeight: 500 }}>Site ID:</span> {id}
           </div>
         </div>
       </section>
 
       {/* Error banner */}
-      {error && (
+      {anyError && (
         <section style={{ marginTop: "0.75rem" }}>
-          <ErrorBanner message={error} onClose={() => setError(null)} />
+          <ErrorBanner
+            message={anyError}
+            onClose={() => {
+              setSiteError(null);
+              setSummaryError(null);
+              setSeriesError(null);
+            }}
+          />
         </section>
       )}
 
@@ -219,7 +254,7 @@ const SiteView: React.FC = () => {
               fontWeight: 600,
             }}
           >
-            {loading ? "…" : formattedTotalKwh24h}
+            {summaryLoading ? "…" : formattedKwh}
           </div>
           <div
             style={{
@@ -228,13 +263,20 @@ const SiteView: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            {loading
-              ? "Loading per-site energy…"
-              : points24h > 0
-              ? `Aggregated from ${points24h.toLocaleString()} readings in the last ${
-                  summary!.window_hours
-                } hours.`
-              : "No recent data for this site. Ensure your CSV uses matching site_id keys."}
+            {hasSummaryData ? (
+              <>
+                Aggregated from{" "}
+                <strong>{summary!.points.toLocaleString()} readings</strong> in
+                the last {summary!.window_hours} hours for this site.
+              </>
+            ) : summaryLoading ? (
+              "Loading per-site energy data…"
+            ) : (
+              <>
+                No recent data for this site. Ensure your uploaded timeseries
+                includes <code>site_id = {siteKey}</code>.
+              </>
+            )}
           </div>
         </div>
 
@@ -252,15 +294,11 @@ const SiteView: React.FC = () => {
           <div
             style={{
               marginTop: "0.35rem",
-              fontSize: "1.2rem",
+              fontSize: "1.4rem",
               fontWeight: 600,
             }}
           >
-            {loading
-              ? "…"
-              : points24h > 0
-              ? `${points24h.toLocaleString()} points`
-              : "No data in last 24h"}
+            {hasSummaryData ? summary!.points.toLocaleString() : "—"}
           </div>
           <div
             style={{
@@ -269,22 +307,52 @@ const SiteView: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Simple coverage indicator based on whether we see any timeseries for
-            this site in the last 24 hours.
+            Number of records for this site in the selected window.
+          </div>
+        </div>
+
+        <div className="cei-card">
+          <div
+            style={{
+              fontSize: "0.75rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Status
+          </div>
+          <div
+            style={{
+              marginTop: "0.35rem",
+              fontSize: "1.2rem",
+              fontWeight: 600,
+            }}
+          >
+            {hasSummaryData ? "Active" : "No recent data"}
+          </div>
+          <div
+            style={{
+              marginTop: "0.25rem",
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Simple heuristic status based on whether we see any recent
+            timeseries for this site.
           </div>
         </div>
       </section>
 
-      {/* Series table */}
-      <section>
+      {/* Main grid: trend + metadata */}
+      <section className="dashboard-main-grid">
+        {/* Trend card */}
         <div className="cei-card">
           <div
             style={{
-              marginBottom: "0.7rem",
               display: "flex",
               justifyContent: "space-between",
-              alignItems: "center",
-              gap: "0.75rem",
+              marginBottom: "0.7rem",
             }}
           >
             <div>
@@ -294,7 +362,7 @@ const SiteView: React.FC = () => {
                   fontWeight: 600,
                 }}
               >
-                Hourly energy – last 24 hours
+                Site energy trend – last 24 hours
               </div>
               <div
                 style={{
@@ -303,8 +371,8 @@ const SiteView: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                Hour-by-hour breakdown used today for validation. Later we can
-                plug this into richer visualizations and anomaly detection.
+                Per-site series aggregated by hour. Uses{" "}
+                <code>site_id = {siteKey}</code> from timeseries.
               </div>
             </div>
             <div
@@ -317,7 +385,7 @@ const SiteView: React.FC = () => {
             </div>
           </div>
 
-          {loading && (
+          {seriesLoading && (
             <div
               style={{
                 padding: "1.2rem 0.5rem",
@@ -329,37 +397,186 @@ const SiteView: React.FC = () => {
             </div>
           )}
 
-          {!loading && !hasSeries && (
+          {!seriesLoading && trendPoints.length === 0 ? (
+            <div
+              style={{
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              No recent per-site series data. Once your timeseries has matching{" "}
+              <code>site_id = {siteKey}</code> within the last 24 hours, this
+              chart will light up.
+            </div>
+          ) : (
+            !seriesLoading && (
+              <>
+                <div
+                  style={{
+                    marginTop: "0.75rem",
+                    padding: "0.75rem",
+                    borderRadius: "0.75rem",
+                    border: "1px solid rgba(148, 163, 184, 0.5)",
+                    background:
+                      "radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.95))",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-end",
+                      justifyContent: "space-between",
+                      gap: "0.75rem",
+                      height: "180px",
+                    }}
+                  >
+                    {trendPoints.map((p) => {
+                      const values = trendPoints.map((t) =>
+                        typeof t.value === "number" ? t.value : 0
+                      );
+                      const max = Math.max(...values, 1);
+                      const rawPct = (p.value / max) * 100;
+                      const heightPct = Math.max(rawPct, 10);
+
+                      return (
+                        <div
+                          key={p.label + p.value}
+                          style={{
+                            flex: 1,
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            gap: "0.4rem",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: "18px",
+                              borderRadius: "999px",
+                              background:
+                                "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
+                              height: `${heightPct}%`,
+                              boxShadow:
+                                "0 6px 18px rgba(56, 189, 248, 0.45)",
+                              border:
+                                "1px solid rgba(226, 232, 240, 0.8)",
+                            }}
+                          />
+                          <span
+                            style={{
+                              fontSize: "0.7rem",
+                              color: "var(--cei-text-muted)",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {p.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Debug list of raw points – keep while validating */}
+                <div
+                  style={{
+                    marginTop: "0.75rem",
+                    fontSize: "0.75rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  <div style={{ marginBottom: "0.3rem" }}>
+                    Raw points (debug view):
+                  </div>
+                  <ul style={{ listStyle: "disc", paddingLeft: "1.2rem" }}>
+                    {series?.points.map((p, idx) => (
+                      <li key={idx}>
+                        {p.ts} – {p.value}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </>
+            )
+          )}
+        </div>
+
+        {/* Metadata card */}
+        <div className="cei-card">
+          <div
+            style={{
+              marginBottom: "0.6rem",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "0.9rem",
+                fontWeight: 600,
+              }}
+            >
+              Site metadata
+            </div>
+            <div
+              style={{
+                marginTop: "0.2rem",
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Basic descriptive information for this site. We’ll extend this
+              with tags, baseline, and other fields later.
+            </div>
+          </div>
+
+          {siteLoading && (
+            <div
+              style={{
+                padding: "1.2rem 0.5rem",
+                display: "flex",
+                justifyContent: "center",
+              }}
+            >
+              <LoadingSpinner />
+            </div>
+          )}
+
+          {!siteLoading && site && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr)",
+                rowGap: "0.4rem",
+                fontSize: "0.85rem",
+              }}
+            >
+              <div>
+                <span style={{ color: "var(--cei-text-muted)" }}>Name:</span>{" "}
+                <span>{site.name}</span>
+              </div>
+              <div>
+                <span style={{ color: "var(--cei-text-muted)" }}>
+                  Location:
+                </span>{" "}
+                <span>{site.location || "—"}</span>
+              </div>
+              <div>
+                <span style={{ color: "var(--cei-text-muted)" }}>
+                  Internal ID:
+                </span>{" "}
+                <span>{site.id}</span>
+              </div>
+            </div>
+          )}
+
+          {!siteLoading && !site && !siteError && (
             <div
               style={{
                 fontSize: "0.85rem",
                 color: "var(--cei-text-muted)",
               }}
             >
-              No hourly timeseries data available for this site in the last 24
-              hours. Once ingest pipelines provide data, you&apos;ll see each
-              hour listed here.
-            </div>
-          )}
-
-          {!loading && hasSeries && (
-            <div style={{ overflowX: "auto" }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Timestamp</th>
-                    <th>Energy</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {series!.points.map((p, idx) => (
-                    <tr key={`${p.ts}-${idx}`}>
-                      <td>{p.ts}</td>
-                      <td>{p.value.toFixed(2)} kWh</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              Site not found.
             </div>
           )}
         </div>

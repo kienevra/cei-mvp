@@ -14,6 +14,7 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
+
 def upgrade():
     op.create_table(
         "staging_upload",
@@ -36,10 +37,24 @@ def upgrade():
         sa.Column("timestamp", sa.DateTime(), nullable=False),
         sa.Column("value", sa.Float(), nullable=False),
         sa.Column("unit", sa.String(), nullable=True),
-        sa.Column("source_staging_id", sa.String(), sa.ForeignKey("staging_upload.id"), nullable=True),
+        sa.Column(
+            "source_staging_id",
+            sa.String(),
+            sa.ForeignKey("staging_upload.id"),
+            nullable=True,
+        ),
         sa.Column("created_at", sa.DateTime(), nullable=True),
     )
-    op.create_unique_constraint("uq_sensor_timestamp", "timeseries_record", ["sensor_external_id", "timestamp"])
+
+    # Add unique constraint only on databases that support ALTER TABLE properly.
+    # SQLite cannot ALTER constraints the same way Postgres can, so we skip it there.
+    bind = op.get_bind()
+    if bind.dialect.name != "sqlite":
+        op.create_unique_constraint(
+            "uq_sensor_timestamp",
+            "timeseries_record",
+            ["sensor_external_id", "timestamp"],
+        )
 
 
 def downgrade():
