@@ -1,17 +1,43 @@
+// frontend/src/components/TopNav.tsx
 import React from "react";
 import { useAuth } from "../hooks/useAuth";
 
-/**
- * Top navigation bar for CEI app.
- */
 const TopNav: React.FC = () => {
-  const { logout } = useAuth();
+  const { isAuthenticated, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+  };
+
   return (
-    <header className="bg-white shadow flex items-center justify-between px-6 py-3">
-      <div className="font-bold text-lg">Carbon Efficiency Intelligence</div>
-      <button className="text-sm text-blue-600" onClick={logout}>
-        Logout
-      </button>
+    <header className="cei-topnav">
+      <div className="cei-topnav-inner">
+        {/* Brand */}
+        <div className="cei-topnav-brand">
+          <span className="cei-topnav-brand-main">CEI</span>
+          <span className="cei-topnav-brand-sub">
+            Carbon Efficiency Intelligence
+          </span>
+        </div>
+
+        {/* Right side – just logout for now */}
+        <div className="cei-topnav-right">
+          {isAuthenticated && (
+            <button
+              type="button"
+              className="cei-btn cei-btn-ghost"
+              style={{
+                padding: "0.3rem 0.9rem",
+                fontSize: "0.8rem",
+                borderRadius: "999px",
+              }}
+              onClick={handleLogout}
+            >
+              Logout
+            </button>
+          )}
+        </div>
+      </div>
     </header>
   );
 };
