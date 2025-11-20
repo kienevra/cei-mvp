@@ -1,12 +1,8 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  ReactNode,
-} from "react";
+// frontend/src/hooks/useAuth.tsx
+import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
+import axios, { AxiosError } from "axios";
 
 type LoginRequest = {
   username: string;
@@ -23,55 +19,66 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [token, setToken] = useState<string | null>(
-    typeof window !== "undefined" ? localStorage.getItem("cei_token") : null
-  );
+  const [token, setTokenState] = useState<string | null>(localStorage.getItem("cei_token"));
   const navigate = useNavigate();
 
-  // Keep token in sync with localStorage on initial load
+  // On mount, sync with localStorage once.
   useEffect(() => {
-    const existing = localStorage.getItem("cei_token");
-    if (existing && !token) {
-      setToken(existing);
-    }
-  }, [token]);
+    setTokenState(localStorage.getItem("cei_token"));
+  }, []);
 
-  const login = async ({ username, password }: LoginRequest) => {
+  const login = async (data: LoginRequest) => {
+    // Send as x-www-form-urlencoded because backend uses OAuth2PasswordRequestForm
     const body = new URLSearchParams();
-    body.append("username", username);
-    body.append("password", password);
+    body.set("username", data.username);
+    body.set("password", data.password);
 
-    const res = await api.post("/auth/login", body, {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    });
+    try {
+      const res = await api.post("/auth/login", body, {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      });
 
-    const accessToken = res.data?.access_token;
-    if (!accessToken) {
-      throw new Error("Invalid login response");
+      const acc = res.data?.access_token as string | undefined;
+      if (!acc) {
+        throw new Error("Invalid login response from server.");
+      }
+
+      localStorage.setItem("cei_token", acc);
+      setTokenState(acc);
+      navigate("/");
+    } catch (err: any) {
+      let message = "Login failed. Please try again.";
+
+      if (axios.isAxiosError(err)) {
+        const resp = err.response;
+
+        if (resp) {
+          if (resp.status === 401) {
+            message = "Incorrect email or password.";
+          } else if (resp.status === 429) {
+            message = "Too many attempts. Please wait a bit before trying again.";
+          } else if (typeof resp.data === "object" && resp.data && (resp.data as any).detail) {
+            message = String((resp.data as any).detail);
+          }
+        } else if (err.message) {
+          message = err.message;
+        }
+      } else if (err instanceof Error && err.message) {
+        message = err.message;
+      }
+
+      throw new Error(message);
     }
-
-    localStorage.setItem("cei_token", accessToken);
-    setToken(accessToken);
-
-    // ✅ Always go to dashboard root after login
-    navigate("/", { replace: true });
   };
 
   const logout = () => {
     localStorage.removeItem("cei_token");
-    setToken(null);
-    navigate("/login", { replace: true });
+    setTokenState(null);
+    navigate("/login");
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        isAuthenticated: !!token,
-        token,
-        login,
-        logout,
-      }}
-    >
+    <AuthContext.Provider value={{ isAuthenticated: !!token, token, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
@@ -79,8 +86,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error("useAuth must be used inside AuthProvider");
-  }
+  if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
   return ctx;
 }

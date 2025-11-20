@@ -1,76 +1,69 @@
-import React, { useState, useMemo } from "react";
+// frontend/src/pages/Login.tsx
+import React, { useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
-const Login: React.FC = () => {
+export default function Login() {
   const { login } = useAuth();
   const location = useLocation();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionMessage, setSessionMessage] = useState<string | null>(null);
 
-  const sessionMessage = useMemo(() => {
+  // One-shot banner for expired sessions
+  useEffect(() => {
     const params = new URLSearchParams(location.search);
     const reason = params.get("reason");
     if (reason === "session_expired") {
-      return "Your session has expired. Please sign in again to continue.";
+      setSessionMessage("Your session expired. Please sign in again.");
+      // Clean the URL so the banner doesn't stick forever
+      const cleanUrl = location.pathname; // usually "/login"
+      window.history.replaceState({}, "", cleanUrl);
+    } else {
+      setSessionMessage(null);
     }
-    return null;
-  }, [location.search]);
+  }, [location.pathname, location.search]);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setSessionMessage(null);
+    setLoading(true);
 
-    if (!email.trim() || !password) {
-      setError("Email and password are required.");
-      return;
-    }
-
-    setSubmitting(true);
     try {
-      await login({ username: email.trim(), password });
-      // on success, useAuth will navigate to "/"
+      await login({ username: email, password });
+      // on success, useAuth.login navigates to "/"
     } catch (err: any) {
-      setError("Login failed. Check your credentials.");
+      setError(err?.message || "Login failed. Please try again.");
     } finally {
-      setSubmitting(false);
+      // this MUST run even on errors so the button never stays stuck
+      setLoading(false);
     }
   }
 
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <div
-          style={{
-            fontSize: "0.8rem",
-            textTransform: "uppercase",
-            letterSpacing: "0.1em",
-            color: "var(--cei-text-muted)",
-            marginBottom: "0.4rem",
-          }}
-        >
-          Carbon Efficiency Intelligence
+        <div style={{ marginBottom: "1rem" }}>
+          <div className="auth-title">Sign in to CEI</div>
+          <div className="auth-subtitle">
+            Enter your credentials to access your carbon &amp; energy intelligence dashboard.
+          </div>
         </div>
-
-        <h1 className="auth-title">Sign in</h1>
-        <p className="auth-subtitle">
-          Access your CEI workspace to monitor energy and carbon performance
-          across sites.
-        </p>
 
         {sessionMessage && (
           <div
             style={{
               marginBottom: "0.75rem",
               fontSize: "0.8rem",
-              padding: "0.55rem 0.7rem",
+              color: "#fbbf24",
+              background: "rgba(250, 204, 21, 0.08)",
+              border: "1px solid rgba(250, 204, 21, 0.5)",
               borderRadius: "0.75rem",
-              border: "1px solid rgba(148, 163, 184, 0.6)",
-              background: "rgba(15, 23, 42, 0.9)",
-              color: "var(--cei-text-muted)",
+              padding: "0.5rem 0.7rem",
             }}
           >
             {sessionMessage}
@@ -82,26 +75,28 @@ const Login: React.FC = () => {
             style={{
               marginBottom: "0.75rem",
               fontSize: "0.8rem",
-              padding: "0.55rem 0.7rem",
+              color: "var(--cei-text-danger)",
+              background: "rgba(239, 68, 68, 0.08)",
+              border: "1px solid rgba(239, 68, 68, 0.5)",
               borderRadius: "0.75rem",
-              border: "1px solid rgba(239, 68, 68, 0.6)",
-              background: "rgba(127, 29, 29, 0.4)",
-              color: "#fecaca",
+              padding: "0.5rem 0.7rem",
             }}
           >
             {error}
           </div>
         )}
 
-        <form className="auth-form" onSubmit={handleSubmit}>
+        <form className="auth-form" onSubmit={submit}>
           <div>
             <label htmlFor="email">Email</label>
             <input
               id="email"
-              autoComplete="email"
+              type="email"
+              autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@example.com"
+              placeholder="you@example.com"
+              required
             />
           </div>
 
@@ -114,21 +109,19 @@ const Login: React.FC = () => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
+              required
             />
           </div>
 
           <button
             type="submit"
             className="cei-btn cei-btn-primary"
-            disabled={submitting}
-            style={{ marginTop: "0.3rem", width: "100%" }}
+            disabled={loading}
           >
-            {submitting ? "Signing in…" : "Sign in"}
+            {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
       </div>
     </div>
   );
-};
-
-export default Login;
+}
