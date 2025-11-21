@@ -1,3 +1,4 @@
+// frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useState } from "react";
 import { getTimeseriesSummary, getTimeseriesSeries, getSites } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -109,13 +110,17 @@ const Dashboard: React.FC = () => {
       : `${totalKwh.toFixed(1)} kWh`
     : "—";
 
-  // Build trend points from API data (force numeric) + 24h labels
+  // Build trend points from API data (force numeric)
   let trendPoints: TrendPoint[] = [];
   if (series && series.points && series.points.length > 0) {
     trendPoints = series.points.map((p) => {
       const d = new Date(p.ts);
-      const hour = d.getHours(); // 0–23
-      const label = hour.toString().padStart(2, "0"); // "00", "01", ..., "23"
+      // 24-hour clock, every bar gets a label
+      const label = d.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
       const numericValue = Number(p.value);
       return {
         label,
@@ -129,18 +134,15 @@ const Dashboard: React.FC = () => {
   const maxVal = hasTrend ? Math.max(...trendValues) : 0;
   const minVal = hasTrend ? Math.min(...trendValues) : 0;
 
+  // Bar height in pixels (avoid percentage weirdness)
+  const maxBarHeight = 160; // px
+
   // Chart content width: fixed per bar, with a minimum
-  const barPixelWidth = 32; // px per bar
+  const barPixelWidth = 40; // px per bar
   const minContentWidth = 600; // px minimum
   const chartContentWidth = hasTrend
     ? Math.max(trendPoints.length * barPixelWidth, minContentWidth)
     : minContentWidth;
-
-  // Pixel-based bar scaling
-  const chartMin = hasTrend ? Math.min(...trendValues) : 0;
-  const chartMax = hasTrend ? Math.max(...trendValues) : 0;
-  const chartSpan = chartMax - chartMin || 1; // avoid 0 division
-  const chartInnerHeightPx = 160; // usable vertical range
 
   // High-level summary of the trend
   let trendSummary: string | null = null;
@@ -151,7 +153,7 @@ const Dashboard: React.FC = () => {
     const peakLabel = trendPoints[peakIndex]?.label ?? "—";
     const windowHours = summary!.window_hours || 24;
 
-    trendSummary = `Peak hour: ${peakLabel}:00 at ${maxVal.toFixed(
+    trendSummary = `Peak hour: ${peakLabel} at ${maxVal.toFixed(
       1
     )} kWh · Average: ${avgVal.toFixed(
       1
@@ -338,7 +340,10 @@ const Dashboard: React.FC = () => {
       {/* Main grid: trend + commentary */}
       <section className="dashboard-main-grid">
         {/* Trend card */}
-        <div className="cei-card" style={{ maxWidth: "100%", overflow: "hidden" }}>
+        <div
+          className="cei-card"
+          style={{ maxWidth: "100%", overflow: "hidden" }}
+        >
           <div
             style={{
               display: "flex",
@@ -427,17 +432,18 @@ const Dashboard: React.FC = () => {
                   }}
                 >
                   {trendPoints.map((p, idx) => {
-                    const v = p.value;
-                    const normalized = (v - chartMin) / chartSpan;
-                    const barHeightPx =
-                      8 + normalized * (chartInnerHeightPx - 8); // min 8px, max ~160px
+                    const val = p.value;
+                    const heightPx =
+                      !hasTrend || maxVal <= 0
+                        ? 0
+                        : (val / maxVal) * maxBarHeight; // proportional in px
 
                     return (
                       <div
                         key={`${idx}-${p.label}`}
                         style={{
                           flex: "0 0 auto",
-                          width: "28px",
+                          width: "32px",
                           display: "flex",
                           flexDirection: "column",
                           alignItems: "center",
@@ -453,22 +459,24 @@ const Dashboard: React.FC = () => {
                             whiteSpace: "nowrap",
                           }}
                         >
-                          {v.toFixed(0)}
+                          {val.toFixed(0)}
                         </span>
                         <div
                           style={{
                             width: "100%",
-                            borderRadius: "4px", // more rectangular
+                            borderRadius: "4px",
                             background:
                               "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
-                            height: `${barHeightPx}px`,
-                            boxShadow: "0 4px 10px rgba(56, 189, 248, 0.35)",
-                            border: "1px solid rgba(148, 163, 184, 0.8)",
+                            height: `${heightPx}px`,
+                            boxShadow:
+                              "0 6px 18px rgba(56, 189, 248, 0.45)",
+                            border:
+                              "1px solid rgba(226, 232, 240, 0.8)",
                           }}
                         />
                         <span
                           style={{
-                            fontSize: "0.6rem",
+                            fontSize: "0.65rem",
                             color: "var(--cei-text-muted)",
                             whiteSpace: "nowrap",
                           }}

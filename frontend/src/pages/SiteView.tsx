@@ -146,9 +146,11 @@ const SiteView: React.FC = () => {
   if (series && series.points && series.points.length > 0) {
     trendPoints = series.points.map((p) => {
       const d = new Date(p.ts);
+      // 24-hour clock, every bar gets a label
       const label = d.toLocaleTimeString(undefined, {
         hour: "2-digit",
         minute: "2-digit",
+        hour12: false,
       });
       const numericValue = Number(p.value);
       return {
@@ -163,19 +165,15 @@ const SiteView: React.FC = () => {
   const maxVal = hasTrend ? Math.max(...trendValues) : 0;
   const minVal = hasTrend ? Math.min(...trendValues) : 0;
 
+  // Bar height in pixels to avoid percent quirks
+  const maxBarHeight = 160; // px
+
   // Chart inner width
   const barPixelWidth = 40;
   const minContentWidth = 600;
   const chartContentWidth = hasTrend
     ? Math.max(trendPoints.length * barPixelWidth, minContentWidth)
     : minContentWidth;
-
-  // Limit label density
-  const maxLabels = 24; // we show every hour in 24h format; still keep a cap in case of weird data
-  const labelEvery =
-    trendPoints.length > maxLabels
-      ? Math.ceil(trendPoints.length / maxLabels)
-      : 1;
 
   // Concise trend summary for this site
   let trendSummary: string | null = null;
@@ -255,10 +253,6 @@ const SiteView: React.FC = () => {
             textAlign: "right",
             fontSize: "0.8rem",
             color: "var(--cei-text-muted)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-end",
-            gap: "0.35rem",
           }}
         >
           {site?.location && (
@@ -270,15 +264,12 @@ const SiteView: React.FC = () => {
           <div>
             <span style={{ fontWeight: 500 }}>Site ID:</span> {id}
           </div>
-          <div>
+          {/* Upload button for this site */}
+          <div style={{ marginTop: "0.5rem" }}>
             <Link
               to="/upload"
               className="cei-btn cei-btn-primary"
-              style={{
-                fontSize: "0.78rem",
-                padding: "0.35rem 0.9rem",
-                textDecoration: "none",
-              }}
+              style={{ fontSize: "0.75rem", padding: "0.4rem 0.9rem" }}
             >
               Upload data
             </Link>
@@ -505,10 +496,10 @@ const SiteView: React.FC = () => {
                 >
                   {trendPoints.map((p, idx) => {
                     const val = p.value;
-                    const heightPct =
-                      !hasTrend || maxVal <= 0 ? 0 : (val / maxVal) * 100;
-
-                    const showLabel = idx % labelEvery === 0;
+                    const heightPx =
+                      !hasTrend || maxVal <= 0
+                        ? 0
+                        : (val / maxVal) * maxBarHeight;
 
                     return (
                       <div
@@ -536,10 +527,10 @@ const SiteView: React.FC = () => {
                         <div
                           style={{
                             width: "100%",
-                            borderRadius: "0.3rem",
+                            borderRadius: "4px",
                             background:
                               "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
-                            height: `${heightPct}%`,
+                            height: `${heightPx}px`,
                             boxShadow:
                               "0 6px 18px rgba(56, 189, 248, 0.45)",
                             border:
@@ -551,7 +542,6 @@ const SiteView: React.FC = () => {
                             fontSize: "0.65rem",
                             color: "var(--cei-text-muted)",
                             whiteSpace: "nowrap",
-                            visibility: showLabel ? "visible" : "hidden",
                           }}
                         >
                           {p.label}
