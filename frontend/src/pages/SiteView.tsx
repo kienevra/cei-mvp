@@ -1,11 +1,10 @@
-// frontend/src/pages/SiteView.tsx
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   getSite,
   getTimeseriesSummary,
   getTimeseriesSeries,
-  getSiteInsights,
+  getSiteInsights, // reserved for backend insights later
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
@@ -45,47 +44,6 @@ type TrendPoint = {
   value: number;
 };
 
-// Shape of insights from backend – defensive/optional
-type SiteInsightsOpportunity = {
-  id?: string;
-  title?: string;
-  summary?: string;
-  impact_estimate_kwh_per_year?: number | null;
-  impact_estimate_pct?: number | null;
-  confidence?: string | null;
-  category?: string | null;
-};
-
-type SiteInsightsBenchmark = {
-  metric_name?: string;
-  value?: number;
-  benchmark?: number | null;
-  percent_of_benchmark?: number | null;
-  flagged?: boolean;
-  recommendation?: string;
-};
-
-type SiteInsights = {
-  site_id?: number | string;
-  window_days?: number;
-  kpis?: {
-    energy_kwh?: number;
-    avg_power_kw?: number;
-    peak_kw?: number;
-    load_factor?: number | null;
-    window_hours?: number;
-    window_start?: string;
-    window_end?: string;
-  };
-  benchmark?: SiteInsightsBenchmark | null;
-  anomalies?: {
-    method?: string;
-    anomaly_indices?: number[];
-    anomalies?: number[];
-  } | null;
-  opportunities?: SiteInsightsOpportunity[];
-};
-
 const SiteView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
 
@@ -100,11 +58,6 @@ const SiteView: React.FC = () => {
   const [series, setSeries] = useState<SeriesResponse | null>(null);
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [seriesError, setSeriesError] = useState<string | null>(null);
-
-  // New: site-level insights from backend analytics
-  const [insights, setInsights] = useState<SiteInsights | null>(null);
-  const [insightsLoading, setInsightsLoading] = useState(false);
-  const [insightsError, setInsightsError] = useState<string | null>(null);
 
   // Map numeric route ID -> timeseries site key (e.g. "site-1")
   const siteKey = id ? `site-${id}` : undefined;
@@ -174,23 +127,6 @@ const SiteView: React.FC = () => {
         setSeriesLoading(false);
       });
 
-    // New: per-site analytics insights (e.g. 7-day window)
-    setInsightsLoading(true);
-    setInsightsError(null);
-    getSiteInsights(id, 7)
-      .then((data) => {
-        if (!isMounted) return;
-        setInsights(data as SiteInsights);
-      })
-      .catch((e: any) => {
-        if (!isMounted) return;
-        setInsightsError(e?.message || "Failed to load site insights.");
-      })
-      .finally(() => {
-        if (!isMounted) return;
-        setInsightsLoading(false);
-      });
-
     return () => {
       isMounted = false;
     };
@@ -204,62 +140,71 @@ const SiteView: React.FC = () => {
       : `${totalKwh.toFixed(1)} kWh`
     : "—";
 
-  // Build trend points from API data
+  // Build trend points from API data (force numeric) + 24h label
   let trendPoints: TrendPoint[] = [];
   if (series && series.points && series.points.length > 0) {
     trendPoints = series.points.map((p) => {
       const d = new Date(p.ts);
-      const label = d.toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      return { label, value: p.value };
+      const hour = d.getHours();
+      const label = hour.toString().padStart(2, "0"); // 24h: "00".."23"
+      const numericValue = Number(p.value);
+      return {
+        label,
+        value: Number.isFinite(numericValue) ? numericValue : 0,
+      };
     });
   }
 
-  const anyError = siteError || summaryError || seriesError || insightsError;
+  const trendValues = trendPoints.map((p) => p.value);
+  const hasTrend = trendValues.length > 0;
+  const maxVal = hasTrend ? Math.max(...trendValues) : 0;
+  const minVal = hasTrend ? Math.min(...trendValues) : 0;
 
-  // Precompute max value once for chart
-  const trendMaxValue =
-    trendPoints.length > 0
-      ? Math.max(...trendPoints.map((t) => (typeof t.value === "number" ? t.value : 0)), 1)
-      : 1;
+  // Chart inner width
+  const barPixelWidth = 32;
+  const minContentWidth = 600;
+  const chartContentWidth = hasTrend
+    ? Math.max(trendPoints.length * barPixelWidth, minContentWidth)
+    : minContentWidth;
 
-  // --- Insights: benchmark + opportunities ---
+  // Pixel-based scaling
+  const chartMin = hasTrend ? Math.min(...trendValues) : 0;
+  const chartMax = hasTrend ? Math.max(...trendValues) : 0;
+  const chartSpan = chartMax - chartMin || 1;
+  const chartInnerHeightPx = 160;
 
-  const benchmark = insights?.benchmark || null;
-  const benchmarkPct = benchmark?.percent_of_benchmark ?? null;
-  const benchmarkFlagged = !!benchmark?.flagged;
+  // Concise trend summary for this site
+  let trendSummary: string | null = null;
+  if (hasTrend && hasSummaryData) {
+    const sumVal = trendValues.reduce((acc, v) => acc + v, 0);
+    const avgVal = sumVal / trendValues.length;
+    const peakIndex = trendValues.indexOf(maxVal);
+    const peakLabel = trendPoints[peakIndex]?.label ?? "—";
+    const windowHours = summary!.window_hours || 24;
 
-  let benchmarkPillClass = "cei-pill-info";
-  let benchmarkLabel = "No benchmark yet";
-  if (benchmarkPct !== null) {
-    if (benchmarkPct >= 130) {
-      benchmarkPillClass = "cei-pill-critical";
-      benchmarkLabel = `${benchmarkPct.toFixed(0)}% of baseline · critical`;
-    } else if (benchmarkPct >= 110) {
-      benchmarkPillClass = "cei-pill-warning";
-      benchmarkLabel = `${benchmarkPct.toFixed(0)}% of baseline · above baseline`;
-    } else {
-      benchmarkPillClass = "cei-pill-info";
-      benchmarkLabel = `${benchmarkPct.toFixed(0)}% of baseline · within range`;
-    }
+    trendSummary = `Peak hour at this site: ${peakLabel}:00 with ${maxVal.toFixed(
+      1
+    )} kWh · Average: ${avgVal.toFixed(
+      1
+    )} kWh/h over ${windowHours.toFixed(
+      0
+    )} hours · Min hourly: ${minVal.toFixed(1)} kWh/h.`;
   }
 
-  const opportunitiesRaw = insights?.opportunities || [];
-  const topOpportunities = opportunitiesRaw.slice(0, 3);
+  const anyError = siteError || summaryError || seriesError;
 
-  // Fallback: heuristic suggestions if we don't yet have structured opportunities
-  const heuristicSuggestions = buildSiteEfficiencySuggestions(
+  // Site-level efficiency suggestions card (frontend-only heuristics)
+  const suggestions = buildSiteEfficiencySuggestions(
     hasSummaryData ? totalKwh : null,
     hasSummaryData ? summary!.points : null,
     site?.name || null
   );
 
-  const hasStructuredOpps = topOpportunities.length > 0;
-
   return (
-    <div className="dashboard-page">
+    <div
+      className="dashboard-page"
+      style={{ maxWidth: "100vw", overflowX: "hidden" }}
+    >
       {/* Header */}
       <section
         style={{
@@ -329,7 +274,6 @@ const SiteView: React.FC = () => {
               setSiteError(null);
               setSummaryError(null);
               setSeriesError(null);
-              setInsightsError(null);
             }}
           />
         </section>
@@ -447,7 +391,7 @@ const SiteView: React.FC = () => {
 
       {/* Main grid: trend + metadata */}
       <section className="dashboard-main-grid">
-        <div className="cei-card">
+        <div className="cei-card" style={{ maxWidth: "100%", overflow: "hidden" }}>
           <div
             style={{
               display: "flex",
@@ -497,7 +441,7 @@ const SiteView: React.FC = () => {
             </div>
           )}
 
-          {!seriesLoading && trendPoints.length === 0 ? (
+          {!seriesLoading && !hasTrend ? (
             <div
               style={{
                 fontSize: "0.8rem",
@@ -509,55 +453,75 @@ const SiteView: React.FC = () => {
             </div>
           ) : (
             <>
+              {/* Local scroll container for this site chart */}
               <div
                 style={{
                   marginTop: "0.75rem",
-                  padding: "0.75rem",
                   borderRadius: "0.75rem",
                   border: "1px solid rgba(148, 163, 184, 0.5)",
                   background:
                     "radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.95))",
+                  padding: "0.75rem",
+                  boxSizing: "border-box",
+                  maxWidth: "100%",
+                  overflowX: "auto",
+                  overflowY: "hidden",
                 }}
               >
                 <div
                   style={{
                     display: "flex",
                     alignItems: "flex-end",
-                    justifyContent: "space-between",
-                    gap: "0.75rem",
-                    height: "180px",
+                    justifyContent: "flex-start",
+                    gap: "0.5rem",
+                    height: "200px",
+                    width: `${chartContentWidth}px`,
+                    boxSizing: "border-box",
                   }}
                 >
-                  {trendPoints.map((p) => {
-                    const rawPct = (p.value / trendMaxValue) * 100;
-                    const heightPct = Math.max(rawPct, 10); // min bar height
+                  {trendPoints.map((p, idx) => {
+                    const v = p.value;
+                    const normalized = (v - chartMin) / chartSpan;
+                    const barHeightPx =
+                      8 + normalized * (chartInnerHeightPx - 8);
 
                     return (
                       <div
-                        key={p.label + p.value}
+                        key={`${idx}-${p.label}`}
                         style={{
-                          flex: 1,
+                          flex: "0 0 auto",
+                          width: "28px",
                           display: "flex",
                           flexDirection: "column",
                           alignItems: "center",
                           justifyContent: "flex-end",
-                          gap: "0.4rem",
+                          gap: "0.25rem",
                         }}
                       >
+                        {/* Numeric value so you can visually confirm proportionality */}
+                        <span
+                          style={{
+                            fontSize: "0.6rem",
+                            color: "var(--cei-text-muted)",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {v.toFixed(0)}
+                        </span>
                         <div
                           style={{
-                            width: "18px",
-                            borderRadius: "999px",
+                            width: "100%",
+                            borderRadius: "4px", // more rectangular
                             background:
                               "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
-                            height: `${heightPct}%`,
-                            boxShadow: "0 6px 18px rgba(56, 189, 248, 0.45)",
-                            border: "1px solid rgba(226, 232, 240, 0.8)",
+                            height: `${barHeightPx}px`,
+                            boxShadow: "0 4px 10px rgba(56, 189, 248, 0.35)",
+                            border: "1px solid rgba(148, 163, 184, 0.8)",
                           }}
                         />
                         <span
                           style={{
-                            fontSize: "0.7rem",
+                            fontSize: "0.6rem",
                             color: "var(--cei-text-muted)",
                             whiteSpace: "nowrap",
                           }}
@@ -570,25 +534,18 @@ const SiteView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Debug list of raw points – optional */}
-              <div
-                style={{
-                  marginTop: "0.75rem",
-                  fontSize: "0.75rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
-                <div style={{ marginBottom: "0.3rem" }}>
-                  Raw points (debug view):
+              {/* Short summary instead of raw debug list */}
+              {trendSummary && (
+                <div
+                  style={{
+                    marginTop: "0.75rem",
+                    fontSize: "0.8rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  {trendSummary}
                 </div>
-                <ul style={{ listStyle: "disc", paddingLeft: "1.2rem" }}>
-                  {series?.points.map((p, idx) => (
-                    <li key={idx}>
-                      {p.ts} – {p.value}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              )}
             </>
           )}
         </div>
@@ -672,185 +629,61 @@ const SiteView: React.FC = () => {
         </div>
       </section>
 
-      {/* Site-level efficiency opportunities card (tightened) */}
+      {/* Site-level efficiency opportunities card */}
       <section>
         <div className="cei-card">
           <div
             style={{
               marginBottom: "0.6rem",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: "0.75rem",
             }}
           >
-            <div>
-              <div
-                style={{
-                  fontSize: "0.9rem",
-                  fontWeight: 600,
-                }}
-              >
-                Efficiency opportunities for this site
-              </div>
-              <div
-                style={{
-                  marginTop: "0.2rem",
-                  fontSize: "0.8rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
-                Based on the recent energy profile and CEI baseline for this
-                type of site.
-              </div>
-            </div>
-
-            {/* Benchmark pill */}
-            <div className={benchmarkPillClass}>
-              {benchmarkPct === null ? "No baseline yet" : benchmarkLabel}
-            </div>
-          </div>
-
-          {insightsLoading && (
             <div
               style={{
-                padding: "0.8rem 0.3rem",
-                display: "flex",
-                justifyContent: "center",
+                fontSize: "0.9rem",
+                fontWeight: 600,
               }}
             >
-              <LoadingSpinner />
+              Efficiency opportunities for this site
             </div>
-          )}
-
-          {!insightsLoading && hasStructuredOpps && (
-            <>
-              <ul
-                style={{
-                  margin: 0,
-                  paddingLeft: "1.1rem",
-                  fontSize: "0.84rem",
-                  color: "var(--cei-text-main)",
-                  lineHeight: 1.5,
-                }}
-              >
-                {topOpportunities.map((opp, idx) => {
-                  const title = opp.title || "Efficiency opportunity";
-                  const summary = opp.summary || "";
-                  const impactKwh = opp.impact_estimate_kwh_per_year ?? null;
-                  const impactPct = opp.impact_estimate_pct ?? null;
-                  const confidence = opp.confidence || "";
-                  const chipLabel =
-                    confidence || opp.category || (benchmarkFlagged ? "High priority" : "");
-
-                  let impactText = "";
-                  if (impactKwh !== null && impactKwh > 0) {
-                    const prettyKwh =
-                      impactKwh >= 1000
-                        ? `${(impactKwh / 1000).toFixed(1)} MWh/year`
-                        : `${impactKwh.toFixed(0)} kWh/year`;
-                    impactText = prettyKwh;
-                  }
-                  if (impactPct !== null && impactPct > 0) {
-                    impactText = impactText
-                      ? `${impactText} · ~${impactPct.toFixed(1)}% of site use`
-                      : `~${impactPct.toFixed(1)}% of site use`;
-                  }
-
-                  return (
-                    <li key={idx} style={{ marginBottom: "0.6rem" }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "baseline",
-                          justifyContent: "space-between",
-                          gap: "0.75rem",
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontWeight: 500,
-                            fontSize: "0.88rem",
-                          }}
-                        >
-                          {title}
-                        </div>
-                        {chipLabel && (
-                          <span
-                            style={{
-                              fontSize: "0.7rem",
-                              textTransform: "uppercase",
-                              letterSpacing: "0.06em",
-                              color: "var(--cei-text-muted)",
-                            }}
-                          >
-                            {chipLabel}
-                          </span>
-                        )}
-                      </div>
-                      {summary && (
-                        <div
-                          style={{
-                            marginTop: "0.15rem",
-                            fontSize: "0.82rem",
-                            color: "var(--cei-text-muted)",
-                          }}
-                        >
-                          {summary}
-                        </div>
-                      )}
-                      {impactText && (
-                        <div
-                          style={{
-                            marginTop: "0.15rem",
-                            fontSize: "0.8rem",
-                            color: "var(--cei-text-accent)",
-                          }}
-                        >
-                          {impactText}
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
-          )}
-
-          {/* Fallback: heuristic suggestions if no structured opps yet */}
-          {!insightsLoading && !hasStructuredOpps && (
             <div
               style={{
                 marginTop: "0.2rem",
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
               }}
             >
-              <div
-                style={{
-                  fontSize: "0.82rem",
-                  color: "var(--cei-text-muted)",
-                  marginBottom: "0.3rem",
-                }}
-              >
-                CEI doesn&apos;t have enough pattern history at this site yet to
-                surface specific quantified actions. In the meantime, use these
-                targeted checks as a starting point:
-              </div>
-              <ul
-                style={{
-                  margin: 0,
-                  paddingLeft: "1.1rem",
-                  fontSize: "0.84rem",
-                  color: "var(--cei-text-main)",
-                  lineHeight: 1.5,
-                }}
-              >
-                {heuristicSuggestions.map((s, idx) => (
-                  <li key={idx} style={{ marginBottom: "0.3rem" }}>
-                    {s}
-                  </li>
-                ))}
-              </ul>
+              Targeted ideas based on the last 24 hours of energy at this site.
+              Use this to brief local operations on where to focus next.
             </div>
+          </div>
+
+          {suggestions.length === 0 ? (
+            <div
+              style={{
+                fontSize: "0.82rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              No specific opportunities detected yet. Once this site has a more
+              stable data profile, CEI will surface patterns worth acting on
+              here.
+            </div>
+          ) : (
+            <ul
+              style={{
+                margin: 0,
+                paddingLeft: "1.1rem",
+                fontSize: "0.84rem",
+                color: "var(--cei-text-main)",
+                lineHeight: 1.5,
+              }}
+            >
+              {suggestions.map((s, idx) => (
+                <li key={idx} style={{ marginBottom: "0.3rem" }}>
+                  {s}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </section>
