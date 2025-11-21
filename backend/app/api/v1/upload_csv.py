@@ -7,16 +7,26 @@ import logging
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.db.session import get_db
 from app.models import TimeseriesRecord
+from app.core.rate_limit import csv_upload_rate_limit
 
 logger = logging.getLogger("cei")
 
+# NOTE: prefix is /upload-csv, and main.py mounts router under /api/v1
+# => POST /api/v1/upload-csv/
 router = APIRouter(prefix="/upload-csv", tags=["upload"])
 
 
@@ -29,7 +39,12 @@ class CsvUploadResult(BaseModel):
     sample_meter_ids: List[str] = []
 
 
-@router.post("/", response_model=CsvUploadResult, status_code=status.HTTP_200_OK)
+@router.post(
+    "/",
+    response_model=CsvUploadResult,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(csv_upload_rate_limit)],
+)
 async def upload_csv(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),

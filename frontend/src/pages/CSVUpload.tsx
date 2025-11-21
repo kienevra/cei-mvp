@@ -41,11 +41,18 @@ const CSVUpload: React.FC = () => {
       setResult(res);
       setSuccess(true);
     } catch (err: any) {
-      const backendDetail =
-        err?.response?.data?.detail ||
-        err?.response?.data?.error ||
-        err?.message;
-      setError(backendDetail || "Upload failed. Please try again.");
+      // Special-case rate limit (429) for a clearer UX
+      if (err?.response?.status === 429) {
+        setError(
+          "You’ve hit the CSV upload limit for this workspace. Please wait a few minutes before trying again."
+        );
+      } else {
+        const backendDetail =
+          err?.response?.data?.detail ||
+          err?.response?.data?.error ||
+          err?.message;
+        setError(backendDetail || "Upload failed. Please try again.");
+      }
     } finally {
       setUploading(false);
     }
@@ -118,9 +125,9 @@ const CSVUpload: React.FC = () => {
           >
             <li>Format: CSV, UTF-8 encoded.</li>
             <li>
-              Required columns (case-sensitive):{" "}
-              <code>site_id</code>, <code>meter_id</code>,{" "}
-              <code>timestamp</code>, <code>value</code>, <code>unit</code>.
+              Required columns (case-sensitive): <code>site_id</code>,{" "}
+              <code>meter_id</code>, <code>timestamp</code>, <code>value</code>
+              , <code>unit</code>.
             </li>
             <li>
               Timestamps should be ISO-like, e.g.{" "}

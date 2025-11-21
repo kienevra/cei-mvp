@@ -165,4 +165,16 @@ export async function deleteAccount() {
   return r.data;
 }
 
+export async function getSiteInsights(
+  siteId: number | string,
+  windowDays: number = 7
+) {
+  const idStr = String(siteId);
+  const resp = await api.get(`/analytics/sites/${idStr}/insights`, {
+    params: { window_days: windowDays },
+  });
+  return resp.data;
+}
+
+
 export default api;

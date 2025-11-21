@@ -1,3 +1,4 @@
+// frontend/src/pages/Alerts.tsx
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getSites, getTimeseriesSummary } from "../services/api";
@@ -78,6 +79,7 @@ const Alerts: React.FC = () => {
 
               return { site, summary, error: null as string | null };
             } catch (e: any) {
+              console.error("Failed to load summary for site", site, e);
               return {
                 site,
                 summary: null,
@@ -133,7 +135,6 @@ const Alerts: React.FC = () => {
           }
 
           // Rule 2 – High usage threshold (simple for now)
-          // You can tune these numbers or make them per-site later.
           let severity: AlertSeverity | null = null;
           let msg = "";
 
@@ -166,6 +167,7 @@ const Alerts: React.FC = () => {
         setAlerts(builtAlerts);
       } catch (e: any) {
         if (!isMounted) return;
+        console.error("Failed to load alerts", e);
         setError(e?.message || "Failed to load alerts.");
       } finally {
         if (!isMounted) return;
@@ -307,7 +309,7 @@ const Alerts: React.FC = () => {
             </div>
           )}
 
-          {!loading && !hasAlerts && (
+          {!loading && !hasAlerts && !error && (
             <div
               style={{
                 fontSize: "0.85rem",

@@ -1,29 +1,43 @@
+# backend/app/services/analytics.py
 """
 Analytics service for CEI (Carbon Efficiency Intelligence).
 
-This module provides core analytics functionality for processing and analyzing energy metrics:
-- KPI computation with robust error handling and validation
-- Industry benchmarking with configurable thresholds
-- Anomaly detection using multiple algorithms (z-score and optional ML)
+This module provides core analytics functionality for processing and analyzing
+energy metrics, plus lightweight site-level insights.
 
-Key Features:
-- Type-safe interfaces with comprehensive error handling
-- Efficient SQL-based aggregation for large datasets
-- Configurable benchmarking from CSV or builtin defaults
-- Extensible anomaly detection framework
-
-Usage:
-    from app.services.analytics import (
-        compute_kpis, 
-        benchmark_against_industry,
-        detect_anomalies
-    )
-
+Features:
+- KPI computation (energy, avg power, peak, load factor)
+- Industry-style benchmarking
+- Simple anomaly detection (z-score, optional IsolationForest)
+- Site-level efficiency insights based on timeseries patterns
 """
 
-import csv
+from __future__ import annotations
+
 import logging
-from typing import Dict, List, Optional, Sequence, Tuple, TypedDict, Union, cast
+import math
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Sequence, TypedDict, Literal
+
+from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from app.models import TimeseriesRecord, Metric, Sensor
+
+logger = logging.getLogger("cei")
+
+# Optional sklearn import for advanced anomaly detection
+try:
+    from sklearn.ensemble import IsolationForest  # type: ignore
+
+    SKLEARN_AVAILABLE = True
+except Exception:  # pragma: no cover - optional dependency
+    SKLEARN_AVAILABLE = False
+
+
+# === Typed results ===
+
 
 class KPIResult(TypedDict):
     energy_kwh: float
@@ -34,6 +48,7 @@ class KPIResult(TypedDict):
     window_start: str
     window_end: str
 
+
 class BenchmarkResult(TypedDict):
     metric_name: str
     value: float
@@ -42,398 +57,413 @@ class BenchmarkResult(TypedDict):
     flagged: bool
     recommendation: str
 
+
 class AnomalyResult(TypedDict):
-    method: str
+    method: str | None
     anomaly_indices: List[int]
     anomalies: List[float]
-import os
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Sequence, Tuple, TypedDict, Union, cast
 
-import numpy as np
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
 
-# Optional sklearn import for advanced anomaly detection
-try:
-    from sklearn.ensemble import IsolationForest
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
-    
-from app.models import Metric, Sensor
-import logging
-logger = logging.getLogger(__name__)
+class Insight(TypedDict):
+    id: str
+    severity: Literal["info", "warning", "critical"]
+    title: str
+    message: str
+
+
+class SiteInsightsResult(TypedDict):
+    site_id: str
+    window_days: int
+    insights: List[Insight]
+
+
+# === Benchmarks (stubbed for now) ===
+
 
 def _load_benchmarks() -> Dict[str, float]:
-    # Dummy implementation for now
+    # Stubbed constants – later we can load from config/DB
     return {
         "manufacturing_energy_intensity": 1000.0,
         "avg_power_kw_per_m2": 0.02,
     }
 
-BENCHMARKS = _load_benchmarks()
 
-class AnalyticsService:
-    def __init__(self, db: Session):
-        self.db = db
+BENCHMARKS: Dict[str, float] = _load_benchmarks()
 
-    def compute_kpis(
-        self,
-        site_id: int,
-        window_days: int = 30,
-        start_ts: Optional[datetime] = None,
-        end_ts: Optional[datetime] = None
-    ) -> KPIResult:
-        """
-        Compute key performance indicators for a site over a specified time window.
 
-        This function calculates:
-        - energy_kwh: Total energy consumed (approximated from power readings)
-        - avg_power_kw: Mean power draw across all sensors
-        - peak_kw: Maximum power draw observed
-        - load_factor: Ratio of average to peak power (efficiency metric)
+# === KPI / energy metrics ===
 
-        Args:
-            site_id: ID of the site to analyze
-            window_days: Number of days to look back (default: 30)
-            start_ts: Optional custom start time (overrides window_days)
-            end_ts: Optional custom end time (defaults to now)
-            arr = np.array(series)
-            result = {"method": method, "anomaly_indices": [], "anomalies": []}
-        Returns:
-            KPIResult: Dictionary containing computed KPIs and metadata
-            flagged = value > (threshold * benchmark) if benchmark else False
-        # Set time window
-        end_ts = end_ts or datetime.utcnow()
-        start_ts = start_ts or (end_ts - timedelta(days=window_days))
-        if start_ts >= end_ts:
-            raise ValueError("start_ts must be before end_ts")
 
-        try:
-            # Get all active sensor IDs for the site in one query
-            sensor_ids_query = (
-                select(Sensor.id)
-                .where(
-                    Sensor.site_id == site_id,
-                    Sensor.is_active == True  # Only include active sensors
-                )
-            )
-
-            return {
-                "energy_kwh": round(energy_kwh, 3),
-                "avg_power_kw": round(avg_power_kw, 3),
-                "peak_kw": round(peak_kw, 3),
-                "load_factor": round(load_factor, 3) if load_factor is not None else None,
-                "window_hours": round(window_hours, 2),
-                "window_start": start_ts.isoformat(),
-                "window_end": end_ts.isoformat()
-            }
-
-        except SQLAlchemyError as e:
-            logger.error("Database error in compute_kpis: %s", str(e))
-            raise
-
-    def _empty_kpi_result(self, start_ts: datetime, end_ts: datetime) -> KPIResult:
-        window_hours = (end_ts - start_ts).total_seconds() / 3600
-        return {
-            "energy_kwh": 0.0,
-            "avg_power_kw": 0.0,
-            "peak_kw": 0.0,
-            "load_factor": None,
-            "window_hours": round(window_hours, 2),
-            "window_start": start_ts.isoformat(),
-            "window_end": end_ts.isoformat()
-        }
-
-    def benchmark_against_industry(
-        self,
-        metric_name: str,
-        value: float,
-        threshold: float = 1.15
-    ) -> BenchmarkResult:
-        if not isinstance(value, (int, float)) or value < 0:
-            raise ValueError(f"Invalid metric value: {value}")
-        if not isinstance(threshold, (int, float)) or threshold <= 1:
-            raise ValueError(f"Invalid threshold: {threshold}. Must be > 1")
-        
-        try:
-            benchmark = BENCHMARKS.get(metric_name)
-            if benchmark is None:
-                logger.warning("No benchmark found for metric: %s", metric_name)
-                return {
-                    "metric_name": metric_name,
-                    "value": value,
-                    "benchmark": None,
-                    "percent_of_benchmark": None,
-                    "flagged": False,
-                    "recommendation": (
-                        "No industry benchmark available. Consider collecting "
-                        "historical data to establish baseline."
-                    )
-                }
-
-            # Calculate comparison metrics
-            percent = (value / benchmark) * 100.0 if benchmark else None
-                        flagged = value > (threshold * benchmark) if benchmark else False
-                        
-                        # Generate detailed recommendations based on severity
-                        if flagged:
-                            percent_over = ((value / benchmark) - 1) * 100
-                            if percent_over > 50:
-                                recommendation = (
-                                    f"Critical: {percent_over:.1f}% above benchmark. "
-                                    "Immediate investigation recommended. Check for: "
-                                    "1) Equipment malfunction "
-                                    "2) Process inefficiencies "
-                                    "3) Calibration errors"
-                                )
-                            else:
-                                recommendation = (
-                                    f"Warning: {percent_over:.1f}% above benchmark. "
-                                    "Consider efficiency improvements: "
-                                    "1) Equipment maintenance "
-                                    "2) Operating procedures review "
-                                    "3) Energy audit"
-                                )
-                        else:
-                            recommendation = (
-                                "Performance within expected range. "
-                                "Continue monitoring for trends."
-                            )
-
-                        # Log the comparison
-                        logger.info(
-                            "Benchmark comparison for %s: %.2f vs benchmark %.2f (%.1f%%)",
-                            metric_name, value, benchmark, percent or 0.0
-                        )
-
-            return {
-                "metric_name": metric_name,
-                "value": round(value, 3),
-                "benchmark": round(benchmark, 3),
-                "percent_of_benchmark": round(percent, 2) if percent else None,
-                "flagged": flagged,
-                "recommendation": recommendation
-            }
-        except Exception as e:
-            logger.error("Error in benchmark comparison: %s", str(e))
-            raise
-
-    def detect_anomalies(
-        self,
-        series: Sequence[float],
-        method: str = "zscore",
-        z_thresh: float = 3.0,
-        contamination: float = 0.1
-    ) -> AnomalyResult:
-
-        Returns:
-            AnomalyResult with detection method and anomaly indices/values
-
-        Raises:
-            ValueError: If method invalid or series empty
-        """
-        if not series:
-            raise ValueError("Empty input series")
-        if not isinstance(z_thresh, (int, float)) or z_thresh <= 0:
-            raise ValueError(f"Invalid z-score threshold: {z_thresh}")
-        if not isinstance(contamination, float) or not 0 < contamination < 0.5:
-            raise ValueError(f"Invalid contamination rate: {contamination}")
-
-        try:
-                        arr = np.array(series)
-                        result = {"method": method, "anomaly_indices": [], "anomalies": []}
-
-                        if method.lower() in ["zscore", "both"]:
-                            z_scores = np.abs((arr - arr.mean()) / arr.std())
-                            z_indices = np.where(z_scores > z_thresh)[0]
-                            result["anomaly_indices"].extend(z_indices.tolist())
-                            result["anomalies"].extend(arr[z_indices].tolist())
-
-                        if method.lower() in ["isolation_forest", "both"]:
-                            if not SKLEARN_AVAILABLE:
-                                logger.warning(
-                                    "IsolationForest requested but scikit-learn not available. "
-                                    "Falling back to z-score method."
-                                )
-                                if method == "isolation_forest":
-                                    # Only use z-score if IsolationForest was specifically requested
-                                    z_scores = np.abs((arr - arr.mean()) / arr.std())
-                                    z_indices = np.where(z_scores > z_thresh)[0]
-                                    result["anomaly_indices"].extend(z_indices.tolist())
-                                    result["anomalies"].extend(arr[z_indices].tolist())
-                            else:
-                                # Use IsolationForest
-                                reshaped = arr.reshape(-1, 1)
-                                iso = IsolationForest(
-                                    contamination=contamination,
-                                    random_state=42
-                                )
-                                preds = iso.fit_predict(reshaped)
-                                iso_indices = np.where(preds == -1)[0]
-                                result["anomaly_indices"].extend(iso_indices.tolist())
-                                result["anomalies"].extend(arr[iso_indices].tolist())
-
-                        # Remove duplicates if both methods were used
-                        result["anomaly_indices"] = sorted(list(set(result["anomaly_indices"])))
-                        result["anomalies"] = sorted(list(set(result["anomalies"])))
-
-                        # Log detection results
-                        logger.info(
-                            "Anomaly detection (%s) found %d anomalies in series of length %d",
-                            method, len(result["anomaly_indices"]), len(series)
-                        )
-
-                        return cast(AnomalyResult, result)
-
-        except Exception as e:
-            logger.error("Error in anomaly detection: %s", str(e))
-            raise
-    # End of AnalyticsService
-
-def energy_metrics_for_window(db: Session, site_id: int, window_days: int = 30) -> dict:
+def energy_metrics_for_window(
+    db: Session, site_id: int, window_days: int = 30
+) -> KPIResult:
     """
-    Calculate energy metrics for a given time window.
-    Returns a dict with energy_kwh, avg_power_kw, peak_kw, load_factor, window_hours, window_start, window_end.
+    Calculate energy metrics for a given time window from Metric/Sensor.
+
+    This assumes:
+    - Metric.value ~ kW
+    - energy_kwh ≈ avg_power_kw * window_hours
     """
     end_ts = datetime.utcnow()
     start_ts = end_ts - timedelta(days=window_days)
-    # Use SQL aggregation to compute avg and max
+
     # Get all sensor IDs for the site
-    sensor_ids = (
+    sensor_ids_subq = (
         select(Sensor.id)
         .where(Sensor.site_id == site_id)
         .scalar_subquery()
     )
-    
+
     stmt_avg = select(func.avg(Metric.value)).where(
-        Metric.sensor_id.in_(sensor_ids),
+        Metric.sensor_id.in_(sensor_ids_subq),
         Metric.ts >= start_ts,
-        Metric.ts <= end_ts
+        Metric.ts <= end_ts,
     )
     stmt_max = select(func.max(Metric.value)).where(
-        Metric.sensor_id.in_(sensor_ids),
+        Metric.sensor_id.in_(sensor_ids_subq),
         Metric.ts >= start_ts,
-        Metric.ts <= end_ts
+        Metric.ts <= end_ts,
     )
 
-    avg_res = db.execute(stmt_avg).scalar()
-    max_res = db.execute(stmt_max).scalar()
+    try:
+        avg_res = db.execute(stmt_avg).scalar()
+        max_res = db.execute(stmt_max).scalar()
+    except SQLAlchemyError as e:
+        logger.error("Database error in energy_metrics_for_window: %s", e)
+        raise
 
     avg_power_kw = float(avg_res) if avg_res is not None else 0.0
     peak_kw = float(max_res) if max_res is not None else 0.0
-    window_hours = window_days * 24.0
+    window_hours = float(window_days) * 24.0
     energy_kwh = avg_power_kw * window_hours  # approximation
 
-    load_factor = (avg_power_kw / peak_kw) if (peak_kw and peak_kw > 0) else None
+    load_factor = (avg_power_kw / peak_kw) if peak_kw and peak_kw > 0 else None
 
     return {
         "energy_kwh": round(energy_kwh, 3),
         "avg_power_kw": round(avg_power_kw, 3),
         "peak_kw": round(peak_kw, 3),
         "load_factor": round(load_factor, 3) if load_factor is not None else None,
-        "window_hours": window_hours,
+        "window_hours": round(window_hours, 2),
         "window_start": start_ts.isoformat(),
         "window_end": end_ts.isoformat(),
     }
-def benchmark_against_industry(metric_name: str, value: float) -> Dict[str, Optional[float]]:
+
+
+# === Benchmarking ===
+
+
+def benchmark_against_industry(
+    metric_name: str,
+    value: float,
+    threshold: float = 1.15,
+) -> BenchmarkResult:
     """
-    Compare `value` against a benchmark for metric_name.
-    Returns a dict:
-    {
-      "metric_name": str,
-      "value": float,
-      "benchmark": float,
-      "percent_of_benchmark": float,
-      "flagged": bool,
-      "recommendation": str
-    }
-    Rule: flagged if value > 1.15 * benchmark
+    Compare `value` to a benchmark for `metric_name`.
+
+    - flagged if value > threshold * benchmark (default 115% of benchmark)
     """
-    benchmark_value = BENCHMARKS.get(metric_name)
-    if benchmark_value is None:
-        # If we don't have a benchmark, return best-effort response
+    if not isinstance(value, (int, float)) or value < 0:
+        raise ValueError(f"Invalid metric value: {value}")
+    if not isinstance(threshold, (int, float)) or threshold <= 1:
+        raise ValueError(f"Invalid threshold: {threshold}. Must be > 1")
+
+    benchmark = BENCHMARKS.get(metric_name)
+    if benchmark is None:
+        logger.warning("No benchmark found for metric: %s", metric_name)
         return {
             "metric_name": metric_name,
-            "value": value,
+            "value": float(value),
             "benchmark": None,
             "percent_of_benchmark": None,
             "flagged": False,
-            "recommendation": "No benchmark available — collect more data or define industry baseline."
+            "recommendation": (
+                "No industry benchmark available. Consider collecting "
+                "historical data to establish a baseline."
+            ),
         }
 
-    percent = (value / benchmark_value) * 100.0 if benchmark_value else None
-    flagged = (value > 1.15 * benchmark_value) if benchmark_value else False
-    recommendation = (
-        "Significant deviation: investigate process inefficiencies, motors, compressed air leaks, "
-        "and waste heat recovery options."
-        if flagged else "Within expected range; monitor for trends."
+    percent = (value / benchmark) * 100.0 if benchmark else None
+    flagged = value > (threshold * benchmark) if benchmark else False
+
+    if flagged:
+        percent_over = ((value / benchmark) - 1) * 100
+        if percent_over > 50:
+            recommendation = (
+                f"Critical: {percent_over:.1f}% above benchmark. "
+                "Immediate investigation recommended (equipment malfunctions, "
+                "process inefficiencies, calibration issues)."
+            )
+        else:
+            recommendation = (
+                f"Warning: {percent_over:.1f}% above benchmark. "
+                "Target improvement via maintenance, operating procedure review, "
+                "and a focused energy audit."
+            )
+    else:
+        recommendation = "Performance within expected range. Continue monitoring for trends."
+
+    logger.info(
+        "Benchmark comparison for %s: %.2f vs benchmark %.2f (%.1f%%)",
+        metric_name,
+        value,
+        benchmark,
+        percent or 0.0,
     )
 
     return {
         "metric_name": metric_name,
-        "value": value,
-        "benchmark": benchmark_value,
+        "value": round(value, 3),
+        "benchmark": round(benchmark, 3),
         "percent_of_benchmark": round(percent, 2) if percent is not None else None,
         "flagged": flagged,
-        "recommendation": recommendation
+        "recommendation": recommendation,
     }
 
-def detect_anomalies(values: Sequence[float], z_thresh: float = 3.0) -> Dict[str, object]:
-    """
-    Basic anomaly detection:
-    - Primary: z-score method (no extra deps)
-    - Fallback/optional: IsolationForest if scikit-learn installed and user requests
 
-    Returns:
-    {
-      "method": "zscore" or "isolation_forest",
-      "anomaly_indices": [int,...],
-      "anomalies": [value,...]
+# === Anomaly detection ===
+
+
+def detect_anomalies(
+    series: Sequence[float],
+    method: str = "zscore",
+    z_thresh: float = 3.0,
+    contamination: float = 0.1,
+) -> AnomalyResult:
+    """
+    Basic anomaly detection.
+
+    - z-score: simple statistical outlier detection
+    - isolation_forest: optional, if scikit-learn is installed
+    - both: combine results from both methods
+    """
+    if not series:
+        raise ValueError("Empty input series")
+    if z_thresh <= 0:
+        raise ValueError(f"Invalid z-score threshold: {z_thresh}")
+    if not (0 < contamination < 0.5):
+        raise ValueError(f"Invalid contamination rate: {contamination}")
+
+    arr = list(float(x) for x in series)
+    result: AnomalyResult = {
+        "method": method,
+        "anomaly_indices": [],
+        "anomalies": [],
     }
-    """
-    out = {"method": None, "anomaly_indices": [], "anomalies": []}
-    if not values:
-        return out
 
-    # z-score
-    try:
-        import math
-        n = len(values)
-        mean = sum(values) / n
-        var = sum((x - mean) ** 2 for x in values) / n
+    method_lower = method.lower()
+
+    # --- z-score path ---
+    if method_lower in ("zscore", "both"):
+        n = len(arr)
+        mean = sum(arr) / n
+        var = sum((x - mean) ** 2 for x in arr) / n
         sd = math.sqrt(var)
-        anomalies = []
-        indices = []
-        if sd == 0:
-            # no variance, no anomalies by z-score
-            out.update({"method": "zscore", "anomaly_indices": [], "anomalies": []})
-            return out
-        for i, v in enumerate(values):
-            z = (v - mean) / sd
-            if abs(z) >= z_thresh:
-                indices.append(i)
-                anomalies.append(v)
-        out.update({"method": "zscore", "anomaly_indices": indices, "anomalies": anomalies})
-        return out
-    except Exception:
-        # fall through to optional sklearn path below
-        pass
+        if sd > 0:
+            for idx, v in enumerate(arr):
+                z = (v - mean) / sd
+                if abs(z) >= z_thresh:
+                    result["anomaly_indices"].append(idx)
+                    result["anomalies"].append(v)
 
-    # Optional: IsolationForest if available
-    if SKLEARN_AVAILABLE:
+    # --- IsolationForest path ---
+    if method_lower in ("isolation_forest", "both") and SKLEARN_AVAILABLE:
         try:
             import numpy as np  # type: ignore
-            arr = np.array(values).reshape(-1, 1)
-            clf = IsolationForest(random_state=0, contamination='auto')
-            preds = clf.fit_predict(arr)
-            indices = [i for i, p in enumerate(preds) if p == -1]
-            anomalies = [values[i] for i in indices]
-            out.update({"method": "isolation_forest", "anomaly_indices": indices, "anomalies": anomalies})
-            return out
-        except Exception:
-            # If sklearn fails, return empty result
-            return {"method": None, "anomaly_indices": [], "anomalies": []}
 
-    return out
+            np_arr = np.array(arr).reshape(-1, 1)
+            clf = IsolationForest(contamination=contamination, random_state=42)
+            preds = clf.fit_predict(np_arr)
+            for idx, p in enumerate(preds):
+                if p == -1:
+                    result["anomaly_indices"].append(idx)
+                    result["anomalies"].append(arr[idx])
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("IsolationForest failed, falling back on z-score only: %s", e)
+
+    # De-duplicate
+    if result["anomaly_indices"]:
+        # preserve order
+        seen = set()
+        indices_dedup: List[int] = []
+        for i in result["anomaly_indices"]:
+            if i not in seen:
+                seen.add(i)
+                indices_dedup.append(i)
+        result["anomaly_indices"] = indices_dedup
+        result["anomalies"] = [arr[i] for i in indices_dedup]
+
+    logger.info(
+        "Anomaly detection (%s) found %d anomalies in series of length %d",
+        method,
+        len(result["anomaly_indices"]),
+        len(series),
+    )
+    return result
+
+
+# === Site-level insights (Phase 1 rule-based) ===
+
+
+def _float_or_zero(v) -> float:
+    try:
+        return float(v or 0)
+    except Exception:
+        return 0.0
+
+
+def compute_site_insights(
+    db: Session,
+    site_key: str,
+    window_days: int = 7,
+) -> SiteInsightsResult:
+    """
+    Phase 1: lightweight, rule-based analytics for a single site.
+
+    - Looks at TimeseriesRecord for this site_key (e.g. "site-1") in the last N days.
+    - Computes:
+        * Night vs day consumption share
+        * Last 24h vs previous 24h delta
+    - Returns a list of insights with severity + human-readable messages.
+    """
+    now = datetime.utcnow()
+    window_start = now - timedelta(days=window_days)
+
+    records: List[TimeseriesRecord] = (
+        db.query(TimeseriesRecord)
+        .filter(
+            TimeseriesRecord.site_id == site_key,
+            TimeseriesRecord.timestamp >= window_start,
+        )
+        .order_by(TimeseriesRecord.timestamp.asc())
+        .all()
+    )
+
+    if not records:
+        return {
+            "site_id": site_key,
+            "window_days": window_days,
+            "insights": [
+                {
+                    "id": "no-data",
+                    "severity": "info",
+                    "title": "No recent data",
+                    "message": (
+                        f"No timeseries records found for {site_key} in the last "
+                        f"{window_days} days. Upload fresh CSV data or connect a feed "
+                        "to start seeing analytics for this site."
+                    ),
+                }
+            ],
+        }
+
+    values = [_float_or_zero(r.value) for r in records]
+    total_kwh = sum(values)
+    total_nonzero = total_kwh if total_kwh > 0 else 1.0
+
+    # Day vs night split (07:00–19:00 considered "day")
+    day_values: List[float] = []
+    night_values: List[float] = []
+    for r in records:
+        v = _float_or_zero(r.value)
+        hour = r.timestamp.hour
+        if 7 <= hour < 19:
+            day_values.append(v)
+        else:
+            night_values.append(v)
+
+    day_total = sum(day_values)
+    night_total = sum(night_values)
+    night_share = night_total / total_nonzero
+
+    insights: List[Insight] = []
+
+    # Rule 1 – high night baseload
+    if night_total > 0 and night_share >= 0.4:
+        sev: Literal["info", "warning", "critical"] = "warning"
+        if night_share >= 0.6:
+            sev = "critical"
+
+        insights.append(
+            {
+                "id": "night-baseload",
+                "severity": sev,
+                "title": "High night baseload",
+                "message": (
+                    f"Night-time consumption accounts for ~{night_share * 100:.0f}% "
+                    f"of this site's energy in the last {window_days} days. "
+                    "This usually points to compressors, HVAC, or lines left "
+                    "running outside of production hours. Start by mapping what "
+                    "should be off between 19:00 and 07:00."
+                ),
+            }
+        )
+
+    # Rule 2 – last 24h vs previous 24h
+    cutoff_24 = now - timedelta(hours=24)
+    prev_24_start = now - timedelta(hours=48)
+
+    last_24_vals = [
+        _float_or_zero(r.value) for r in records if r.timestamp >= cutoff_24
+    ]
+    prev_24_vals = [
+        _float_or_zero(r.value)
+        for r in records
+        if prev_24_start <= r.timestamp < cutoff_24
+    ]
+
+    if last_24_vals and prev_24_vals:
+        last_24_total = sum(last_24_vals)
+        prev_24_total = sum(prev_24_vals)
+        if prev_24_total > 0:
+            delta = (last_24_total - prev_24_total) / prev_24_total
+            if delta >= 0.3:
+                insights.append(
+                    {
+                        "id": "last24-spike",
+                        "severity": "critical",
+                        "title": "Sharp increase in last 24 hours",
+                        "message": (
+                            "Energy in the last 24 hours is roughly "
+                            f"{delta * 100:+.0f}% versus the previous 24 hours. "
+                            "Check for abnormal operating conditions, extended shifts, "
+                            "or equipment left running."
+                        ),
+                    }
+                )
+            elif delta >= 0.15:
+                insights.append(
+                    {
+                        "id": "last24-rise",
+                        "severity": "warning",
+                        "title": "Notable rise in recent consumption",
+                        "message": (
+                            "Energy in the last 24 hours is about "
+                            f"{delta * 100:+.0f}% higher than the previous 24 hours. "
+                            "If this isn't explained by production changes, this is a "
+                            "good candidate for a focused walk-through."
+                        ),
+                    }
+                )
+
+    # Fallback – always give at least one directional insight
+    if not insights and total_kwh > 0:
+        insights.append(
+            {
+                "id": "baseline-check",
+                "severity": "info",
+                "title": "Establish a baseline",
+                "message": (
+                    f"CEI sees {total_kwh:.1f} kWh for this site in the last "
+                    f"{window_days} days. Use this as a baseline, then compare "
+                    "before/after when you implement specific actions "
+                    "(e.g. night shutdown checklist, compressed air leak hunt)."
+                ),
+            }
+        )
+
+    return {
+        "site_id": site_key,
+        "window_days": window_days,
+        "insights": insights,
+    }

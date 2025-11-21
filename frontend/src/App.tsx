@@ -1,3 +1,4 @@
+// frontend/src/App.tsx
 import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./hooks/useAuth";
@@ -35,8 +36,10 @@ const App: React.FC = () => (
     <AuthProvider>
       <Suspense fallback={<LoadingSpinner />}>
         <Routes>
+          {/* Public route */}
           <Route path="/login" element={<Login />} />
 
+          {/* Dashboard */}
           <Route
             path="/"
             element={
@@ -48,6 +51,7 @@ const App: React.FC = () => (
             }
           />
 
+          {/* Sites list */}
           <Route
             path="/sites"
             element={
@@ -59,6 +63,7 @@ const App: React.FC = () => (
             }
           />
 
+          {/* Single site view */}
           <Route
             path="/sites/:id"
             element={
@@ -70,21 +75,19 @@ const App: React.FC = () => (
             }
           />
 
+          {/* Alerts – FIXED (no nested route wrapper) */}
           <Route
             path="/alerts"
-            element>
-            <Route
-              index
-              element={
-                <Layout>
-                  <ProtectedRoute>
-                    <Alerts />
-                  </ProtectedRoute>
-                </Layout>
-              }
-            />
-          </Route>
+            element={
+              <Layout>
+                <ProtectedRoute>
+                  <Alerts />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
 
+          {/* Reports */}
           <Route
             path="/reports"
             element={
@@ -96,6 +99,7 @@ const App: React.FC = () => (
             }
           />
 
+          {/* CSV Upload */}
           <Route
             path="/upload"
             element={
@@ -107,6 +111,7 @@ const App: React.FC = () => (
             }
           />
 
+          {/* Account */}
           <Route
             path="/account"
             element={
@@ -118,6 +123,7 @@ const App: React.FC = () => (
             }
           />
 
+          {/* Settings */}
           <Route
             path="/settings"
             element={
@@ -129,6 +135,7 @@ const App: React.FC = () => (
             }
           />
 
+          {/* 404 – can leave without Layout if you want a bare page */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>

@@ -5,10 +5,10 @@ from typing import List, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+
 from app.core.config import settings
 from app.api.v1 import sites as sites_api
-
 
 # --- Logging setup ---
 logging.basicConfig(level=logging.INFO)
@@ -27,7 +27,6 @@ app = FastAPI(
 )
 
 # --- CORS setup ---
-# settings.origins_list() should return a List[str] or None
 origins: Optional[List[str]] = None
 try:
     origins = settings.origins_list()
@@ -40,6 +39,8 @@ if not origins:
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
+        "https://cei-frontend.herokuapp.com",
+        "https://cei-mvp.onrender.com",
     ]
 
 logger.info(f"CORS allow_origins={origins}")
@@ -53,6 +54,8 @@ app.add_middleware(
 )
 
 # --- Error logging middleware ---
+
+
 @app.middleware("http")
 async def log_exceptions(request: Request, call_next):
     try:
@@ -61,7 +64,6 @@ async def log_exceptions(request: Request, call_next):
     except Exception as e:
         logger.error(f"Unhandled error at {request.url.path}: {e}")
         logger.error(traceback.format_exc())
-        # return safe, short payload to clients but include last lines for debugging
         tb_lines = traceback.format_exc().splitlines()
         return JSONResponse(
             status_code=500,
@@ -72,18 +74,30 @@ async def log_exceptions(request: Request, call_next):
             },
         )
 
+
 # --- Include routers (after app creation) ---
-# keep these imports below to avoid circular import during startup
-from app.api.v1 import data_timeseries, upload_csv, auth, billing  # noqa: E402
+# keep these imports below to avoid circular imports during startup
+from app.api.v1 import (  # noqa: E402
+    auth,
+    billing,
+    data_timeseries,
+    upload_csv,
+    analytics,
+    alerts,
+)
 
 app.include_router(data_timeseries.router, prefix="/api/v1")
 app.include_router(upload_csv.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(billing.router, prefix="/api/v1")
 app.include_router(sites_api.router, prefix="/api/v1")
+app.include_router(analytics.router, prefix="/api/v1")
+app.include_router(alerts.router, prefix="/api/v1")
 
 
 # --- Root + health endpoints ---
+
+
 @app.get("/", include_in_schema=False)
 def root():
     if enable_docs:
