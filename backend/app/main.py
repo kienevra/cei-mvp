@@ -1,11 +1,12 @@
 # backend/app/main.py
+
 import logging
 import traceback
 from typing import List, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 
 from app.core.config import settings
 from app.api.v1 import sites as sites_api
@@ -18,6 +19,14 @@ logger = logging.getLogger("cei")
 enable_docs = getattr(settings, "enable_docs", False)
 logger.info(f"Startup: enable_docs={enable_docs}")
 
+# Log DB backend type (sqlite, postgresql, etc.) without leaking credentials
+try:
+    db_backend = (settings.database_url or "").split(":", 1)[0]
+except Exception:  # extremely defensive
+    db_backend = "unknown"
+
+logger.info("DB backend detected: %s", db_backend)
+
 # --- App setup ---
 app = FastAPI(
     title="CEI API",
@@ -27,13 +36,14 @@ app = FastAPI(
 )
 
 # --- CORS setup ---
+# settings.origins_list() should return a List[str] or [] if unset
 origins: Optional[List[str]] = None
 try:
     origins = settings.origins_list()
 except Exception:
     origins = None
 
-# sensible defaults during development
+# Sensible defaults during development
 if not origins:
     origins = [
         "http://localhost:5173",
@@ -54,8 +64,6 @@ app.add_middleware(
 )
 
 # --- Error logging middleware ---
-
-
 @app.middleware("http")
 async def log_exceptions(request: Request, call_next):
     try:
@@ -64,6 +72,7 @@ async def log_exceptions(request: Request, call_next):
     except Exception as e:
         logger.error(f"Unhandled error at {request.url.path}: {e}")
         logger.error(traceback.format_exc())
+        # Return safe, short payload to clients but include last lines for debugging
         tb_lines = traceback.format_exc().splitlines()
         return JSONResponse(
             status_code=500,
@@ -76,14 +85,15 @@ async def log_exceptions(request: Request, call_next):
 
 
 # --- Include routers (after app creation) ---
-# keep these imports below to avoid circular imports during startup
+# Keep these imports below to avoid circular imports during startup
 from app.api.v1 import (  # noqa: E402
-    auth,
-    billing,
     data_timeseries,
     upload_csv,
+    auth,
+    billing,
     analytics,
     alerts,
+    health,
 )
 
 app.include_router(data_timeseries.router, prefix="/api/v1")
@@ -93,11 +103,10 @@ app.include_router(billing.router, prefix="/api/v1")
 app.include_router(sites_api.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(alerts.router, prefix="/api/v1")
+app.include_router(health.router, prefix="/api/v1")
 
 
-# --- Root + health endpoints ---
-
-
+# --- Root + debug endpoints ---
 @app.get("/", include_in_schema=False)
 def root():
     if enable_docs:
@@ -108,9 +117,3 @@ def root():
 @app.get("/debug/docs-enabled", include_in_schema=False)
 def debug_docs_enabled():
     return {"enable_docs": enable_docs}
-
-
-@app.get("/api/v1/health", include_in_schema=False)
-def health():
-    # This is the canonical api health endpoint used by the frontend
-    return {"status": "ok"}

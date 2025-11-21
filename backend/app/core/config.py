@@ -1,56 +1,98 @@
 # backend/app/core/config.py
 
-import os
 from functools import lru_cache
-from pydantic_settings import BaseSettings
+from typing import List
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """
-    Global application settings loaded from environment variables (.env or Render/Vercel).
+    Central configuration for CEI backend.
+
+    All values come from environment variables or backend/.env.
+    This is the single source of truth for:
+    - environment (dev/staging/prod)
+    - database URL
+    - CORS / allowed origins
+    - docs toggle
+    - auth / token settings
     """
 
-    # --- Core app configuration ---
-    database_url: str
-    pgsslmode: str = "require"
-    jwt_secret: str
-    secret_key: str
-    allowed_origins: str = "*"
+    # Pydantic Settings config
+    # - env_file: backend/.env
+    # - extra="ignore": tolerate legacy env vars like BACKEND_CORS_ORIGINS
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
-    # --- Stripe configuration ---
-    stripe_secret_key: str | None = None
-    stripe_webhook_secret: str | None = None
+    # High-level environment flags
+    environment: str = Field(
+        default="dev",
+        description="Deployment environment identifier (dev|staging|prod)",
+        env="ENVIRONMENT",
+    )
+    debug: bool = Field(default=True, env="DEBUG")
 
-    # --- Supabase configuration ---
-    supabase_url: str | None = None
-    supabase_service_role_key: str | None = None
+    # Database
+    database_url: str = Field(
+        default="sqlite:///../dev.db",
+        env="DATABASE_URL",
+        description="SQLAlchemy-style DB URL (SQLite for dev, Postgres in prod).",
+    )
 
-    # --- Misc environment info ---
-    env: str = "production"
-    port: int = 8000
+    # Auth / tokens
+    jwt_secret: str = Field(
+        default="supersecret",
+        env="JWT_SECRET",
+        description="JWT signing secret; override in all non-dev environments.",
+    )
+    access_token_expire_minutes: int = Field(
+        default=60,
+        env="ACCESS_TOKEN_EXPIRE_MINUTES",
+    )
+    refresh_token_expire_days: int = Field(
+        default=7,
+        env="REFRESH_TOKEN_EXPIRE_DAYS",
+    )
 
-    # --- Optional frontend key (for client-side Stripe) ---
-    vite_stripe_public_key: str | None = None
+    # CORS / frontends
+    allowed_origins: str = Field(
+        default=(
+            "http://localhost:5173,"
+            "http://127.0.0.1:5173,"
+            "https://cei-frontend.herokuapp.com,"
+            "https://cei-mvp.onrender.com"
+        ),
+        env="ALLOWED_ORIGINS",
+        description="Comma-separated list of allowed frontend origins.",
+    )
 
-    # --- Utility methods ---
-    def origins_list(self) -> list[str]:
+    # API docs toggle
+    enable_docs: bool = Field(
+        default=False,
+        env="ENABLE_DOCS",
+        description="If true, exposes /api/v1/docs and /api/v1/redoc.",
+    )
+
+    def origins_list(self) -> List[str]:
         """
-        Converts comma-separated origins string into a list for CORS.
+        Split ALLOWED_ORIGINS into a list for CORSMiddleware.
         """
-        return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
-
-    class Config:
-        env_file = ".env"
-        extra = "ignore"  # allows Render/Vercel to define extra env vars safely
+        if not self.allowed_origins:
+            return []
+        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
 
 @lru_cache()
 def get_settings() -> Settings:
     """
-    Cached settings instance (used throughout the app).
+    Cached settings instance so the app only parses env once.
     """
     return Settings()
 
 
-# Global settings instance
 settings = get_settings()
