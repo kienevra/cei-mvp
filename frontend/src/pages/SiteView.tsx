@@ -1,3 +1,4 @@
+// frontend/src/pages/SiteView.tsx
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
@@ -140,13 +141,15 @@ const SiteView: React.FC = () => {
       : `${totalKwh.toFixed(1)} kWh`
     : "—";
 
-  // Build trend points from API data (force numeric) + 24h label
+  // Build trend points from API data (force numeric)
   let trendPoints: TrendPoint[] = [];
   if (series && series.points && series.points.length > 0) {
     trendPoints = series.points.map((p) => {
       const d = new Date(p.ts);
-      const hour = d.getHours();
-      const label = hour.toString().padStart(2, "0"); // 24h: "00".."23"
+      const label = d.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
       const numericValue = Number(p.value);
       return {
         label,
@@ -161,17 +164,18 @@ const SiteView: React.FC = () => {
   const minVal = hasTrend ? Math.min(...trendValues) : 0;
 
   // Chart inner width
-  const barPixelWidth = 32;
+  const barPixelWidth = 40;
   const minContentWidth = 600;
   const chartContentWidth = hasTrend
     ? Math.max(trendPoints.length * barPixelWidth, minContentWidth)
     : minContentWidth;
 
-  // Pixel-based scaling
-  const chartMin = hasTrend ? Math.min(...trendValues) : 0;
-  const chartMax = hasTrend ? Math.max(...trendValues) : 0;
-  const chartSpan = chartMax - chartMin || 1;
-  const chartInnerHeightPx = 160;
+  // Limit label density
+  const maxLabels = 24; // we show every hour in 24h format; still keep a cap in case of weird data
+  const labelEvery =
+    trendPoints.length > maxLabels
+      ? Math.ceil(trendPoints.length / maxLabels)
+      : 1;
 
   // Concise trend summary for this site
   let trendSummary: string | null = null;
@@ -182,7 +186,7 @@ const SiteView: React.FC = () => {
     const peakLabel = trendPoints[peakIndex]?.label ?? "—";
     const windowHours = summary!.window_hours || 24;
 
-    trendSummary = `Peak hour at this site: ${peakLabel}:00 with ${maxVal.toFixed(
+    trendSummary = `Peak hour at this site: ${peakLabel} with ${maxVal.toFixed(
       1
     )} kWh · Average: ${avgVal.toFixed(
       1
@@ -251,6 +255,10 @@ const SiteView: React.FC = () => {
             textAlign: "right",
             fontSize: "0.8rem",
             color: "var(--cei-text-muted)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: "0.35rem",
           }}
         >
           {site?.location && (
@@ -261,6 +269,19 @@ const SiteView: React.FC = () => {
           )}
           <div>
             <span style={{ fontWeight: 500 }}>Site ID:</span> {id}
+          </div>
+          <div>
+            <Link
+              to="/upload"
+              className="cei-btn cei-btn-primary"
+              style={{
+                fontSize: "0.78rem",
+                padding: "0.35rem 0.9rem",
+                textDecoration: "none",
+              }}
+            >
+              Upload data
+            </Link>
           </div>
         </div>
       </section>
@@ -391,7 +412,10 @@ const SiteView: React.FC = () => {
 
       {/* Main grid: trend + metadata */}
       <section className="dashboard-main-grid">
-        <div className="cei-card" style={{ maxWidth: "100%", overflow: "hidden" }}>
+        <div
+          className="cei-card"
+          style={{ maxWidth: "100%", overflow: "hidden" }}
+        >
           <div
             style={{
               display: "flex",
@@ -480,17 +504,18 @@ const SiteView: React.FC = () => {
                   }}
                 >
                   {trendPoints.map((p, idx) => {
-                    const v = p.value;
-                    const normalized = (v - chartMin) / chartSpan;
-                    const barHeightPx =
-                      8 + normalized * (chartInnerHeightPx - 8);
+                    const val = p.value;
+                    const heightPct =
+                      !hasTrend || maxVal <= 0 ? 0 : (val / maxVal) * 100;
+
+                    const showLabel = idx % labelEvery === 0;
 
                     return (
                       <div
                         key={`${idx}-${p.label}`}
                         style={{
                           flex: "0 0 auto",
-                          width: "28px",
+                          width: "32px",
                           display: "flex",
                           flexDirection: "column",
                           alignItems: "center",
@@ -506,24 +531,27 @@ const SiteView: React.FC = () => {
                             whiteSpace: "nowrap",
                           }}
                         >
-                          {v.toFixed(0)}
+                          {val.toFixed(0)}
                         </span>
                         <div
                           style={{
                             width: "100%",
-                            borderRadius: "4px", // more rectangular
+                            borderRadius: "0.3rem",
                             background:
                               "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
-                            height: `${barHeightPx}px`,
-                            boxShadow: "0 4px 10px rgba(56, 189, 248, 0.35)",
-                            border: "1px solid rgba(148, 163, 184, 0.8)",
+                            height: `${heightPct}%`,
+                            boxShadow:
+                              "0 6px 18px rgba(56, 189, 248, 0.45)",
+                            border:
+                              "1px solid rgba(226, 232, 240, 0.8)",
                           }}
                         />
                         <span
                           style={{
-                            fontSize: "0.6rem",
+                            fontSize: "0.65rem",
                             color: "var(--cei-text-muted)",
                             whiteSpace: "nowrap",
+                            visibility: showLabel ? "visible" : "hidden",
                           }}
                         >
                           {p.label}

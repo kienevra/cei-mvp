@@ -22,7 +22,11 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
-      <Sidebar />
+      {/* Sidebar: visibility controlled via .sidebar-shell in global.css */}
+      <div className="sidebar-shell">
+        <Sidebar />
+      </div>
+
       <div className="flex-1 flex flex-col">
         <TopNav />
         <main>{children}</main>
@@ -36,10 +40,8 @@ const App: React.FC = () => (
     <AuthProvider>
       <Suspense fallback={<LoadingSpinner />}>
         <Routes>
-          {/* Public route */}
           <Route path="/login" element={<Login />} />
 
-          {/* Dashboard */}
           <Route
             path="/"
             element={
@@ -51,7 +53,6 @@ const App: React.FC = () => (
             }
           />
 
-          {/* Sites list */}
           <Route
             path="/sites"
             element={
@@ -63,7 +64,6 @@ const App: React.FC = () => (
             }
           />
 
-          {/* Single site view */}
           <Route
             path="/sites/:id"
             element={
@@ -75,7 +75,6 @@ const App: React.FC = () => (
             }
           />
 
-          {/* Alerts – FIXED (no nested route wrapper) */}
           <Route
             path="/alerts"
             element={
@@ -87,7 +86,6 @@ const App: React.FC = () => (
             }
           />
 
-          {/* Reports */}
           <Route
             path="/reports"
             element={
@@ -99,7 +97,6 @@ const App: React.FC = () => (
             }
           />
 
-          {/* CSV Upload */}
           <Route
             path="/upload"
             element={
@@ -111,7 +108,6 @@ const App: React.FC = () => (
             }
           />
 
-          {/* Account */}
           <Route
             path="/account"
             element={
@@ -123,7 +119,6 @@ const App: React.FC = () => (
             }
           />
 
-          {/* Settings */}
           <Route
             path="/settings"
             element={
@@ -135,7 +130,6 @@ const App: React.FC = () => (
             }
           />
 
-          {/* 404 – can leave without Layout if you want a bare page */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>

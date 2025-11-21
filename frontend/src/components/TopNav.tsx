@@ -1,18 +1,37 @@
 // frontend/src/components/TopNav.tsx
-import React from "react";
+import React, { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
 const TopNav: React.FC = () => {
-  const { isAuthenticated, logout } = useAuth();
+  const { user, logout } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  const handleLogout = () => {
+  const navItems = [
+    { label: "Dashboard", path: "/" },
+    { label: "Sites", path: "/sites" },
+    { label: "Alerts", path: "/alerts" },
+    { label: "Upload CSV", path: "/upload" },
+    { label: "Reports", path: "/reports" },
+    { label: "Settings", path: "/settings" },
+    { label: "Account", path: "/account" },
+  ];
+
+  const handleNavClick = (path: string) => {
+    navigate(path);
+    setMenuOpen(false);
+  };
+
+  const handleLogoutClick = () => {
+    setMenuOpen(false);
     logout();
   };
 
   return (
     <header className="cei-topnav">
       <div className="cei-topnav-inner">
-        {/* Brand */}
         <div className="cei-topnav-brand">
           <span className="cei-topnav-brand-main">CEI</span>
           <span className="cei-topnav-brand-sub">
@@ -20,24 +39,78 @@ const TopNav: React.FC = () => {
           </span>
         </div>
 
-        {/* Right side – just logout for now */}
-        <div className="cei-topnav-right">
-          {isAuthenticated && (
+        {/* Desktop user info (hidden on mobile) */}
+        <div className="cei-topnav-right hide-on-mobile">
+          {user?.email && (
+            <span style={{ marginRight: "0.5rem" }}>{user.email}</span>
+          )}
+          <button
+            type="button"
+            className="cei-btn cei-btn-ghost"
+            onClick={logout}
+          >
+            Logout
+          </button>
+        </div>
+
+        {/* Mobile menu toggle – 3-dot button */}
+        <div className="cei-mobile-menu-toggle">
+          <button
+            type="button"
+            aria-label="Open navigation menu"
+            className="cei-btn cei-btn-ghost"
+            onClick={() => setMenuOpen((prev) => !prev)}
+          >
+            ⋮
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile dropdown menu */}
+      {menuOpen && (
+        <div className="cei-mobile-menu">
+          <div className="cei-mobile-menu-list">
+            {navItems.map((item) => {
+              const active = location.pathname === item.path;
+              return (
+                <button
+                  key={item.path}
+                  type="button"
+                  className="cei-mobile-menu-link"
+                  onClick={() => handleNavClick(item.path)}
+                >
+                  <span>{item.label}</span>
+                  {active && (
+                    <span
+                      style={{ fontSize: "0.7rem", opacity: 0.7, marginLeft: 8 }}
+                    >
+                      ●
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="cei-mobile-menu-footer">
+            <div>
+              {user?.email ? (
+                <span>{user.email}</span>
+              ) : (
+                <span>Signed in</span>
+              )}
+            </div>
             <button
               type="button"
-              className="cei-btn cei-btn-ghost"
-              style={{
-                padding: "0.3rem 0.9rem",
-                fontSize: "0.8rem",
-                borderRadius: "999px",
-              }}
-              onClick={handleLogout}
+              className="cei-btn cei-btn-danger"
+              style={{ padding: "0.3rem 0.7rem", fontSize: "0.78rem" }}
+              onClick={handleLogoutClick}
             >
               Logout
             </button>
-          )}
+          </div>
         </div>
-      </div>
+      )}
     </header>
   );
 };

@@ -139,7 +139,7 @@ main {
   align-items: center;
   justify-content: center;
   padding: 0 1.5rem;
-  position: static !important; /* force non-sticky, non-fixed */
+  position: relative !important; /* anchor mobile menu dropdown */
   z-index: 1;
 }
 
@@ -176,6 +176,72 @@ main {
   font-size: 0.75rem;
   color: var(--cei-text-muted);
   opacity: 0.9;
+}
+
+/* === Mobile menu controls (top-right 3-dot) === */
+
+.cei-mobile-menu-toggle {
+  display: none; /* enabled only on mobile via media query */
+}
+
+/* Dropdown panel for mobile nav */
+.cei-mobile-menu {
+  position: absolute;
+  top: 56px;
+  right: 0;
+  width: 100%;
+  max-width: 260px;
+  background: rgba(15, 23, 42, 0.98);
+  border-left: 1px solid var(--cei-border-subtle);
+  border-bottom: 1px solid var(--cei-border-subtle);
+  box-shadow: var(--cei-shadow-soft);
+  border-radius: 0 0 0 var(--cei-radius-lg);
+  padding: 0.75rem;
+  z-index: 40;
+  display: none; /* shown only on mobile media query */
+}
+
+.cei-mobile-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.cei-mobile-menu-link {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--cei-text-main);
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.75rem;
+  font-size: 0.87rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+
+.cei-mobile-menu-link:hover {
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.cei-mobile-menu-footer {
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--cei-border-subtle);
+  font-size: 0.78rem;
+  color: var(--cei-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* === Sidebar visibility === */
+
+/* Default: hide sidebar; re-enable it on tablet/desktop breakpoint */
+.sidebar-shell {
+  display: none;
 }
 
 /* === Typography === */
@@ -376,9 +442,17 @@ tbody tr:hover {
   gap: var(--cei-spacing-md);
 }
 
+/* Desktop layout tweaks (only large screens) */
 @media (min-width: 1024px) {
   .dashboard-main-grid {
     grid-template-columns: 2fr 1.2fr;
+  }
+}
+
+/* Sidebar appears from tablet width and up */
+@media (min-width: 768px) {
+  .sidebar-shell {
+    display: block;
   }
 }
 
@@ -421,14 +495,30 @@ tbody tr:hover {
 }
 
 /* === Responsive tweaks for mobile === */
+/* Mobile: up to 767px -> 3-dot menu, no sidebar */
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   main {
     padding: var(--cei-spacing-md);
   }
 
   .dashboard-page {
     gap: var(--cei-spacing-md);
+  }
+
+  /* Collapse KPI / main grids to single column on small screens */
+  .dashboard-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--cei-spacing-md);
+  }
+
+  .dashboard-main-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Slightly tighter cards on mobile to reclaim space */
+  .cei-card {
+    padding: var(--cei-spacing-md);
   }
 
   table thead th,
@@ -466,5 +556,14 @@ tbody tr:hover {
   .cei-topnav-brand-sub {
     display: none;
   }
-}
 
+  /* Enable 3-dot toggle and dropdown only on mobile */
+  .cei-mobile-menu-toggle {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .cei-mobile-menu {
+    display: block;
+  }
+}
