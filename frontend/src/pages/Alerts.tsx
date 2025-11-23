@@ -1,46 +1,40 @@
 // frontend/src/pages/Alerts.tsx
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { getSites, getTimeseriesSummary } from "../services/api";
+import { getAlerts } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 
-type SiteRecord = {
-  id: number | string;
-  name: string;
-  location?: string | null;
+type AlertRecord = {
+  id?: string | number;
+  site_id?: string | null;
+  site_name?: string | null;
+  severity?: "critical" | "warning" | "info" | string;
+  title?: string;
+  message?: string;
+  metric?: string | null;
+  window_hours?: number | null;
+  triggered_at?: string | null;
+  // keep it flexible so we don't break on backend changes
   [key: string]: any;
 };
 
-type SummaryResponse = {
-  site_id: string | null;
-  meter_id: string | null;
-  window_hours: number;
-  total_value: number;
-  points: number;
-  from_timestamp: string | null;
-  to_timestamp: string | null;
-};
-
-type AlertSeverity = "critical" | "warning" | "info";
-
-type AlertItem = {
-  id: string; // synthetic alert id
-  siteId: string;
-  siteName: string;
-  location?: string | null;
-  severity: AlertSeverity;
-  message: string;
-  totalKwh: number;
-  points: number;
-};
+function toSiteRouteId(siteId: string): string {
+  if (!siteId) return siteId;
+  // If we get "site-3", turn it into "3" for the /sites/{id} route
+  if (siteId.startsWith("site-")) {
+    return siteId.substring("site-".length);
+  }
+  return siteId;
+}
 
 const Alerts: React.FC = () => {
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [sites, setSites] = useState<SiteRecord[]>([]);
+  // 24h vs 7 days (168h)
+  const [windowHours, setWindowHours] = useState<24 | 168>(24);
 
   useEffect(() => {
     let isMounted = true;
@@ -50,120 +44,13 @@ const Alerts: React.FC = () => {
       setError(null);
 
       try {
-        // 1) Get sites
-        const siteList = await getSites();
+        const data = await getAlerts({ window_hours: windowHours });
         if (!isMounted) return;
 
-        const normalizedSites = Array.isArray(siteList)
-          ? (siteList as SiteRecord[])
-          : [];
+        // Normalize into AlertRecord[]
+        const normalized: AlertRecord[] = Array.isArray(data) ? data : [];
 
-        setSites(normalizedSites);
-
-        if (normalizedSites.length === 0) {
-          setAlerts([]);
-          return;
-        }
-
-        // 2) For each site, fetch last 24h summary (using site-{id} key)
-        const results = await Promise.all(
-          normalizedSites.map(async (site) => {
-            const idStr = String(site.id);
-            const siteKey = `site-${idStr}`;
-
-            try {
-              const summary = (await getTimeseriesSummary({
-                site_id: siteKey,
-                window_hours: 24,
-              })) as SummaryResponse;
-
-              return { site, summary, error: null as string | null };
-            } catch (e: any) {
-              return {
-                site,
-                summary: null,
-                error:
-                  e?.message ||
-                  `Failed to load summary for site ${site.name || idStr}`,
-              };
-            }
-          })
-        );
-
-        if (!isMounted) return;
-
-        // 3) Build alert list based on simple rules
-        const builtAlerts: AlertItem[] = [];
-
-        for (const { site, summary, error: siteErr } of results) {
-          const idStr = String(site.id);
-
-          if (siteErr || !summary) {
-            builtAlerts.push({
-              id: `site-${idStr}-error`,
-              siteId: idStr,
-              siteName: site.name || `Site ${idStr}`,
-              location: site.location,
-              severity: "warning",
-              message:
-                siteErr ||
-                "Unable to compute energy summary for this site (API error).",
-              totalKwh: 0,
-              points: 0,
-            });
-            continue;
-          }
-
-          const total = summary.total_value || 0;
-          const points = summary.points || 0;
-
-          // Rule 1 – No data in last 24h
-          if (points === 0) {
-            builtAlerts.push({
-              id: `site-${idStr}-no-data`,
-              siteId: idStr,
-              siteName: site.name || `Site ${idStr}`,
-              location: site.location,
-              severity: "info",
-              message:
-                "No timeseries records in the last 24 hours for this site.",
-              totalKwh: 0,
-              points: 0,
-            });
-            continue;
-          }
-
-          // Rule 2 – High usage threshold (simple for now)
-          let severity: AlertSeverity | null = null;
-          let msg = "";
-
-          if (total >= 400) {
-            severity = "critical";
-            msg = `Very high energy consumption in the last 24 hours: ${total.toFixed(
-              1
-            )} kWh.`;
-          } else if (total >= 300) {
-            severity = "warning";
-            msg = `Elevated energy consumption in the last 24 hours: ${total.toFixed(
-              1
-            )} kWh.`;
-          }
-
-          if (severity) {
-            builtAlerts.push({
-              id: `site-${idStr}-usage`,
-              siteId: idStr,
-              siteName: site.name || `Site ${idStr}`,
-              location: site.location,
-              severity,
-              message: msg,
-              totalKwh: total,
-              points,
-            });
-          }
-        }
-
-        setAlerts(builtAlerts);
+        setAlerts(normalized);
       } catch (e: any) {
         if (!isMounted) return;
         setError(e?.message || "Failed to load alerts.");
@@ -178,31 +65,51 @@ const Alerts: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [windowHours]);
 
-  const severityLabel = (sev: AlertSeverity) => {
-    switch (sev) {
-      case "critical":
-        return "Critical";
-      case "warning":
-        return "Warning";
-      default:
-        return "Info";
-    }
-  };
+  const totalAlerts = alerts.length;
+  const criticalCount = alerts.filter((a) => a.severity === "critical").length;
+  const warningCount = alerts.filter((a) => a.severity === "warning").length;
+  const infoCount = alerts.filter((a) => a.severity === "info").length;
 
-  const severityClass = (sev: AlertSeverity) => {
-    switch (sev) {
+  const windowLabel = windowHours === 24 ? "last 24 hours" : "last 7 days";
+
+  function formatTimestamp(ts?: string | null): string {
+    if (!ts) return "—";
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return ts;
+    return d.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  function severityPillClass(severity: string | undefined): string {
+    switch (severity) {
       case "critical":
         return "cei-pill-critical";
       case "warning":
         return "cei-pill-warning";
+      case "info":
       default:
         return "cei-pill-info";
     }
-  };
+  }
 
-  const hasAlerts = alerts.length > 0;
+  function severityLabel(severity: string | undefined): string {
+    switch (severity) {
+      case "critical":
+        return "Critical";
+      case "warning":
+        return "Warning";
+      case "info":
+      default:
+        return "Info";
+    }
+  }
 
   return (
     <div className="dashboard-page">
@@ -223,7 +130,7 @@ const Alerts: React.FC = () => {
               letterSpacing: "-0.02em",
             }}
           >
-            Alerts & triage
+            Alerts
           </h1>
           <p
             style={{
@@ -232,25 +139,71 @@ const Alerts: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Lightweight ops briefing for the last 24 hours. Each alert is a
-            prompt to check a site, validate the pattern, and decide whether
-            to act now or park it.
+            Rule-based exceptions generated from your timeseries data.{" "}
+            <strong>Critical</strong> alerts indicate high-confidence waste or
+            abnormal baselines, while <strong>Warnings</strong> flag patterns
+            worth a closer look.
           </p>
         </div>
+
+        {/* Window toggle */}
         <div
           style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: "0.4rem",
             fontSize: "0.8rem",
             color: "var(--cei-text-muted)",
-            textAlign: "right",
           }}
         >
-          {sites.length > 0 && (
-            <div>
-              Monitoring <strong>{sites.length}</strong> sites.
-            </div>
-          )}
-          <div>Rules: no data + high-usage thresholds</div>
-          <div>Window: last 24 hours</div>
+          <div>Window: {windowLabel}</div>
+          <div
+            style={{
+              display: "inline-flex",
+              padding: "0.2rem",
+              borderRadius: "999px",
+              border: "1px solid var(--cei-border-subtle)",
+              background: "rgba(15,23,42,0.95)",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setWindowHours(24)}
+              style={{
+                padding: "0.25rem 0.7rem",
+                borderRadius: "999px",
+                border: "none",
+                fontSize: "0.78rem",
+                cursor: "pointer",
+                background:
+                  windowHours === 24 ? "rgba(56,189,248,0.18)" : "transparent",
+                color:
+                  windowHours === 24 ? "#e5e7eb" : "var(--cei-text-muted)",
+              }}
+            >
+              24h
+            </button>
+            <button
+              type="button"
+              onClick={() => setWindowHours(168)}
+              style={{
+                padding: "0.25rem 0.7rem",
+                borderRadius: "999px",
+                border: "none",
+                fontSize: "0.78rem",
+                cursor: "pointer",
+                background:
+                  windowHours === 168
+                    ? "rgba(56,189,248,0.18)"
+                    : "transparent",
+                color:
+                  windowHours === 168 ? "#e5e7eb" : "var(--cei-text-muted)",
+              }}
+            >
+              7d
+            </button>
+          </div>
         </div>
       </section>
 
@@ -261,8 +214,119 @@ const Alerts: React.FC = () => {
         </section>
       )}
 
-      {/* Main card */}
-      <section style={{ marginTop: "0.9rem" }}>
+      {/* Summary row */}
+      <section className="dashboard-row">
+        <div className="cei-card">
+          <div
+            style={{
+              fontSize: "0.75rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Total alerts – {windowLabel}
+          </div>
+          <div
+            style={{
+              marginTop: "0.35rem",
+              fontSize: "1.6rem",
+              fontWeight: 600,
+            }}
+          >
+            {loading ? "…" : totalAlerts}
+          </div>
+          <div
+            style={{
+              marginTop: "0.25rem",
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Count of all critical, warning, and info-level alerts raised in the
+            selected window.
+          </div>
+        </div>
+
+        <div className="cei-card">
+          <div
+            style={{
+              fontSize: "0.75rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Severity mix
+          </div>
+          <div
+            style={{
+              marginTop: "0.5rem",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "0.4rem",
+              alignItems: "center",
+            }}
+          >
+            <span className="cei-pill-critical">
+              Critical: {loading ? "…" : criticalCount}
+            </span>
+            <span className="cei-pill-warning">
+              Warning: {loading ? "…" : warningCount}
+            </span>
+            <span className="cei-pill-info">
+              Info: {loading ? "…" : infoCount}
+            </span>
+          </div>
+          <div
+            style={{
+              marginTop: "0.35rem",
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Use this to understand whether the portfolio is mostly “noise” or if
+            true exceptions are creeping in.
+          </div>
+        </div>
+
+        <div className="cei-card">
+          <div
+            style={{
+              fontSize: "0.75rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Operational playbook
+          </div>
+          <div
+            style={{
+              marginTop: "0.3rem",
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            <ul
+              style={{
+                margin: 0,
+                paddingLeft: "1.1rem",
+                lineHeight: 1.6,
+              }}
+            >
+              <li>
+                Work through <strong>critical</strong> alerts first.
+              </li>
+              <li>Review warnings during daily/weekly ops meetings.</li>
+              <li>Use site links below to investigate trends directly.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* Alerts list */}
+      <section>
         <div className="cei-card">
           <div
             style={{
@@ -280,7 +344,7 @@ const Alerts: React.FC = () => {
                   fontWeight: 600,
                 }}
               >
-                Today&apos;s triage list
+                Current alerts
               </div>
               <div
                 style={{
@@ -289,9 +353,8 @@ const Alerts: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                Use this as a daily “who needs attention” list. Critical means
-                “likely worth a conversation”. Warnings and info are good
-                candidates for weekly review.
+                Site-level exceptions for the selected window. Click through to
+                the site dashboard to see the underlying trend.
               </div>
             </div>
           </div>
@@ -308,65 +371,152 @@ const Alerts: React.FC = () => {
             </div>
           )}
 
-          {!loading && !hasAlerts && (
+          {!loading && totalAlerts === 0 && (
             <div
               style={{
                 fontSize: "0.85rem",
                 color: "var(--cei-text-muted)",
-                paddingTop: "0.5rem",
               }}
             >
-              No alerts triggered under the current rules. As more sites and
-              timeseries come online, high-usage and no-data conditions will
-              appear here so you can triage them quickly.
+              No alerts raised in {windowLabel}. If you recently uploaded data,
+              give CEI a moment to crunch baselines and reconverge on
+              thresholds.
             </div>
           )}
 
-          {!loading && hasAlerts && (
-            <div style={{ marginTop: "0.5rem", overflowX: "auto" }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Site</th>
-                    <th>Location</th>
-                    <th>Severity</th>
-                    <th>Signal</th>
-                    <th>Energy (last 24h)</th>
-                    <th>Readings</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {alerts.map((a) => (
-                    <tr key={a.id}>
-                      <td>{a.siteName}</td>
-                      <td>{a.location || "—"}</td>
-                      <td>
-                        <span className={severityClass(a.severity)}>
-                          {severityLabel(a.severity)}
-                        </span>
-                      </td>
-                      <td style={{ maxWidth: "320px" }}>{a.message}</td>
-                      <td>
-                        {a.totalKwh > 0 ? `${a.totalKwh.toFixed(1)} kWh` : "—"}
-                      </td>
-                      <td>{a.points > 0 ? a.points : "—"}</td>
-                      <td>
-                        <Link
-                          to={`/sites/${a.siteId}`}
+          {!loading && totalAlerts > 0 && (
+            <div
+              style={{
+                marginTop: "0.5rem",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.6rem",
+              }}
+            >
+              {alerts.map((alert, idx) => {
+                const siteIdRaw =
+                  alert.site_id || alert.site_name || undefined;
+                const siteLabel = alert.site_name || String(siteIdRaw || "—");
+                const sev = alert.severity || "info";
+                const triggeredLabel = formatTimestamp(alert.triggered_at);
+
+                const key = String(alert.id ?? `${siteLabel}-${idx}`);
+                const routeId = siteIdRaw
+                  ? toSiteRouteId(String(siteIdRaw))
+                  : "";
+
+                return (
+                  <div
+                    key={key}
+                    style={{
+                      borderRadius: "0.75rem",
+                      border: "1px solid rgba(148,163,184,0.4)",
+                      padding: "0.7rem 0.85rem",
+                      background:
+                        sev === "critical"
+                          ? "rgba(127, 29, 29, 0.4)"
+                          : sev === "warning"
+                          ? "rgba(120, 53, 15, 0.35)"
+                          : "rgba(15, 23, 42, 0.8)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: "0.75rem",
+                        alignItems: "flex-start",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0.3rem",
+                          flex: 1,
+                        }}
+                      >
+                        <div
                           style={{
-                            fontSize: "0.8rem",
-                            color: "var(--cei-text-accent)",
-                            textDecoration: "none",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.5rem",
                           }}
                         >
-                          Open site view →
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                          <span className={severityPillClass(sev)}>
+                            {severityLabel(sev)}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: "0.8rem",
+                              color: "var(--cei-text-muted)",
+                            }}
+                          >
+                            Site: <strong>{siteLabel}</strong>{" "}
+                            {siteIdRaw && siteIdRaw !== siteLabel && (
+                              <span style={{ opacity: 0.7 }}>
+                                (<code>{String(siteIdRaw)}</code>)
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "0.9rem",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {alert.title || "Energy anomaly detected"}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "0.8rem",
+                            color: "var(--cei-text-muted)",
+                          }}
+                        >
+                          {alert.message ||
+                            "This site’s recent energy pattern deviates from its baseline. Review the dashboard for confirmation."}
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          textAlign: "right",
+                          fontSize: "0.78rem",
+                          color: "var(--cei-text-muted)",
+                          minWidth: "140px",
+                        }}
+                      >
+                        <div>Triggered: {triggeredLabel}</div>
+                        {alert.metric && (
+                          <div style={{ marginTop: "0.15rem" }}>
+                            Metric: <code>{alert.metric}</code>
+                          </div>
+                        )}
+                        {alert.window_hours && (
+                          <div style={{ marginTop: "0.15rem" }}>
+                            Window: {alert.window_hours}h
+                          </div>
+                        )}
+                        {routeId && (
+                          <div style={{ marginTop: "0.3rem" }}>
+                            <Link
+                              to={`/sites/${routeId}`}
+                              style={{
+                                color: "var(--cei-text-accent)",
+                                fontSize: "0.78rem",
+                                textDecoration: "none",
+                              }}
+                            >
+                              View site →
+                            </Link>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

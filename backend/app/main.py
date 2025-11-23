@@ -96,11 +96,11 @@ from app.api.v1 import (  # noqa: E402
     health,
 )
 
-app.include_router(data_timeseries.router, prefix="/api/v1")
-app.include_router(upload_csv.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(billing.router, prefix="/api/v1")
 app.include_router(sites_api.router, prefix="/api/v1")
+app.include_router(data_timeseries.router, prefix="/api/v1")
+app.include_router(upload_csv.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(alerts.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
