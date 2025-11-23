@@ -567,3 +567,43 @@ tbody tr:hover {
     display: block;
   }
 }
+
+/* Local scrollbar styling for trend charts only */
+.cei-trend-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-color: var(--cei-text-muted) transparent; /* Firefox */
+  scrollbar-width: thin;
+}
+
+.cei-trend-scroll::-webkit-scrollbar {
+  height: 8px; /* horizontal bar height */
+}
+
+.cei-trend-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cei-trend-scroll::-webkit-scrollbar-thumb {
+  background: var(--cei-text-muted); /* same tone as time labels */
+  border-radius: 999px;
+}
+
+/* Trend chart scrollbars – match hour label color */
+.cei-trend-scroll {
+  scrollbar-color: var(--cei-text-muted) transparent; /* Firefox */
+}
+
+.cei-trend-scroll::-webkit-scrollbar {
+  height: 8px; /* horizontal scrollbar height */
+}
+
+.cei-trend-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cei-trend-scroll::-webkit-scrollbar-thumb {
+  background: var(--cei-text-muted); /* same as hour labels */
+  border-radius: 999px;
+}

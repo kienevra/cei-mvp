@@ -1,6 +1,10 @@
 // frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useState } from "react";
-import { getTimeseriesSummary, getTimeseriesSeries, getSites } from "../services/api";
+import {
+  getTimeseriesSummary,
+  getTimeseriesSeries,
+  getSites,
+} from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 
@@ -31,6 +35,69 @@ type TrendPoint = {
   label: string;
   value: number;
 };
+
+function formatDateTimeLabel(raw?: string | null): string | null {
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatTimeRange(
+  from?: string | null,
+  to?: string | null
+): string | null {
+  if (!from || !to) return null;
+  const fromD = new Date(from);
+  const toD = new Date(to);
+  if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) {
+    return null;
+  }
+  const sameDay =
+    fromD.getFullYear() === toD.getFullYear() &&
+    fromD.getMonth() === toD.getMonth() &&
+    fromD.getDate() === toD.getDate();
+
+  if (sameDay) {
+    const dayPart = toD.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    });
+    const fromTime = fromD.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const toTime = toD.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return `${dayPart} · ${fromTime} – ${toTime}`;
+  }
+
+  const fromLabel = fromD.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const toLabel = toD.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${fromLabel} → ${toLabel}`;
+}
+
 
 const Dashboard: React.FC = () => {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
@@ -103,6 +170,14 @@ const Dashboard: React.FC = () => {
 
   const hasSummaryData = summary && summary.points > 0;
   const totalKwh = hasSummaryData ? summary!.total_value : 0;
+  const lastUpdatedLabel = hasSummaryData
+  ? formatDateTimeLabel(summary!.to_timestamp)
+  : null;
+
+  const dataWindowLabel = hasSummaryData
+  ? formatTimeRange(summary!.from_timestamp, summary!.to_timestamp)
+  : null;
+
 
   const formattedKwh = hasSummaryData
     ? totalKwh >= 1000
@@ -110,12 +185,11 @@ const Dashboard: React.FC = () => {
       : `${totalKwh.toFixed(1)} kWh`
     : "—";
 
-  // Build trend points from API data (force numeric)
+  // Build trend points from API data (force numeric, 24h labels)
   let trendPoints: TrendPoint[] = [];
   if (series && series.points && series.points.length > 0) {
     trendPoints = series.points.map((p) => {
       const d = new Date(p.ts);
-      // 24-hour clock, every bar gets a label
       const label = d.toLocaleTimeString(undefined, {
         hour: "2-digit",
         minute: "2-digit",
@@ -134,15 +208,16 @@ const Dashboard: React.FC = () => {
   const maxVal = hasTrend ? Math.max(...trendValues) : 0;
   const minVal = hasTrend ? Math.min(...trendValues) : 0;
 
-  // Bar height in pixels (avoid percentage weirdness)
-  const maxBarHeight = 160; // px
-
   // Chart content width: fixed per bar, with a minimum
   const barPixelWidth = 40; // px per bar
   const minContentWidth = 600; // px minimum
   const chartContentWidth = hasTrend
     ? Math.max(trendPoints.length * barPixelWidth, minContentWidth)
     : minContentWidth;
+
+  // Pixel-based bar height mapping for visible magnitude differences
+  const maxBarHeightPx = 160; // tallest bar inside chart
+  const baseBarHeightPx = 20; // minimum visible height when value > 0
 
   // High-level summary of the trend
   let trendSummary: string | null = null;
@@ -195,8 +270,8 @@ const Dashboard: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            High-level energy view across all sites over the last 24 hours.
-            Use this as your daily cockpit: is the fleet behaving as expected?
+            High-level energy view across all sites over the last 24 hours. Use
+            this as your daily cockpit: is the fleet behaving as expected?
           </p>
         </div>
         <div
@@ -212,7 +287,21 @@ const Dashboard: React.FC = () => {
             </div>
           )}
           <div>Window: last 24 hours</div>
-        </div>
+          {lastUpdatedLabel && (
+            <div style={{ marginTop: "0.15rem" }}>
+              Last updated:{" "}
+              <span style={{ color: "var(--cei-text-accent)" }}>
+                {lastUpdatedLabel}
+              </span>
+            </div>
+          )}
+          {dataWindowLabel && (
+            <div style={{ marginTop: "0.1rem", fontSize: "0.75rem" }}>
+              Data window: {dataWindowLabel}
+    </div>
+  )}
+</div>
+
       </section>
 
       {/* Errors */}
@@ -407,6 +496,7 @@ const Dashboard: React.FC = () => {
             <>
               {/* Local scroll container just for the chart */}
               <div
+                className="cei-trend-scroll"
                 style={{
                   marginTop: "0.75rem",
                   borderRadius: "0.75rem",
@@ -433,10 +523,18 @@ const Dashboard: React.FC = () => {
                 >
                   {trendPoints.map((p, idx) => {
                     const val = p.value;
-                    const heightPx =
-                      !hasTrend || maxVal <= 0
-                        ? 0
-                        : (val / maxVal) * maxBarHeight; // proportional in px
+
+                    let heightPx = 0;
+                    if (hasTrend && maxVal > 0) {
+                      if (maxVal > minVal) {
+                        const ratio = (val - minVal) / (maxVal - minVal || 1);
+                        heightPx =
+                          baseBarHeightPx + ratio * maxBarHeightPx;
+                      } else {
+                        // all equal > 0
+                        heightPx = baseBarHeightPx + maxBarHeightPx;
+                      }
+                    }
 
                     return (
                       <div
@@ -451,7 +549,7 @@ const Dashboard: React.FC = () => {
                           gap: "0.25rem",
                         }}
                       >
-                        {/* Numeric value for debugging proportionality */}
+                        {/* numeric value for sanity check */}
                         <span
                           style={{
                             fontSize: "0.6rem",

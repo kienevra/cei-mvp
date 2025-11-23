@@ -1,72 +1,121 @@
-import React, { useState } from "react";
+// frontend/src/pages/CSVUpload.tsx
+import React, { useEffect, useState } from "react";
+import { uploadCsv } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
-import { uploadCsv } from "../services/api";
 
-type UploadResult = any;
+type CsvUploadBackendResult = {
+  rows_received: number;
+  rows_ingested: number;
+  rows_failed: number;
+  errors: string[];
+  sample_site_ids: string[];
+  sample_meter_ids: string[];
+};
+
+type StoredUploadSnapshot = CsvUploadBackendResult & {
+  completedAt: string; // ISO timestamp stored on the client
+};
+
+const STORAGE_KEY = "cei_last_upload_result";
+
+function formatDateTimeLabel(raw?: string | null): string | null {
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 const CSVUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<UploadResult | null>(null);
-  const [success, setSuccess] = useState(false);
-  const [showRaw, setShowRaw] = useState(false);
+  const [result, setResult] = useState<CsvUploadBackendResult | null>(null);
+  const [lastSnapshot, setLastSnapshot] = useState<StoredUploadSnapshot | null>(
+    null
+  );
+
+  // Load last successful upload snapshot from localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as StoredUploadSnapshot;
+      if (parsed && typeof parsed.completedAt === "string") {
+        setLastSnapshot(parsed);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0] || null;
-    setFile(f);
     setError(null);
-    setSuccess(false);
     setResult(null);
+    if (!e.target.files || e.target.files.length === 0) {
+      setFile(null);
+      return;
+    }
+    const f = e.target.files[0];
+    setFile(f);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+    setResult(null);
+
     if (!file) {
-      setError("Please select a CSV file before uploading.");
+      setError("Please choose a CSV file to upload.");
       return;
     }
 
-    const formData = new FormData();
-    formData.append("file", file);
-
-    setUploading(true);
-    setError(null);
-    setSuccess(false);
-    setResult(null);
-
     try {
-      const res = await uploadCsv(formData);
-      setResult(res);
-      setSuccess(true);
-    } catch (err: any) {
-      // Special-case rate limit (429) for a clearer UX
-      if (err?.response?.status === 429) {
-        setError(
-          "You’ve hit the CSV upload limit for this workspace. Please wait a few minutes before trying again."
-        );
-      } else {
-        const backendDetail =
-          err?.response?.data?.detail ||
-          err?.response?.data?.error ||
-          err?.message;
-        setError(backendDetail || "Upload failed. Please try again.");
+      setUploading(true);
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const data = (await uploadCsv(formData)) as CsvUploadBackendResult;
+      setResult(data);
+
+      const snapshot: StoredUploadSnapshot = {
+        ...data,
+        completedAt: new Date().toISOString(),
+      };
+
+      setLastSnapshot(snapshot);
+
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+      } catch {
+        // ignore storage failures
       }
+    } catch (e: any) {
+      const msg =
+        e?.response?.data?.detail ||
+        e?.message ||
+        "Upload failed. Please check the file and try again.";
+      setError(msg);
     } finally {
       setUploading(false);
     }
   };
 
-  // Try to normalize common result shapes without assuming too much
-  const rowsInserted =
-    (result as any)?.rows_inserted ??
-    (result as any)?.rows_ingested ??
-    (result as any)?.inserted ??
-    null;
-  const rowsFailed =
-    (result as any)?.rows_failed ?? (result as any)?.failed ?? null;
-  const jobId = (result as any)?.job_id ?? (result as any)?.jobId ?? null;
+  const successRate =
+    result && result.rows_received > 0
+      ? (result.rows_ingested / result.rows_received) * 100
+      : null;
+
+  const lastCompletedLabel = lastSnapshot
+    ? formatDateTimeLabel(lastSnapshot.completedAt)
+    : null;
 
   return (
     <div className="dashboard-page">
@@ -87,7 +136,7 @@ const CSVUpload: React.FC = () => {
               letterSpacing: "-0.02em",
             }}
           >
-            CSV upload
+            Upload timeseries data
           </h1>
           <p
             style={{
@@ -96,236 +145,275 @@ const CSVUpload: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Upload batch timeseries data into CEI. This is ideal for pilots,
-            historical backfills, and analyst-driven imports.
+            Drag a CSV into CEI and we&apos;ll ingest energy readings into the
+            timeseries engine. Column{" "}
+            <code>order doesn&apos;t matter</code> as long as the headers
+            include <code>timestamp</code>, <code>value</code>,{" "}
+            <code>unit</code>, <code>site_id</code>, and <code>meter_id</code>.
           </p>
+        </div>
+        <div
+          style={{
+            textAlign: "right",
+            fontSize: "0.8rem",
+            color: "var(--cei-text-muted)",
+          }}
+        >
+          <div>Endpoint: /api/v1/upload-csv</div>
+          <div>Auth: required</div>
+          {lastSnapshot && lastCompletedLabel && (
+            <div style={{ marginTop: "0.35rem" }}>
+              <div style={{ fontSize: "0.78rem" }}>Last successful upload</div>
+              <div style={{ fontSize: "0.78rem" }}>
+                <span style={{ color: "var(--cei-text-accent)" }}>
+                  {lastCompletedLabel}
+                </span>
+                {", "}
+                ingested{" "}
+                <strong>{lastSnapshot.rows_ingested.toLocaleString()}</strong> /
+                {lastSnapshot.rows_received.toLocaleString()} rows.
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
-      {/* Instructions + form */}
-      <section className="dashboard-row">
-        <div className="cei-card">
-          <div
-            style={{
-              fontSize: "0.9rem",
-              fontWeight: 600,
-              marginBottom: "0.5rem",
-            }}
-          >
-            File requirements
-          </div>
-          <ul
-            style={{
-              margin: 0,
-              paddingLeft: "1.1rem",
-              fontSize: "0.84rem",
-              color: "var(--cei-text-muted)",
-              lineHeight: 1.5,
-            }}
-          >
-            <li>Format: CSV, UTF-8 encoded.</li>
-            <li>
-              Required columns (case-sensitive): <code>site_id</code>,{" "}
-              <code>meter_id</code>, <code>timestamp</code>, <code>value</code>
-              , <code>unit</code>.
-            </li>
-            <li>
-              Timestamps should be ISO-like, e.g.{" "}
-              <code>2025-11-18T07:00:00</code> or{" "}
-              <code>2025-11-18 07:00:00</code>.
-            </li>
-            <li>
-              <code>value</code> must be numeric; invalid rows may be rejected
-              server-side.
-            </li>
-          </ul>
-        </div>
+      {/* Error banner */}
+      {error && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <ErrorBanner message={error} onClose={() => setError(null)} />
+        </section>
+      )}
 
+      {/* Main card */}
+      <section style={{ marginTop: "0.9rem" }}>
         <div className="cei-card">
+          {/* Upload form */}
           <form onSubmit={handleSubmit}>
             <div
               style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "0.75rem",
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr)",
+                gap: "1rem",
+                alignItems: "flex-start",
               }}
             >
+              {/* Left: file picker */}
               <div>
-                <label htmlFor="csvFile">CSV file</label>
+                <label htmlFor="csv-file">CSV file</label>
                 <input
-                  id="csvFile"
+                  id="csv-file"
                   type="file"
                   accept=".csv,text/csv"
                   onChange={handleFileChange}
                 />
-              </div>
-              <div
-                style={{
-                  fontSize: "0.8rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
-                Select a CSV file and click <strong>Upload &amp; ingest</strong>
-                . Once processed, metrics will appear on the dashboard and site
-                views.
-              </div>
-              <div>
-                <button
-                  type="submit"
-                  className="cei-btn cei-btn-primary"
-                  disabled={!file || uploading}
-                >
-                  {uploading ? "Uploading…" : "Upload & ingest"}
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-      </section>
-
-      {/* Feedback area */}
-      <section>
-        <div className="cei-card">
-          {error && (
-            <div style={{ marginBottom: "0.75rem" }}>
-              <ErrorBanner message={error} onClose={() => setError(null)} />
-            </div>
-          )}
-
-          {uploading && (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                padding: "1rem 0",
-              }}
-            >
-              <LoadingSpinner />
-            </div>
-          )}
-
-          {!uploading && success && (
-            <div
-              style={{
-                marginBottom: "0.75rem",
-                fontSize: "0.85rem",
-                color: "var(--cei-text-main)",
-              }}
-            >
-              <div
-                style={{
-                  marginBottom: "0.3rem",
-                  fontWeight: 500,
-                }}
-              >
-                Upload complete.
-              </div>
-              <div style={{ color: "var(--cei-text-muted)" }}>
-                CEI successfully processed the file. You should see the impact
-                reflected in recent energy KPIs and time series charts.
-              </div>
-            </div>
-          )}
-
-          {!uploading && (rowsInserted !== null || rowsFailed !== null) && (
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "1rem",
-                marginTop: "0.4rem",
-                fontSize: "0.82rem",
-              }}
-            >
-              <div>
-                <span
+                <div
                   style={{
-                    fontSize: "0.75rem",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
+                    marginTop: "0.35rem",
+                    fontSize: "0.8rem",
                     color: "var(--cei-text-muted)",
-                    display: "block",
                   }}
                 >
-                  Rows ingested
-                </span>
-                <span style={{ fontWeight: 600 }}>
-                  {rowsInserted !== null ? rowsInserted : "—"}
-                </span>
-              </div>
-              <div>
-                <span
-                  style={{
-                    fontSize: "0.75rem",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                    color: "var(--cei-text-muted)",
-                    display: "block",
-                  }}
-                >
-                  Rows failed
-                </span>
-                <span style={{ fontWeight: 600 }}>
-                  {rowsFailed !== null ? rowsFailed : "—"}
-                </span>
-              </div>
-              {jobId && (
-                <div>
-                  <span
+                  CEI will read the header row and map columns by name. The
+                  engine expects at least:
+                  <ul
                     style={{
-                      fontSize: "0.75rem",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.06em",
-                      color: "var(--cei-text-muted)",
-                      display: "block",
+                      margin: "0.4rem 0 0",
+                      paddingLeft: "1.1rem",
+                      fontSize: "0.8rem",
                     }}
                   >
-                    Job id
-                  </span>
-                  <span style={{ fontFamily: "monospace" }}>{jobId}</span>
+                    <li>
+                      <code>timestamp</code> – ISO 8601 or{" "}
+                      <code>YYYY-MM-DD HH:MM:SS</code>
+                    </li>
+                    <li>
+                      <code>value</code> – numeric reading
+                    </li>
+                    <li>
+                      <code>unit</code> – e.g. <code>kWh</code>
+                    </li>
+                    <li>
+                      <code>site_id</code> – e.g. <code>site-1</code>
+                    </li>
+                    <li>
+                      <code>meter_id</code> – e.g. <code>meter-main-1</code>
+                    </li>
+                  </ul>
                 </div>
-              )}
-            </div>
-          )}
+              </div>
 
-          {!uploading && result && (
-            <div style={{ marginTop: "0.9rem" }}>
-              <button
-                type="button"
-                className="cei-btn cei-btn-ghost"
-                onClick={() => setShowRaw((prev) => !prev)}
+              {/* Right: call-to-action and hints */}
+              <div
+                style={{
+                  fontSize: "0.82rem",
+                  color: "var(--cei-text-muted)",
+                  borderLeft: "1px solid rgba(31, 41, 55, 0.8)",
+                  paddingLeft: "0.85rem",
+                }}
               >
-                {showRaw ? "Hide raw response" : "Show raw response"}
-              </button>
-              {showRaw && (
-                <pre
+                <div style={{ marginBottom: "0.4rem", fontWeight: 500 }}>
+                  Tips for smooth ingestion
+                </div>
+                <ul
                   style={{
-                    marginTop: "0.6rem",
-                    maxHeight: "260px",
-                    overflow: "auto",
-                    fontSize: "0.78rem",
-                    background: "rgba(15, 23, 42, 0.9)",
-                    padding: "0.7rem",
-                    borderRadius: "0.6rem",
-                    border: "1px solid rgba(31, 41, 55, 0.8)",
+                    margin: 0,
+                    paddingLeft: "1.1rem",
+                    lineHeight: 1.6,
                   }}
                 >
-                  {JSON.stringify(result, null, 2)}
-                </pre>
-              )}
+                  <li>Keep timestamps in a single timezone per file.</li>
+                  <li>
+                    Use stable <code>site_id</code> values so dashboards can
+                    build trends over time.
+                  </li>
+                  <li>
+                    If you backfill older data, it will not change the “last 24
+                    hours” KPIs but will appear in broader windows later.
+                  </li>
+                </ul>
+              </div>
             </div>
-          )}
 
-          {!uploading && !error && !result && !success && (
             <div
               style={{
-                fontSize: "0.82rem",
-                color: "var(--cei-text-muted)",
-                marginTop: "0.3rem",
+                marginTop: "1.2rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.75rem",
               }}
             >
-              No upload performed yet. Select a CSV file and run an ingest to
-              populate the CEI engine with data.
+              <button
+                type="submit"
+                className="cei-btn cei-btn-primary"
+                disabled={uploading}
+              >
+                {uploading ? "Uploading…" : "Upload CSV"}
+              </button>
+              {uploading && <LoadingSpinner />}
+            </div>
+          </form>
+
+          {/* Result panel */}
+          {result && (
+            <div
+              style={{
+                marginTop: "1.3rem",
+                paddingTop: "0.9rem",
+                borderTop: "1px solid rgba(31, 41, 55, 0.8)",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "0.9rem",
+                  fontWeight: 600,
+                  marginBottom: "0.35rem",
+                }}
+              >
+                Ingestion summary
+              </div>
+              <div
+                style={{
+                  fontSize: "0.82rem",
+                  color: "var(--cei-text-muted)",
+                  marginBottom: "0.45rem",
+                }}
+              >
+                CEI received{" "}
+                <strong>{result.rows_received.toLocaleString()}</strong> row
+                {result.rows_received === 1 ? "" : "s"}, ingested{" "}
+                <strong>{result.rows_ingested.toLocaleString()}</strong>, and
+                skipped{" "}
+                <strong>{result.rows_failed.toLocaleString()}</strong>.
+                {successRate !== null && (
+                  <>
+                    {" "}
+                    Effective success rate:{" "}
+                    <strong>{successRate.toFixed(1)}%</strong>.
+                  </>
+                )}
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "1.5rem",
+                  fontSize: "0.8rem",
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      fontSize: "0.72rem",
+                      color: "var(--cei-text-muted)",
+                      marginBottom: "0.2rem",
+                    }}
+                  >
+                    Sample site_ids
+                  </div>
+                  {result.sample_site_ids.length === 0 ? (
+                    <div>None detected</div>
+                  ) : (
+                    <div>
+                      {result.sample_site_ids.join(", ")}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <div
+                    style={{
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      fontSize: "0.72rem",
+                      color: "var(--cei-text-muted)",
+                      marginBottom: "0.2rem",
+                    }}
+                  >
+                    Sample meter_ids
+                  </div>
+                  {result.sample_meter_ids.length === 0 ? (
+                    <div>None detected</div>
+                  ) : (
+                    <div>
+                      {result.sample_meter_ids.join(", ")}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {result.errors.length > 0 && (
+                <div
+                  style={{
+                    marginTop: "0.9rem",
+                    fontSize: "0.8rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  <div
+                    style={{
+                      marginBottom: "0.3rem",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Sample row-level issues (first {result.errors.length}):
+                  </div>
+                  <ul
+                    style={{
+                      margin: 0,
+                      paddingLeft: "1.1rem",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {result.errors.map((err, idx) => (
+                      <li key={idx}>{err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </div>

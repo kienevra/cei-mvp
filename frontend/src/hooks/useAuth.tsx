@@ -1,91 +1,129 @@
 // frontend/src/hooks/useAuth.tsx
-import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  ReactNode,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
-import axios, { AxiosError } from "axios";
 
-type LoginRequest = {
+type LoginPayload = {
   username: string;
   password: string;
 };
 
-type AuthContextType = {
-  isAuthenticated: boolean;
+export type AuthUser = {
+  username?: string;
+  email?: string;
+  [key: string]: any;
+};
+
+export type AuthContextType = {
   token: string | null;
-  login: (data: LoginRequest) => Promise<void>;
+  isAuthenticated: boolean;
+  user: AuthUser | null;
+  login: (data: LoginPayload) => Promise<void>;
   logout: () => void;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [token, setTokenState] = useState<string | null>(localStorage.getItem("cei_token"));
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({
+  children,
+}) => {
   const navigate = useNavigate();
 
-  // On mount, sync with localStorage once.
-  useEffect(() => {
-    setTokenState(localStorage.getItem("cei_token"));
-  }, []);
-
-  const login = async (data: LoginRequest) => {
-    // Send as x-www-form-urlencoded because backend uses OAuth2PasswordRequestForm
-    const body = new URLSearchParams();
-    body.set("username", data.username);
-    body.set("password", data.password);
-
+  // Token is the only thing we *must* persist
+  const [token, setToken] = useState<string | null>(() => {
     try {
-      const res = await api.post("/auth/login", body, {
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      });
-
-      const acc = res.data?.access_token as string | undefined;
-      if (!acc) {
-        throw new Error("Invalid login response from server.");
-      }
-
-      localStorage.setItem("cei_token", acc);
-      setTokenState(acc);
-      navigate("/");
-    } catch (err: any) {
-      let message = "Login failed. Please try again.";
-
-      if (axios.isAxiosError(err)) {
-        const resp = err.response;
-
-        if (resp) {
-          if (resp.status === 401) {
-            message = "Incorrect email or password.";
-          } else if (resp.status === 429) {
-            message = "Too many attempts. Please wait a bit before trying again.";
-          } else if (typeof resp.data === "object" && resp.data && (resp.data as any).detail) {
-            message = String((resp.data as any).detail);
-          }
-        } else if (err.message) {
-          message = err.message;
-        }
-      } else if (err instanceof Error && err.message) {
-        message = err.message;
-      }
-
-      throw new Error(message);
+      return localStorage.getItem("cei_token");
+    } catch {
+      return null;
     }
+  });
+
+  // Optional user object (TopNav is reading this)
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  const isAuthenticated = !!token;
+
+  // Keep localStorage in sync with token
+  useEffect(() => {
+    try {
+      if (token) {
+        localStorage.setItem("cei_token", token);
+      } else {
+        localStorage.removeItem("cei_token");
+      }
+    } catch {
+      // fail silently if storage is unavailable
+    }
+  }, [token]);
+
+  const login = async ({ username, password }: LoginPayload) => {
+    // Backend expects application/x-www-form-urlencoded (OAuth2PasswordRequestForm)
+    const form = new URLSearchParams();
+    form.append("username", username);
+    form.append("password", password);
+    // grant_type is optional but harmless; some libs expect "password"
+    form.append("grant_type", "password");
+
+    const resp = await api.post("/auth/login", form, {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    });
+
+    const data = resp.data as any;
+
+    const accessToken: string | undefined = data?.access_token;
+    if (!accessToken) {
+      throw new Error("Login response missing access_token");
+    }
+
+    // Store token in state (and indirectly in localStorage via effect)
+    setToken(accessToken);
+
+    // If backend returns user payload, use it; otherwise synthesize minimal user
+    if (data.user && typeof data.user === "object") {
+      setUser(data.user as AuthUser);
+    } else {
+      setUser({ username });
+    }
+
+    navigate("/", { replace: true });
   };
 
   const logout = () => {
-    localStorage.removeItem("cei_token");
-    setTokenState(null);
-    navigate("/login");
+    setToken(null);
+    setUser(null);
+    try {
+      localStorage.removeItem("cei_token");
+    } catch {
+      // ignore
+    }
+    navigate("/login", { replace: true });
   };
 
-  return (
-    <AuthContext.Provider value={{ isAuthenticated: !!token, token, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  const value: AuthContextType = {
+    token,
+    isAuthenticated,
+    user,
+    login,
+    logout,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
-export function useAuth() {
+export function useAuth(): AuthContextType {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
+  if (!ctx) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
   return ctx;
 }
+
+export default useAuth;

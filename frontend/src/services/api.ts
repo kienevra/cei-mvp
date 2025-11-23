@@ -4,7 +4,11 @@ import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
 const rawEnv = (import.meta as any).env || {};
 const envBase = rawEnv.VITE_API_URL || "";
 const base = envBase.replace(/\/+$/, "");
-const baseURL = base ? (base.endsWith("/api/v1") ? base : `${base}/api/v1`) : "/api/v1";
+const baseURL = base
+  ? base.endsWith("/api/v1")
+    ? base
+    : `${base}/api/v1`
+  : "/api/v1";
 
 const api = axios.create({
   baseURL,
@@ -26,15 +30,22 @@ let refreshPromise: Promise<string | null> | null = null;
 
 function isAuthPath(url: string | undefined): boolean {
   if (!url) return false;
-  return url.includes("/auth/login") || url.includes("/auth/signup") || url.includes("/auth/refresh");
+  return (
+    url.includes("/auth/login") ||
+    url.includes("/auth/signup") ||
+    url.includes("/auth/refresh")
+  );
 }
 
 api.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error: AxiosError) => {
     const status = error.response?.status;
-    const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
+    const originalRequest = error.config as AxiosRequestConfig & {
+      _retry?: boolean;
+    };
 
+    // Non-401 errors: just bubble up
     if (status !== 401 || !originalRequest) {
       return Promise.reject(error);
     }
@@ -73,7 +84,9 @@ api.interceptors.response.use(
               timeout: 8000,
             }
           );
-          const newToken = (resp.data as any)?.access_token as string | undefined;
+          const newToken = (resp.data as any)?.access_token as
+            | string
+            | undefined;
           if (!newToken) {
             throw new Error("No access_token in refresh response");
           }
@@ -153,8 +166,12 @@ export async function getTimeseriesSeries(params: {
   return r.data;
 }
 
+/**
+ * Upload CSV via multipart/form-data.
+ * Callers must pass a FormData with key "file" containing the File.
+ */
 export async function uploadCsv(formData: FormData) {
-  const r = await api.post("/upload-csv", formData, {
+  const r = await api.post("/upload-csv/", formData, {
     headers: { "Content-Type": "multipart/form-data" },
   });
   return r.data;
@@ -175,6 +192,5 @@ export async function getSiteInsights(
   });
   return resp.data;
 }
-
 
 export default api;

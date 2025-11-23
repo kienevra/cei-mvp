@@ -1,7 +1,7 @@
 // frontend/src/pages/SitesList.tsx
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { getSites, createSite, deleteSite } from "../services/api";
+import { useNavigate, Link } from "react-router-dom";
+import { getSites } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 
@@ -13,97 +13,48 @@ type SiteRecord = {
 };
 
 const SitesList: React.FC = () => {
+  const navigate = useNavigate();
+
   const [sites, setSites] = useState<SiteRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [showCreate, setShowCreate] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newLocation, setNewLocation] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const navigate = useNavigate();
-
   useEffect(() => {
     let isMounted = true;
-    setLoading(true);
-    setError(null);
 
-    getSites()
-      .then((data) => {
+    async function loadSites() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const data = await getSites();
         if (!isMounted) return;
-        const normalized = Array.isArray(data) ? data : [];
-        setSites(normalized as SiteRecord[]);
-      })
-      .catch((e: any) => {
+
+        if (Array.isArray(data)) {
+          setSites(data as SiteRecord[]);
+        } else {
+          setSites([]);
+        }
+      } catch (e: any) {
         if (!isMounted) return;
         setError(e?.message || "Failed to load sites.");
-      })
-      .finally(() => {
+      } finally {
         if (!isMounted) return;
         setLoading(false);
-      });
+      }
+    }
+
+    loadSites();
 
     return () => {
       isMounted = false;
     };
   }, []);
 
-  const hasSites = sites && sites.length > 0;
+  const hasSites = sites.length > 0;
 
-  const resetCreateForm = () => {
-    setNewName("");
-    setNewLocation("");
-    setCreateError(null);
-    setCreating(false);
-  };
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) {
-      setCreateError("Site name is required.");
-      return;
-    }
-
-    setCreating(true);
-    setCreateError(null);
-
-    try {
-      const created = await createSite({
-        name: newName.trim(),
-        location: newLocation.trim() || undefined,
-      });
-
-      setSites((prev) => [...prev, created]);
-      resetCreateForm();
-      setShowCreate(false);
-    } catch (err: any) {
-      setCreateError(err?.message || "Failed to create site.");
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const handleDelete = async (site: SiteRecord) => {
-    const name = site.name || `Site ${site.id}`;
-    if (
-      !window.confirm(
-        `Delete site "${name}"? This action cannot be undone in this MVP.`
-      )
-    ) {
-      return;
-    }
-
-    try {
-      await deleteSite(site.id);
-      setSites((prev) => prev.filter((s) => s.id !== site.id));
-    } catch (err: any) {
-      setError(err?.message || "Failed to delete site.");
-    }
-  };
-
-  const goToSite = (id: number | string) => {
-    navigate(`/sites/${id}`);
+  const handleRowClick = (siteId: number | string) => {
+    navigate(`/sites/${siteId}`);
   };
 
   return (
@@ -134,66 +85,47 @@ const SitesList: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Your monitored plants, facilities, and sites participating in CEI
-            analytics.
+            Portfolio of monitored sites. Drill down to see per-site trends and
+            upload data tied to each location.
           </p>
         </div>
-        <div>
-          <button
-            type="button"
-            className="cei-btn cei-btn-primary"
-            onClick={() => {
-              setShowCreate((prev) => !prev);
-              setCreateError(null);
-            }}
-          >
-            {showCreate ? "Cancel" : "+ Add site"}
-          </button>
-        </div>
-      </section>
-
-      {/* Summary card */}
-      <section className="dashboard-row">
-        <div className="cei-card">
-          <div
-            style={{
-              fontSize: "0.75rem",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "var(--cei-text-muted)",
-            }}
-          >
-            Total sites
-          </div>
-          <div
-            style={{
-              marginTop: "0.4rem",
-              fontSize: "1.5rem",
-              fontWeight: 600,
-            }}
-          >
-            {sites.length}
-          </div>
-          <div
-            style={{
-              marginTop: "0.25rem",
-              fontSize: "0.8rem",
-              color: "var(--cei-text-muted)",
-            }}
-          >
-            {sites.length === 0
-              ? "No sites configured yet."
-              : "Sites currently tracked for energy and CO₂ performance."}
+        <div
+          style={{
+            textAlign: "right",
+            fontSize: "0.8rem",
+            color: "var(--cei-text-muted)",
+          }}
+        >
+          {hasSites ? (
+            <div>
+              Tracking <strong>{sites.length}</strong> site
+              {sites.length === 1 ? "" : "s"}.
+            </div>
+          ) : (
+            <div>No sites detected yet.</div>
+          )}
+          <div>
+            Need to ingest data?{" "}
+            <Link to="/upload" className="cei-btn cei-btn-primary">
+              Go to upload
+            </Link>
           </div>
         </div>
       </section>
 
-      {/* Main content card: create form + table / empty / loading / error */}
-      <section>
+      {/* Error banner */}
+      {error && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <ErrorBanner message={error} onClose={() => setError(null)} />
+        </section>
+      )}
+
+      {/* Main card */}
+      <section style={{ marginTop: "0.9rem" }}>
         <div className="cei-card">
           <div
             style={{
-              marginBottom: "0.6rem",
+              marginBottom: "0.7rem",
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
@@ -207,7 +139,7 @@ const SitesList: React.FC = () => {
                   fontWeight: 600,
                 }}
               >
-                Sites overview
+                Site directory
               </div>
               <div
                 style={{
@@ -216,85 +148,13 @@ const SitesList: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                Basic registry of each monitored site. We’ll layer analytics and
-                drill-down views on top of this.
+                Click a site to open its dedicated dashboard. From there, you
+                can review trends and push new CSV data into CEI.
               </div>
             </div>
           </div>
 
-          {error && (
-            <div style={{ marginBottom: "0.75rem" }}>
-              <ErrorBanner message={error} onClose={() => setError(null)} />
-            </div>
-          )}
-
-          {/* Create form */}
-          {showCreate && (
-            <div
-              style={{
-                marginBottom: "0.9rem",
-                borderRadius: "0.9rem",
-                border: "1px solid rgba(148, 163, 184, 0.4)",
-                padding: "0.8rem 0.9rem",
-                background:
-                  "radial-gradient(circle at top left, rgba(56, 189, 248, 0.14), rgba(15, 23, 42, 0.95))",
-              }}
-            >
-              <form onSubmit={handleCreate}>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "minmax(0, 2fr) minmax(0, 2fr) auto",
-                    gap: "0.6rem",
-                    alignItems: "flex-end",
-                  }}
-                >
-                  <div>
-                    <label htmlFor="siteName">Site name</label>
-                    <input
-                      id="siteName"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      placeholder="e.g. Turin Plant A"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="siteLocation">Location</label>
-                    <input
-                      id="siteLocation"
-                      value={newLocation}
-                      onChange={(e) => setNewLocation(e.target.value)}
-                      placeholder="City / region"
-                    />
-                  </div>
-                  <div>
-                    <button
-                      type="submit"
-                      className="cei-btn cei-btn-primary"
-                      disabled={creating}
-                    >
-                      {creating ? "Creating…" : "Save"}
-                    </button>
-                  </div>
-                </div>
-                {createError && (
-                  <div
-                    style={{
-                      marginTop: "0.4rem",
-                      fontSize: "0.78rem",
-                      color: "var(--cei-text-danger)",
-                    }}
-                  >
-                    {createError}
-                  </div>
-                )}
-              </form>
-            </div>
-          )}
-
-          {/* Table / empty / loading */}
-          {loading ? (
+          {loading && (
             <div
               style={{
                 padding: "1.2rem 0.5rem",
@@ -304,82 +164,89 @@ const SitesList: React.FC = () => {
             >
               <LoadingSpinner />
             </div>
-          ) : hasSites ? (
-            <div style={{ overflowX: "auto" }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: "80px" }}>ID</th>
-                    <th>Name</th>
-                    <th>Location</th>
-                    <th style={{ width: "220px" }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sites.map((site) => (
-                    <tr key={site.id}>
-                      <td
-                        className="cell-link"
-                        onClick={() => goToSite(site.id)}
-                      >
-                        {site.id}
-                      </td>
-                      <td
-                        className="cell-link"
-                        onClick={() => goToSite(site.id)}
-                      >
-                        {site.name}
-                      </td>
-                      <td>{site.location || "—"}</td>
-                      <td
-                        style={{
-                          display: "flex",
-                          justifyContent: "flex-end",
-                          gap: "0.5rem",
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className="cei-btn cei-btn-ghost"
-                          onClick={() => goToSite(site.id)}
-                        >
-                          View site →
-                        </button>
-                        <button
-                          type="button"
-                          className="cei-btn"
-                          style={{
-                            background: "transparent",
-                            borderColor: "rgba(248,113,113,0.7)",
-                            color: "#fecaca",
-                          }}
-                          onClick={() => handleDelete(site)}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
+          )}
+
+          {!loading && !hasSites && !error && (
             <div
               style={{
-                padding: "1rem 0.2rem 0.3rem",
+                paddingTop: "0.5rem",
+                paddingBottom: "0.5rem",
                 fontSize: "0.85rem",
                 color: "var(--cei-text-muted)",
               }}
             >
               <p>
-                No sites are configured yet. Once sites are onboarded, you’ll
-                see them listed here with basic metadata and can drill into
-                per-site dashboards.
+                No sites have been registered or inferred yet. CEI creates
+                site-level views once it sees data with a{" "}
+                <code>site_id</code> column.
               </p>
-              <p style={{ marginTop: "0.4rem" }}>
-                Use the <strong>“Add site”</strong> action above to register
-                your first plant or facility.
+              <p style={{ marginTop: "0.5rem" }}>
+                Start by{" "}
+                <Link to="/upload" style={{ color: "var(--cei-text-accent)" }}>
+                  uploading a CSV
+                </Link>{" "}
+                that includes <code>site_id</code>, <code>ts</code>, and{" "}
+                <code>value</code> fields. Then refresh this page.
               </p>
+            </div>
+          )}
+
+          {!loading && hasSites && (
+            <div style={{ marginTop: "0.4rem", overflowX: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Site</th>
+                    <th className="hide-on-mobile">Location</th>
+                    <th className="hide-on-mobile">Internal ID</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sites.map((site) => {
+                    const idStr = String(site.id);
+                    return (
+                      <tr
+                        key={idStr}
+                        className="clickable-row"
+                        onClick={() => handleRowClick(site.id)}
+                      >
+                        <td>{site.name || `Site ${idStr}`}</td>
+                        <td className="hide-on-mobile">
+                          {site.location || "—"}
+                        </td>
+                        <td className="hide-on-mobile">{idStr}</td>
+                        <td
+                          onClick={(e) => {
+                            // prevent row click when pressing the button
+                            e.stopPropagation();
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "0.4rem",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <button
+                              className="cei-btn cei-btn-ghost"
+                              onClick={() => navigate(`/sites/${site.id}`)}
+                            >
+                              Open
+                            </button>
+                            <Link to="/upload">
+                              <button className="cei-btn cei-btn-primary">
+                                Upload data
+                              </button>
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
