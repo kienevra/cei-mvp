@@ -94,6 +94,7 @@ class AccountMeOut(BaseModel):
     subscription_plan_key: Optional[str] = None
     enable_alerts: bool = True
     enable_reports: bool = True
+    subscription_status: Optional[str] = None  # <- top-level mirror
 
     class Config:
         orm_mode = True
@@ -388,4 +389,5 @@ def read_me(
         subscription_plan_key=subscription_plan_key,
         enable_alerts=enable_alerts,
         enable_reports=enable_reports,
+        subscription_status=subscription_status,
     )

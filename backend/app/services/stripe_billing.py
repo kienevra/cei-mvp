@@ -1,7 +1,5 @@
-# backend/app/services/stripe_billing.py
 from __future__ import annotations
 
-import json
 import logging
 import os
 from dataclasses import dataclass
@@ -57,6 +55,13 @@ def get_stripe_config() -> StripeConfig:
     # If stripe SDK is installed, set api_key globally once
     if stripe is not None and api_key:
         stripe.api_key = api_key
+    elif api_key and stripe is None:
+        # Configured but SDK missing – this will surface as a RuntimeError
+        # when we actually try to use Stripe.
+        logger.warning(
+            "Stripe API key is set but the 'stripe' SDK is not installed. "
+            "Billing operations will fail until the package is installed."
+        )
 
     return StripeConfig(
         enabled=enabled,
@@ -141,7 +146,7 @@ def create_checkout_session_for_org(
 
     Behaviour:
     - If Stripe is misconfigured or SDK missing, raises RuntimeError (which
-      the API layer turns into a clean 4xx / 5xx response).
+      the API layer turns into a clean 4xx).
     - If org has no stripe_customer_id and the model supports it, we create
       a Customer and best-effort persist the ID.
     - We set metadata on the Session so webhook handlers can map back to org.

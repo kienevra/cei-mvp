@@ -1,8 +1,7 @@
-# backend/app/api/v1/billing.py
 from __future__ import annotations
 
 import logging
-from typing import Optional, Literal
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -17,6 +16,7 @@ from app.services.stripe_billing import (
     snapshot_org_stripe_state,
     CheckoutSessionParams,
     create_checkout_session_for_org,
+    create_portal_session_for_org,
 )
 
 logger = logging.getLogger("cei")
@@ -76,20 +76,28 @@ class CheckoutSessionCreateIn(BaseModel):
 
 class CheckoutSessionCreateOut(BaseModel):
     """
-    What the frontend gets back: a hosted checkout URL.
+    Frontend expects a simple `{ url?: string }` shape.
+    If `url` is null/omitted, the UI shows a "not configured" message.
     """
 
-    provider: Literal["stripe"] = "stripe"
-    checkout_url: str
+    url: Optional[str] = None
+
+
+class PortalSessionCreateIn(BaseModel):
+    """
+    Payload from the frontend asking to open the billing portal.
+    """
+
+    return_url: str
 
 
 class PortalSessionCreateOut(BaseModel):
     """
-    Hosted self-service billing portal (Stripe customer portal).
+    Frontend expects a simple `{ url?: string }` shape.
+    If `url` is null/omitted, the UI shows a "not configured" message.
     """
 
-    provider: Literal["stripe"] = "stripe"
-    portal_url: str
+    url: Optional[str] = None
 
 
 # ========= Helpers =========
@@ -174,14 +182,11 @@ def get_billing_overview(
     return BillingOverviewOut(
         org_id=getattr(org, "id", None),
         org_name=getattr(org, "name", None),
-
         current_plan=current_plan,
         billing_status=org_snap.stripe_status or "unknown",
-
         stripe_enabled=cfg.enabled,
         stripe_api_key_present=cfg.api_key_present,
         stripe_webhook_secret_present=cfg.webhook_secret_present,
-
         stripe_customer_id=org_snap.stripe_customer_id,
         stripe_subscription_id=org_snap.stripe_subscription_id,
         stripe_status=org_snap.stripe_status,
@@ -189,7 +194,7 @@ def get_billing_overview(
 
 
 @router.post(
-    "/checkout-session",
+    "/checkout",
     response_model=CheckoutSessionCreateOut,
     status_code=status.HTTP_200_OK,
 )
@@ -201,21 +206,20 @@ def create_billing_checkout_session(
     """
     Start a Stripe Checkout session for the current org.
 
-    *Important at this stage:*
-      - If Stripe is NOT configured, we fail fast with a 400 and a clear message.
-      - The underlying service function still raises NotImplementedError
-        in this step of the roadmap – that's expected until we wire real Stripe.
+    Behavior:
+      - If Stripe is NOT configured, we return 200 with `url = null`,
+        so the frontend can show a friendly "billing not configured" banner.
+      - If Stripe *is* configured but something is miswired, we surface
+        a clean 4xx/5xx with a useful message.
+      - Org scoping is enforced via the current user.
     """
     cfg = get_stripe_config()
     if not cfg.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Stripe is not configured (no usable API key). "
-                "Set STRIPE_API_KEY / stripe_api_key in backend settings "
-                "before using the billing checkout flow."
-            ),
+        logger.info(
+            "Checkout requested but Stripe is not enabled. "
+            "Returning null URL for org-scoped checkout."
         )
+        return CheckoutSessionCreateOut(url=None)
 
     org = _get_org_for_user(db, user)
 
@@ -227,18 +231,8 @@ def create_billing_checkout_session(
 
     try:
         result = create_checkout_session_for_org(db, org, params)
-    except NotImplementedError as e:
-        # Step 2: we deliberately surface a 501 so it's obvious in testing
-        logger.warning("Checkout requested but not implemented: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail=(
-                "Stripe Checkout is not implemented yet at this step of the CEI "
-                "billing roadmap. The API surface is in place and ready to be wired."
-            ),
-        )
     except RuntimeError as e:
-        # e.g. Stripe disabled at service layer
+        # e.g. unknown plan key, missing SDK, or org missing required fields
         logger.warning("Stripe runtime error during checkout: %s", e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -251,56 +245,56 @@ def create_billing_checkout_session(
             detail="Unexpected error creating Stripe checkout session.",
         )
 
-    # Once we wire Stripe for real, result.url will be a hosted checkout URL.
-    return CheckoutSessionCreateOut(checkout_url=result.url)
+    return CheckoutSessionCreateOut(url=result.url)
 
 
 @router.post(
-    "/portal-session",
+    "/portal",
     response_model=PortalSessionCreateOut,
     status_code=status.HTTP_200_OK,
 )
 def create_billing_portal_session(
+    payload: PortalSessionCreateIn,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ) -> PortalSessionCreateOut:
     """
-    Skeleton for a Stripe Billing Portal session.
+    Create a Stripe Billing Portal session for the current org.
 
-    In a later step we will:
-      - ensure the org has a stripe_customer_id
-      - call stripe.billing_portal.Session.create(...)
-      - return the hosted portal URL
-
-    For now, we just:
-      - validate that Stripe is configured
-      - return a 501 Not Implemented, so frontend knows the capability
-        exists but isn't active yet.
+    Behavior:
+      - If Stripe is NOT configured, we return 200 with `url = null`,
+        so the frontend can surface a "portal not configured" message.
+      - If Stripe *is* configured but the org has no customer, we 400
+        with a clear explanation.
+      - Otherwise we return the hosted portal URL.
     """
     cfg = get_stripe_config()
     if not cfg.enabled:
+        logger.info(
+            "Billing portal requested but Stripe is not enabled. "
+            "Returning null URL for org-scoped portal."
+        )
+        return PortalSessionCreateOut(url=None)
+
+    org = _get_org_for_user(db, user)
+
+    try:
+        result = create_portal_session_for_org(
+            db=db,
+            org=org,
+            return_url=payload.return_url,
+        )
+    except RuntimeError as e:
+        logger.warning("Stripe runtime error during billing portal: %s", e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Stripe is not configured (no usable API key). "
-                "Set STRIPE_API_KEY / stripe_api_key in backend settings "
-                "before using the billing portal."
-            ),
+            detail=str(e),
+        )
+    except Exception as e:
+        logger.exception("Unexpected error creating billing portal session: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error creating Stripe billing portal session.",
         )
 
-    # We still resolve org so we can log / audit
-    org = _get_org_for_user(db, user)
-    logger.info(
-        "Billing portal requested for org %s – Stripe portal integration "
-        "not implemented at this step.",
-        getattr(org, "id", None),
-    )
-
-    # 501 signals: "this endpoint is legit but not yet implemented"
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=(
-            "Stripe Billing Portal integration is not implemented yet. "
-            "The endpoint is reserved and ready for wiring in a later step."
-        ),
-    )
+    return PortalSessionCreateOut(url=result.url)

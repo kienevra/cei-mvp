@@ -201,17 +201,18 @@ export async function getAlerts(params: { window_hours?: number } = {}) {
 }
 
 /**
- * Fetch current account/org info from the auth subsystem.
+ * Fetch current account/org info, if the backend exposes it.
  * This is best-effort; UI will degrade gracefully if it fails.
  */
 export async function getAccountMe() {
-  const resp = await api.get("/auth/me");
+  const resp = await api.get("/account/me");
   return resp.data;
 }
 
 /**
  * Start a Stripe Checkout session for a given plan.
- * Backend is expected to return: { url: string }
+ * Backend returns: { provider: "stripe", checkout_url: string }
+ * We normalize to { url?: string } for existing callers.
  */
 export async function startCheckout(planKey: string) {
   const origin =
@@ -219,27 +220,45 @@ export async function startCheckout(planKey: string) {
   const success_url = `${origin}/account?billing=success`;
   const cancel_url = `${origin}/account?billing=cancel`;
 
-  const resp = await api.post("/billing/checkout", {
+  const resp = await api.post("/billing/checkout-session", {
     plan_key: planKey,
     success_url,
     cancel_url,
   });
-  return resp.data as { url?: string };
+
+  const data = resp.data as {
+    provider?: string;
+    checkout_url?: string;
+    url?: string;
+  };
+
+  // Prefer the explicit checkout_url, fall back to url if we ever change backend
+  const url = data.checkout_url || data.url;
+  return { url };
 }
 
 /**
  * Open the Stripe Billing Portal for the current org.
- * Backend is expected to return: { url: string }
+ * Backend returns: { provider: "stripe", portal_url: string }
+ * We normalize to { url?: string } for existing callers.
  */
 export async function openBillingPortal() {
   const origin =
     typeof window !== "undefined" ? window.location.origin : "";
   const return_url = `${origin}/account`;
 
-  const resp = await api.post("/billing/portal", {
+  const resp = await api.post("/billing/portal-session", {
     return_url,
   });
-  return resp.data as { url?: string };
+
+  const data = resp.data as {
+    provider?: string;
+    portal_url?: string;
+    url?: string;
+  };
+
+  const url = data.portal_url || data.url;
+  return { url };
 }
 
 export default api;
