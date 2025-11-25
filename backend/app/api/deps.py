@@ -1,137 +1,78 @@
-# backend/app/api/deps.py
-"""
-Shared API dependencies for CEI.
+from typing import Optional, Set, Any
 
-This module introduces a simple multi-tenant context and role scaffolding
-on top of your existing get_current_user() dependency.
+from fastapi import Depends
+from sqlalchemy.orm import Session
 
-We deliberately:
-- Do NOT change auth/token logic here.
-- Derive organization_id and role from the current user as best we can.
-- Default to "owner" role and use the user's own id as org_id if nothing
-  more specific exists (so your current single-tenant flows keep working).
-"""
-
-from __future__ import annotations
-
-from typing import Literal, Optional
-
-from fastapi import Depends, HTTPException, status
-from pydantic import BaseModel
-
+from app.db.session import get_db
+from app.models import User, Organization, Site, TimeseriesRecord
 from app.api.v1.auth import get_current_user
 
 
-class CurrentContext(BaseModel):
+def get_current_active_user(
+    user: User = Depends(get_current_user),
+) -> User:
     """
-    Per-request multi-tenant context.
+    Wrapper around auth.get_current_user.
 
-    This is the backbone for:
-    - scoping all queries by organization_id
-    - enforcing role-based access (owner/admin/analyst/viewer)
+    In future, you can enforce is_active here.
     """
-
-    user_id: int
-    organization_id: int
-    role: Literal["owner", "admin", "analyst", "viewer"]
+    return user
 
 
-def _infer_org_id(user) -> int:
+def get_current_org(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> Optional[Organization]:
     """
-    Best-effort inference of organization_id from the User model.
-
-    We try a few common attributes. If nothing is present, we fall back to
-    using the user's own id as a pseudo-org, which preserves behavior for
-    your current single-tenant setup.
+    Resolve the Organization for the current user, if any.
     """
-    # Try the obvious ones first
-    for attr in ("organization_id", "org_id", "tenant_id"):
-        value = getattr(user, attr, None)
-        if isinstance(value, int):
-            return value
+    org_id = getattr(user, "organization_id", None)
+    if not org_id:
+        return None
 
-    # Fallback: treat each user as their own org (single-tenant mode)
-    if hasattr(user, "id") and isinstance(user.id, int):
-        return user.id
-
-    # Extremely defensive fallback
-    raise RuntimeError("Unable to infer organization_id from current user")
+    return db.query(Organization).filter(Organization.id == org_id).first()
 
 
-def _infer_role(user) -> str:
+def get_org_allowed_site_ids(
+    db: Session,
+    org_id: int,
+) -> Set[str]:
     """
-    Best-effort inference of the user's role inside the organization.
+    Compute the set of timeseries.site_id values that belong to this org.
 
-    If there's no explicit role field, we treat the user as an 'owner'
-    so they are not accidentally blocked from anything after this change.
+    We support both:
+    - 'site-{id}' style keys
+    - raw numeric string ids ('1', '2', ...)
     """
-    raw_role: Optional[str] = getattr(user, "role", None) or getattr(
-        user, "org_role", None
-    )
-
-    if not raw_role:
-        return "owner"
-
-    normalized = str(raw_role).strip().lower()
-    if normalized in {"owner", "admin", "analyst", "viewer"}:
-        return normalized
-
-    # Unknown custom role? Treat as analyst by default.
-    return "analyst"
+    site_rows = db.query(Site.id).filter(Site.org_id == org_id).all()
+    allowed: Set[str] = set()
+    for (site_id,) in site_rows:
+        allowed.add(f"site-{site_id}")
+        allowed.add(str(site_id))
+    return allowed
 
 
-def get_current_context(user=Depends(get_current_user)) -> CurrentContext:
+def apply_org_scope_to_timeseries_query(
+    query,
+    db: Session,
+    user: Any,
+):
     """
-    Main dependency to use in new multi-tenant aware endpoints.
+    Given a SQLAlchemy query on TimeseriesRecord, constrain it to the
+    current user's organization (if any).
 
-    Example:
-
-        @router.get("/something")
-        def list_something(
-            ctx: CurrentContext = Depends(get_current_context),
-            db: Session = Depends(get_db),
-        ):
-            q = db.query(Model).filter(Model.organization_id == ctx.organization_id)
-            ...
+    Usage in /timeseries endpoints:
+        query = db.query(TimeseriesRecord).filter(...)
+        query = apply_org_scope_to_timeseries_query(query, db, user)
     """
-    org_id = _infer_org_id(user)
-    role = _infer_role(user)
+    org_id = getattr(user, "organization_id", None)
+    if not org_id:
+        # No org concept -> single-tenant/dev, no restriction
+        return query
 
-    return CurrentContext(
-        user_id=int(getattr(user, "id")),
-        organization_id=org_id,
-        role=role,  # type: ignore[arg-type]
-    )
+    allowed = get_org_allowed_site_ids(db, org_id)
+    if not allowed:
+        # Force an empty result set
+        return query.filter(TimeseriesRecord.site_id == "__no_such_site__")
 
-
-def require_role(
-    ctx: CurrentContext,
-    allowed: set[str],
-) -> None:
-    """
-    Lightweight role check.
-
-    Call this at the top of endpoints that should be restricted:
-
-        def some_admin_endpoint(
-            ctx: CurrentContext = Depends(get_current_context),
-        ):
-            require_role(ctx, {"owner", "admin"})
-            ...
-
-    If the user doesn't have a permitted role, this will raise HTTP 403.
-    """
-    if ctx.role not in allowed:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Insufficient permissions for this operation.",
-        )
-
-
-def require_billing_access(ctx: CurrentContext) -> None:
-    """
-    Convenience helper specifically for billing/plan endpoints.
-
-    Currently: only 'owner' and 'admin' can see/change billing.
-    """
-    require_role(ctx, {"owner", "admin"})
+    return query.filter(TimeseriesRecord.site_id.in_(allowed))

@@ -1,3 +1,4 @@
+// frontend/src/services/api.ts
 import axios, {
   AxiosError,
   AxiosRequestConfig,
@@ -200,8 +201,8 @@ export async function getAlerts(params: { window_hours?: number } = {}) {
 }
 
 /**
- * Fetch current account/org info from the auth layer.
- * This is the single source of truth for plan + feature flags.
+ * Fetch current account/org info from the auth subsystem.
+ * This is best-effort; UI will degrade gracefully if it fails.
  */
 export async function getAccountMe() {
   const resp = await api.get("/auth/me");

@@ -1,8 +1,9 @@
+# backend/app/api/v1/alerts.py
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Literal, Any
+from typing import List, Optional, Dict, Literal, Any, Set
 
 from fastapi import APIRouter, Depends, Query, status, HTTPException
 from pydantic import BaseModel
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.db.session import get_db
-from app.models import TimeseriesRecord  # and Site / Organization if available
+from app.models import TimeseriesRecord  # Site/Organization imported lazily where needed
 
 logger = logging.getLogger("cei")
 
@@ -64,7 +65,7 @@ DEFAULT_THRESHOLDS = AlertThresholdsConfig()
 
 # Optional per-site overrides (keyed by timeseries site_id, e.g. "site-1")
 SITE_THRESHOLDS: Dict[str, AlertThresholdsConfig] = {
-    # Example of how you'd override in future:
+    # Example override:
     # "site-1": AlertThresholdsConfig(
     #     night_warning_ratio=0.5,
     #     night_critical_ratio=0.8,
@@ -176,13 +177,35 @@ def list_alerts(
             detail="Alerts are not enabled for this organization/plan.",
         )
 
+    # --- Org-scoped site IDs (multi-tenant safety) ---
+    allowed_site_ids: Optional[Set[str]] = None
+    try:
+        org = getattr(user, "organization", None)
+        if org is not None and hasattr(org, "sites"):
+            allowed_site_ids = {
+                f"site-{s.id}"
+                for s in getattr(org, "sites", [])
+                if getattr(s, "id", None) is not None
+            }
+            # Also allow raw numeric IDs if your ingestion ever uses them
+            allowed_site_ids.update(
+                {str(s.id) for s in getattr(org, "sites", []) if getattr(s, "id", None) is not None}
+            )
+    except Exception:
+        logger.exception("Failed to compute allowed_site_ids; falling back to unrestricted.")
+        allowed_site_ids = None
+
     # Clamp any silly values
     if window_hours <= 0:
         window_hours = 24
     if window_hours > 24 * 30:
         window_hours = 24 * 30
 
-    alerts = _generate_alerts_for_window(db=db, window_hours=window_hours)
+    alerts = _generate_alerts_for_window(
+        db=db,
+        window_hours=window_hours,
+        allowed_site_ids=allowed_site_ids,
+    )
     logger.info("Generated %d alerts for window_hours=%s", len(alerts), window_hours)
     return alerts
 
@@ -190,11 +213,15 @@ def list_alerts(
 # ---- Internal helpers ----
 
 
-def _generate_alerts_for_window(db: Session, window_hours: int) -> List[AlertOut]:
+def _generate_alerts_for_window(
+    db: Session,
+    window_hours: int,
+    allowed_site_ids: Optional[Set[str]] = None,
+) -> List[AlertOut]:
     window_start = datetime.utcnow() - timedelta(hours=window_hours)
 
     # Base stats per site_id
-    stats_rows = (
+    stats_query = (
         db.query(
             TimeseriesRecord.site_id,
             func.count().label("points"),
@@ -205,9 +232,12 @@ def _generate_alerts_for_window(db: Session, window_hours: int) -> List[AlertOut
             func.max(TimeseriesRecord.timestamp).label("last_ts"),
         )
         .filter(TimeseriesRecord.timestamp >= window_start)
-        .group_by(TimeseriesRecord.site_id)
-        .all()
     )
+
+    if allowed_site_ids:
+        stats_query = stats_query.filter(TimeseriesRecord.site_id.in_(allowed_site_ids))
+
+    stats_rows = stats_query.group_by(TimeseriesRecord.site_id).all()
 
     if not stats_rows:
         return []
@@ -218,15 +248,19 @@ def _generate_alerts_for_window(db: Session, window_hours: int) -> List[AlertOut
     portfolio_avg_per_site = portfolio_total / total_sites if total_sites > 0 else 0.0
 
     # Pull raw points once and compute day/night + weekday/weekend in Python
-    point_rows = (
+    points_query = (
         db.query(
             TimeseriesRecord.site_id,
             TimeseriesRecord.timestamp,
             TimeseriesRecord.value,
         )
         .filter(TimeseriesRecord.timestamp >= window_start)
-        .all()
     )
+
+    if allowed_site_ids:
+        points_query = points_query.filter(TimeseriesRecord.site_id.in_(allowed_site_ids))
+
+    point_rows = points_query.all()
 
     # Typical "plant" definition of night and day hours
     night_hours = {0, 1, 2, 3, 4, 5, 22, 23}
