@@ -757,6 +757,20 @@ const SiteView: React.FC = () => {
               Targeted ideas based on the last 24 hours of energy at this site.
               Use this to brief local operations on where to focus next.
             </div>
+            <div
+              style={{
+                marginTop: "0.35rem",
+                fontSize: "0.78rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Under the hood, CEI compares this site&apos;s{" "}
+              <strong>night vs day baseline</strong>,{" "}
+              <strong>weekend vs weekday levels</strong>, and{" "}
+              <strong>short-lived spikes vs typical hourly load</strong> — the
+              same logic powering the Alerts page. Use both views together to
+              separate day-to-day noise from structural waste.
+            </div>
           </div>
 
           {suggestions.length === 0 ? (

@@ -1,8 +1,5 @@
-# backend/app/api/v1/auth.py
-
 from datetime import datetime, timedelta
 import logging
-import os
 from typing import Optional
 
 from fastapi import (
@@ -20,16 +17,18 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import User
+from app.models import User, Organization  # <- NOTE: import Organization
 from app.core.rate_limit import login_rate_limit, refresh_rate_limit
+from app.core.config import settings
 
 logger = logging.getLogger("cei")
 
 # === JWT / security settings ===
-SECRET_KEY = os.environ.get("JWT_SECRET", "supersecret")
+# Centralized via app.core.config.Settings
+SECRET_KEY = settings.jwt_secret
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
-REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
+REFRESH_TOKEN_EXPIRE_DAYS = settings.refresh_token_expire_days
 
 # Use Argon2 for password hashing (good long-term choice)
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
@@ -61,6 +60,40 @@ class UserOut(BaseModel):
     id: int
     email: str
     organization_id: Optional[int]
+
+    class Config:
+        orm_mode = True
+
+
+class OrgSummaryOut(BaseModel):
+    id: int
+    name: str
+    plan_key: Optional[str] = None
+    subscription_plan_key: Optional[str] = None
+    enable_alerts: bool = True
+    enable_reports: bool = True
+    subscription_status: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+
+
+class AccountMeOut(BaseModel):
+    id: int
+    email: str
+    organization_id: Optional[int] = None
+
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+
+    # Duplicated for front-end convenience
+    org: Optional[OrgSummaryOut] = None
+    organization: Optional[OrgSummaryOut] = None
+
+    # Plan-level flags mirrored at the top level
+    subscription_plan_key: Optional[str] = None
+    enable_alerts: bool = True
+    enable_reports: bool = True
 
     class Config:
         orm_mode = True
@@ -274,9 +307,85 @@ def get_current_user(
     return user
 
 
-@router.get("/me", response_model=UserOut)
-def read_me(current_user: User = Depends(get_current_user)):
+@router.get("/me", response_model=AccountMeOut)
+def read_me(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """
-    Basic identity endpoint. Handy for debugging auth.
+    Rich account endpoint used by the front-end to drive plan gating.
+    Returns:
+      - basic user info
+      - attached organization summary (plan_key, flags)
+      - top-level plan flags (enable_alerts, enable_reports)
     """
-    return current_user
+    org: Optional[Organization] = None
+    if current_user.organization_id is not None:
+        org = (
+            db.query(Organization)
+            .filter(Organization.id == current_user.organization_id)
+            .first()
+        )
+
+    # Derive plan + flags with sane defaults
+    plan_key: Optional[str] = None
+    subscription_plan_key: Optional[str] = None
+    enable_alerts: bool = True
+    enable_reports: bool = True
+    subscription_status: Optional[str] = None
+
+    if org is not None:
+        plan_key = getattr(org, "plan_key", None)
+        subscription_plan_key = getattr(org, "subscription_plan_key", None) or plan_key
+
+        raw_enable_alerts = getattr(org, "enable_alerts", None)
+        raw_enable_reports = getattr(org, "enable_reports", None)
+
+        # If DB flags are None, infer from plan (starter/growth = on)
+        plan_for_flags = subscription_plan_key or plan_key or "cei-starter"
+        default_enabled = plan_for_flags in ("cei-starter", "cei-growth")
+
+        enable_alerts = (
+            bool(raw_enable_alerts) if raw_enable_alerts is not None else default_enabled
+        )
+        enable_reports = (
+            bool(raw_enable_reports)
+            if raw_enable_reports is not None
+            else default_enabled
+        )
+
+        subscription_status = getattr(org, "subscription_status", None)
+    else:
+        # No org attached: default to starter-like behaviour but with no org metadata
+        subscription_plan_key = "cei-starter"
+        enable_alerts = True
+        enable_reports = True
+
+    # Build org summary payload if org exists
+    org_summary: Optional[OrgSummaryOut] = None
+    if org is not None:
+        org_summary = OrgSummaryOut(
+            id=org.id,
+            name=org.name,
+            plan_key=plan_key,
+            subscription_plan_key=subscription_plan_key,
+            enable_alerts=enable_alerts,
+            enable_reports=enable_reports,
+            subscription_status=subscription_status,
+        )
+
+    # Derive a simple role label for now
+    role = "admin" if getattr(current_user, "is_superuser", 0) else "member"
+
+    return AccountMeOut(
+        id=current_user.id,
+        email=current_user.email,
+        organization_id=current_user.organization_id,
+        full_name=getattr(current_user, "full_name", None),
+        role=role,
+        org=org_summary,
+        organization=org_summary,
+        subscription_plan_key=subscription_plan_key,
+        enable_alerts=enable_alerts,
+        enable_reports=enable_reports,
+    )

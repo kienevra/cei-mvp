@@ -1,7 +1,10 @@
-// frontend/src/pages/Reports.tsx
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { getSites, getTimeseriesSummary } from "../services/api";
+import {
+  getSites,
+  getTimeseriesSummary,
+  getAccountMe,
+} from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 
@@ -24,69 +27,106 @@ type SummaryResponse = {
 
 type SiteReportRow = {
   siteId: string;
-  name: string;
+  siteName: string;
   location?: string | null;
-  totalKwh: number;
-  points: number;
-  windowHours: number;
-  fromTs: string | null;
-  toTs: string | null;
+  totalKwh7d: number;
+  points7d: number;
+  avgPerPoint7d: number | null;
 };
 
-const HOURS_7_DAYS = 24 * 7;
-
 const Reports: React.FC = () => {
-  const [sites, setSites] = useState<SiteRecord[]>([]);
-  const [reports, setReports] = useState<SiteReportRow[]>([]);
-  const [loadingSites, setLoadingSites] = useState(false);
-  const [loadingReports, setLoadingReports] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [sites, setSites] = useState<SiteRecord[]>([]);
+  const [portfolioSummary, setPortfolioSummary] =
+    useState<SummaryResponse | null>(null);
+  const [siteRows, setSiteRows] = useState<SiteReportRow[]>([]);
+
+  // Plan flags coming from /auth/me
+  const [planKey, setPlanKey] = useState<string>("cei-starter");
+  const [enableReports, setEnableReports] = useState<boolean>(true);
 
   useEffect(() => {
     let isMounted = true;
 
-    async function load() {
+    async function loadReport() {
+      setLoading(true);
       setError(null);
-      setLoadingSites(true);
-      setLoadingReports(true);
 
       try {
-        // 1) Load sites
-        const data = await getSites();
+        // 0) Pull account + plan flags
+        const account = await getAccountMe().catch(() => null);
+
         if (!isMounted) return;
 
-        const siteList = Array.isArray(data) ? (data as SiteRecord[]) : [];
-        setSites(siteList);
+        const org =
+          (account?.org as any) ??
+          (account?.organization as any) ??
+          null;
 
-        if (siteList.length === 0) {
-          setReports([]);
+        const derivedPlanKey: string =
+          org?.subscription_plan_key ||
+          org?.plan_key ||
+          account?.subscription_plan_key ||
+          "cei-starter";
+
+        // Backend might already send explicit flags; if not, derive from plan
+        const backendEnableReports: boolean | undefined =
+          account?.enable_reports ?? org?.enable_reports;
+
+        const effectiveEnableReports =
+          typeof backendEnableReports === "boolean"
+            ? backendEnableReports
+            : derivedPlanKey === "cei-starter" ||
+              derivedPlanKey === "cei-growth";
+
+        setPlanKey(derivedPlanKey);
+        setEnableReports(effectiveEnableReports);
+
+        // If the plan doesn't include reports, stop here:
+        if (!effectiveEnableReports) {
+          setLoading(false);
           return;
         }
 
-        // 2) For each site, fetch 7-day summary
-        const summaries = await Promise.all(
-          siteList.map(async (site) => {
+        // 1) Fetch sites
+        const siteList = await getSites();
+        if (!isMounted) return;
+
+        const normalizedSites = Array.isArray(siteList)
+          ? (siteList as SiteRecord[])
+          : [];
+        setSites(normalizedSites);
+
+        // 2) Portfolio summary – all sites, last 7 days (168 hours)
+        const portfolio = (await getTimeseriesSummary({
+          window_hours: 168,
+        })) as SummaryResponse;
+        if (!isMounted) return;
+        setPortfolioSummary(portfolio);
+
+        // 3) Per-site summaries
+        const siteSummaries = await Promise.all(
+          normalizedSites.map(async (site) => {
             const idStr = String(site.id);
             const siteKey = `site-${idStr}`;
 
             try {
               const summary = (await getTimeseriesSummary({
                 site_id: siteKey,
-                window_hours: HOURS_7_DAYS,
+                window_hours: 168,
               })) as SummaryResponse;
-
-              return {
-                ok: true as const,
-                site,
-                summary,
-              };
+              return { site, summary, error: null as string | null };
             } catch (e: any) {
               return {
-                ok: false as const,
                 site,
+                summary: null,
                 error:
                   e?.message ||
-                  `Failed to load 7-day summary for site ${site.name || idStr}`,
+                  `Failed to load 7-day summary for site ${
+                    site.name || idStr
+                  }`,
               };
             }
           })
@@ -94,99 +134,111 @@ const Reports: React.FC = () => {
 
         if (!isMounted) return;
 
-        const rows: SiteReportRow[] = [];
-        const errorMessages: string[] = [];
+        const rows: SiteReportRow[] = siteSummaries.map(
+          ({ site, summary }) => {
+            const idStr = String(site.id);
+            const total = summary?.total_value || 0;
+            const points = summary?.points || 0;
+            const avgPerPoint =
+              points > 0 ? total / points : null;
 
-        for (const item of summaries) {
-          const idStr = String(item.site.id);
-
-          if (!item.ok || !item.summary) {
-            errorMessages.push(
-              item.error ||
-                `Unknown error loading summary for site ${item.site.name || idStr}`
-            );
-            continue;
+            return {
+              siteId: idStr,
+              siteName: site.name || `Site ${idStr}`,
+              location: site.location,
+              totalKwh7d: total,
+              points7d: points,
+              avgPerPoint7d: avgPerPoint,
+            };
           }
+        );
 
-          const s = item.summary;
-          const total = typeof s.total_value === "number" ? s.total_value : 0;
-          const points = typeof s.points === "number" ? s.points : 0;
-
-          rows.push({
-            siteId: idStr,
-            name: item.site.name || `Site ${idStr}`,
-            location: item.site.location,
-            totalKwh: total,
-            points,
-            windowHours: s.window_hours || HOURS_7_DAYS,
-            fromTs: s.from_timestamp,
-            toTs: s.to_timestamp,
-          });
-        }
-
-        setReports(rows);
-
-        // If some sites failed, surface a compact error
-        if (errorMessages.length > 0) {
-          setError(
-            `Some site summaries failed to load: ${errorMessages
-              .slice(0, 3)
-              .join(" | ")}`
-          );
-        }
+        setSiteRows(rows);
       } catch (e: any) {
         if (!isMounted) return;
-        setError(e?.message || "Failed to load 7-day portfolio report.");
+        setError(e?.message || "Failed to load reports.");
       } finally {
         if (!isMounted) return;
-        setLoadingSites(false);
-        setLoadingReports(false);
+        setLoading(false);
       }
     }
 
-    load();
+    loadReport();
 
     return () => {
       isMounted = false;
     };
   }, []);
 
-  const loading = loadingSites || loadingReports;
-  const hasSites = sites.length > 0;
-  const hasReports = reports.length > 0;
+  const totalSites = sites.length;
+  const totalKwh7d = portfolioSummary?.total_value || 0;
+  const totalPoints7d = portfolioSummary?.points || 0;
 
-  const formatEnergy = (kwh: number): string => {
-    if (kwh <= 0) return "—";
-    if (kwh >= 1000) return `${(kwh / 1000).toFixed(2)} MWh`;
-    return `${kwh.toFixed(1)} kWh`;
-  };
+  const formattedTotalKwh7d =
+    totalKwh7d === 0
+      ? "—"
+      : totalKwh7d >= 1000
+      ? `${(totalKwh7d / 1000).toFixed(2)} MWh`
+      : `${totalKwh7d.toFixed(1)} kWh`;
 
-  const computeStatus = (row: SiteReportRow): string => {
-    if (row.points === 0 || row.totalKwh === 0) return "No recent data";
-    if (row.points < 24) return "Sparse coverage";
-    return "Healthy coverage";
-  };
+  const avgPerSite =
+    totalSites > 0 ? totalKwh7d / Math.max(totalSites, 1) : 0;
+  const formattedAvgPerSite =
+    avgPerSite === 0
+      ? "—"
+      : avgPerSite >= 1000
+      ? `${(avgPerSite / 1000).toFixed(2)} MWh`
+      : `${avgPerSite.toFixed(1)} kWh`;
 
-  const formatWindow = (row: SiteReportRow): string => {
-    if (!row.fromTs || !row.toTs) {
-      return `Last ${row.windowHours} hours`;
+  const handleDownloadCsv = () => {
+    if (!enableReports) {
+      alert("Reports are not enabled for this plan.");
+      return;
+    }
+    if (!siteRows.length) {
+      alert("No site data available to export yet.");
+      return;
     }
 
-    const from = new Date(row.fromTs);
-    const to = new Date(row.toTs);
+    const header = [
+      "site_id",
+      "site_name",
+      "location",
+      "total_kwh_7d",
+      "points_7d",
+      "avg_kwh_per_point_7d",
+    ];
 
-    const fromStr = from.toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-    });
-    const toStr = to.toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-    });
+    const lines = [header.join(",")];
 
-    return `${fromStr} → ${toStr}`;
+    for (const row of siteRows) {
+      const cells = [
+        row.siteId,
+        row.siteName.replace(/,/g, " "),
+        (row.location || "").replace(/,/g, " "),
+        row.totalKwh7d.toFixed(2),
+        row.points7d.toString(),
+        row.avgPerPoint7d !== null
+          ? row.avgPerPoint7d.toFixed(4)
+          : "",
+      ];
+      lines.push(cells.join(","));
+    }
+
+    const csvContent = lines.join("\n");
+    const blob = new Blob([csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "cei_7day_site_reports.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -208,7 +260,7 @@ const Reports: React.FC = () => {
               letterSpacing: "-0.02em",
             }}
           >
-            7-day portfolio report
+            Reports
           </h1>
           <p
             style={{
@@ -217,186 +269,324 @@ const Reports: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Rolling 7-day view of energy and data coverage per site. Use this
-            as a weekly executive summary before diving into individual
-            dashboards.
+            Portfolio snapshot for the last 7 days. This is your first
+            production-ready report layer built directly on top of the CEI
+            timeseries engine.
           </p>
         </div>
         <div
           style={{
-            textAlign: "right",
             fontSize: "0.8rem",
             color: "var(--cei-text-muted)",
+            textAlign: "right",
           }}
         >
-          {hasSites ? (
-            <div>
-              Reporting on <strong>{sites.length}</strong> site
-              {sites.length === 1 ? "" : "s"}.
-            </div>
-          ) : (
-            <div>No sites detected yet.</div>
-          )}
           <div>Window: last 7 days (168 hours)</div>
+          {totalSites > 0 && (
+            <div>
+              Sites: <strong>{totalSites}</strong>
+            </div>
+          )}
         </div>
       </section>
 
-      {/* Error banner (if any) */}
+      {/* Error banner */}
       {error && (
         <section style={{ marginTop: "0.75rem" }}>
           <ErrorBanner message={error} onClose={() => setError(null)} />
         </section>
       )}
 
-      {/* Main card */}
-      <section style={{ marginTop: "0.9rem" }}>
-        <div className="cei-card">
+      {/* Upgrade gating banner */}
+      {!loading && !enableReports && (
+        <section style={{ marginTop: "0.9rem" }}>
           <div
+            className="cei-card"
             style={{
-              marginBottom: "0.7rem",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: "0.75rem",
+              border: "1px solid rgba(250,204,21,0.7)",
+              background:
+                "linear-gradient(135deg, rgba(30,64,175,0.7), rgba(15,23,42,0.95))",
             }}
           >
-            <div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.4rem",
+              }}
+            >
               <div
                 style={{
                   fontSize: "0.9rem",
                   fontWeight: 600,
                 }}
               >
-                Site-level weekly summary
+                Upgrade to unlock portfolio reports
               </div>
               <div
                 style={{
-                  marginTop: "0.2rem",
                   fontSize: "0.8rem",
                   color: "var(--cei-text-muted)",
+                  maxWidth: "40rem",
                 }}
               >
-                For each site, CEI aggregates the last 168 hours of data into a
-                simple report: total energy, data coverage, and a quick status
-                flag. Click any site name to open its full dashboard.
+                Your current plan (<code>{planKey}</code>) does not include
+                the 7-day portfolio reporting layer. Upgrade to CEI Starter
+                or above to see fleet-level KPIs, per-site tables, and
+                export-ready summaries.
+              </div>
+              <div
+                style={{
+                  marginTop: "0.4rem",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "0.5rem",
+                }}
+              >
+                <Link to="/account">
+                  <button className="cei-btn cei-btn-primary">
+                    View plans &amp; billing
+                  </button>
+                </Link>
+                <span
+                  style={{
+                    fontSize: "0.78rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  Reports will light up automatically as soon as your
+                  subscription is active.
+                </span>
               </div>
             </div>
+          </div>
+        </section>
+      )}
+
+      {/* KPI row – only when reports are enabled */}
+      {enableReports && (
+        <section className="dashboard-row">
+          <div className="cei-card">
             <div
               style={{
                 fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
                 color: "var(--cei-text-muted)",
-                textAlign: "right",
               }}
             >
-              Metrics derived from{" "}
-              <code>/timeseries/summary?window_hours=168</code>.
+              Portfolio energy – last 7 days
+            </div>
+            <div
+              style={{
+                marginTop: "0.35rem",
+                fontSize: "1.6rem",
+                fontWeight: 600,
+              }}
+            >
+              {loading ? "…" : formattedTotalKwh7d}
+            </div>
+            <div
+              style={{
+                marginTop: "0.25rem",
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Aggregated energy consumption across all sites over the last
+              168 hours. Points:{" "}
+              {loading ? "…" : totalPoints7d > 0 ? totalPoints7d : "—"}
             </div>
           </div>
 
-          {loading && (
+          <div className="cei-card">
             <div
               style={{
-                padding: "1.2rem 0.5rem",
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Sites with data
+            </div>
+            <div
+              style={{
+                marginTop: "0.35rem",
+                fontSize: "1.4rem",
+                fontWeight: 600,
+              }}
+            >
+              {loading
+                ? "…"
+                : siteRows.filter((r) => r.points7d > 0).length || "0"}
+            </div>
+            <div
+              style={{
+                marginTop: "0.25rem",
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Number of sites reporting at least one timeseries point in the
+              last week.
+            </div>
+          </div>
+
+          <div className="cei-card">
+            <div
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Avg energy per site – 7 days
+            </div>
+            <div
+              style={{
+                marginTop: "0.35rem",
+                fontSize: "1.4rem",
+                fontWeight: 600,
+              }}
+            >
+              {loading ? "…" : formattedAvgPerSite}
+            </div>
+            <div
+              style={{
+                marginTop: "0.25rem",
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Simple average of portfolio energy divided by monitored sites.
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Main table – only when reports are enabled */}
+      {enableReports && (
+        <section>
+          <div className="cei-card">
+            <div
+              style={{
+                marginBottom: "0.7rem",
                 display: "flex",
-                justifyContent: "center",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "0.75rem",
               }}
             >
-              <LoadingSpinner />
-            </div>
-          )}
+              <div>
+                <div
+                  style={{
+                    fontSize: "0.9rem",
+                    fontWeight: 600,
+                  }}
+                >
+                  Site-level 7-day energy
+                </div>
+                <div
+                  style={{
+                    marginTop: "0.2rem",
+                    fontSize: "0.8rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  Per-site energy and point counts over the last week. This is
+                  the backbone for exportable operational reports.
+                </div>
+              </div>
 
-          {!loading && !hasSites && !error && (
-            <div
-              style={{
-                fontSize: "0.85rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              No sites available yet. Start by{" "}
-              <Link to="/upload" style={{ color: "var(--cei-text-accent)" }}>
-                uploading a CSV
-              </Link>{" "}
-              with a <code>site_id</code> column, then refresh this page.
+              <div>
+                <button
+                  type="button"
+                  className="cei-btn cei-btn-ghost"
+                  onClick={handleDownloadCsv}
+                  disabled={loading || !siteRows.length}
+                >
+                  {loading ? "Preparing…" : "Download CSV"}
+                </button>
+              </div>
             </div>
-          )}
 
-          {!loading && hasSites && !hasReports && !error && (
-            <div
-              style={{
-                fontSize: "0.85rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              Sites are registered, but we haven&apos;t seen recent timeseries
-              in the last 7 days. Try expanding the window on individual site
-              dashboards or ingest new CSV data.
-            </div>
-          )}
+            {loading && (
+              <div
+                style={{
+                  padding: "1.2rem 0.5rem",
+                  display: "flex",
+                  justifyContent: "center",
+                }}
+              >
+                <LoadingSpinner />
+              </div>
+            )}
 
-          {!loading && hasReports && (
-            <div style={{ marginTop: "0.4rem", overflowX: "auto" }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Site</th>
-                    <th className="hide-on-mobile">Location</th>
-                    <th>7-day energy</th>
-                    <th>Points</th>
-                    <th>Status</th>
-                    <th className="hide-on-mobile">Data window</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {reports.map((row) => (
-                    <tr key={row.siteId}>
-                      <td>
-                        <Link
-                          to={`/sites/${row.siteId}`}
-                          style={{
-                            color: "var(--cei-text-accent)",
-                            textDecoration: "none",
-                          }}
-                        >
-                          {row.name}
-                        </Link>
-                      </td>
-                      <td className="hide-on-mobile">
-                        {row.location || "—"}
-                      </td>
-                      <td>{formatEnergy(row.totalKwh)}</td>
-                      <td>{row.points.toLocaleString()}</td>
-                      <td>{computeStatus(row)}</td>
-                      <td className="hide-on-mobile">
-                        <span
-                          style={{
-                            fontSize: "0.78rem",
-                            color: "var(--cei-text-muted)",
-                          }}
-                        >
-                          {formatWindow(row)}
-                        </span>
-                      </td>
-                      <td>
-                        <Link
-                          to={`/sites/${row.siteId}`}
-                          style={{
-                            fontSize: "0.8rem",
-                            color: "var(--cei-text-accent)",
-                            textDecoration: "none",
-                          }}
-                        >
-                          View site →
-                        </Link>
-                      </td>
+            {!loading && siteRows.length === 0 && (
+              <div
+                style={{
+                  fontSize: "0.85rem",
+                  color: "var(--cei-text-muted)",
+                }}
+              >
+                No sites available yet. Once sites and timeseries are
+                configured, this table will populate with 7-day energy
+                metrics per site.
+              </div>
+            )}
+
+            {!loading && siteRows.length > 0 && (
+              <div style={{ marginTop: "0.5rem", overflowX: "auto" }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Site</th>
+                      <th>Location</th>
+                      <th>Energy (7 days)</th>
+                      <th>Points</th>
+                      <th>Energy / point</th>
+                      <th />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </section>
+                  </thead>
+                  <tbody>
+                    {siteRows.map((row) => (
+                      <tr key={row.siteId}>
+                        <td>{row.siteName}</td>
+                        <td>{row.location || "—"}</td>
+                        <td>
+                          {row.totalKwh7d > 0
+                            ? `${row.totalKwh7d.toFixed(1)} kWh`
+                            : "—"}
+                        </td>
+                        <td>{row.points7d > 0 ? row.points7d : "—"}</td>
+                        <td>
+                          {row.avgPerPoint7d !== null
+                            ? `${row.avgPerPoint7d.toFixed(2)} kWh`
+                            : "—"}
+                        </td>
+                        <td>
+                          <Link
+                            to={`/sites/${row.siteId}`}
+                            style={{
+                              fontSize: "0.8rem",
+                              color: "var(--cei-text-accent)",
+                              textDecoration: "none",
+                            }}
+                          >
+                            View site →
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   );
 };

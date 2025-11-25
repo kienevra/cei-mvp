@@ -1,122 +1,306 @@
 # backend/app/api/v1/billing.py
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.responses import JSONResponse
-from typing import Any, Optional
-import os
+from __future__ import annotations
+
 import logging
-import stripe
+from typing import Optional, Literal
 
-from app.api.v1.auth import get_current_user  # auth dependency
-from app.db.session import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from app.models import Subscription, BillingPlan, User  # DB models for persistence (placeholders)
 
-logger = logging.getLogger("cei.billing")
+from app.api.v1.auth import get_current_user
+from app.db.session import get_db
+from app.models import Organization  # type: ignore
+
+from app.services.stripe_billing import (
+    get_stripe_config,
+    snapshot_org_stripe_state,
+    CheckoutSessionParams,
+    create_checkout_session_for_org,
+)
+
+logger = logging.getLogger("cei")
+
 router = APIRouter(prefix="/billing", tags=["billing"])
 
-# initialize stripe
-stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
-PRICE_ID = os.environ.get("STRIPE_PRICE_ID_MONTHLY")  # should be set in env
-TRIAL_DAYS = int(os.environ.get("STRIPE_TRIAL_DAYS", "182"))  # default to ~6 months
-FRONTEND_URL = os.environ.get("FRONTEND_URL", os.environ.get("VITE_API_URL", "http://localhost:5173"))
 
-@router.post("/create-checkout-session")
-def create_checkout_session(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+# ========= DTOs / schemas =========
+
+
+class BillingPlanPublic(BaseModel):
     """
-    Create a Stripe Checkout session for a subscription with a trial.
-    Returns a JSON with { "sessionId": "<stripe-session-id>" }.
+    Public view of a plan. For now this is just a placeholder.
 
-    Frontend should redirect to: https://checkout.stripe.com/pay/<sessionId>
+    Later we can:
+      - load real BillingPlan rows from the DB
+      - expose fields like monthly_price, currency, hard limits, etc.
     """
-    if not PRICE_ID:
-        logger.error("Stripe price ID not configured (STRIPE_PRICE_ID_MONTHLY).")
-        raise HTTPException(status_code=500, detail="Payment configuration not present")
 
-    # Ensure user email available
-    email = getattr(current_user, "email", None) or None
+    key: str
+    name: str
+    description: Optional[str] = None
+    is_default: bool = False
 
-    # Create or fetch a Stripe Customer (for simplicity we create a customer here).
-    # In production, you'd store stripe_customer_id on the User or Subscription row and reuse it.
-    try:
-        customer = stripe.Customer.create(email=email, metadata={"user_id": str(getattr(current_user, "id", ""))})
-    except stripe.error.StripeError as e:
-        logger.exception("Failed to create Stripe customer")
-        raise HTTPException(status_code=502, detail=str(e))
 
-    try:
-        session = stripe.checkout.Session.create(
-            customer=customer.id,
-            mode="subscription",
-            line_items=[{"price": PRICE_ID, "quantity": 1}],
-            subscription_data={"trial_period_days": TRIAL_DAYS},
-            metadata={"user_id": str(getattr(current_user, "id", ""))},
-            success_url=f"{FRONTEND_URL.rstrip('/')}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{FRONTEND_URL.rstrip('/')}/billing/cancel",
+class BillingOverviewOut(BaseModel):
+    """
+    What the frontend needs to render a simple Billing page
+    *without* caring about Stripe internals.
+    """
+
+    org_id: Optional[int]
+    org_name: Optional[str] = None
+
+    current_plan: Optional[BillingPlanPublic] = None
+    billing_status: str = "unknown"
+
+    stripe_enabled: bool
+    stripe_api_key_present: bool
+    stripe_webhook_secret_present: bool
+
+    stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: Optional[str] = None
+    stripe_status: Optional[str] = None
+
+
+class CheckoutSessionCreateIn(BaseModel):
+    """
+    Payload from the frontend asking to start a plan change
+    (or initial subscription) via Stripe Checkout.
+    """
+
+    plan_key: str
+    success_url: str
+    cancel_url: str
+
+
+class CheckoutSessionCreateOut(BaseModel):
+    """
+    What the frontend gets back: a hosted checkout URL.
+    """
+
+    provider: Literal["stripe"] = "stripe"
+    checkout_url: str
+
+
+class PortalSessionCreateOut(BaseModel):
+    """
+    Hosted self-service billing portal (Stripe customer portal).
+    """
+
+    provider: Literal["stripe"] = "stripe"
+    portal_url: str
+
+
+# ========= Helpers =========
+
+
+def _get_org_for_user(db: Session, user) -> Organization:
+    """
+    Resolve the Organization for the current user.
+
+    We keep this defensive so it doesn't explode if your User model
+    evolves. Priority:
+      1) user.organization (relationship)
+      2) user.organization_id or user.org_id
+    """
+    org = getattr(user, "organization", None)
+    if org is not None:
+        return org
+
+    org_id = (
+        getattr(user, "organization_id", None)
+        or getattr(user, "org_id", None)
+    )
+    if not org_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not linked to any organization.",
         )
-    except stripe.error.StripeError as e:
-        logger.exception("Stripe checkout session creation failed")
-        raise HTTPException(status_code=502, detail=str(e))
 
-    # Optionally, persist a staging subscription record in DB here (status = 'checkout_pending')
-    # Example (pseudo):
-    # db_sub = Subscription(user_id=current_user.id, stripe_customer_id=customer.id,
-    #                      stripe_subscription_id="", status="checkout_pending")
-    # db.add(db_sub); db.commit(); db.refresh(db_sub)
-
-    return {"sessionId": session.id}
+    org = db.get(Organization, org_id)
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Organization {org_id} not found.",
+        )
+    return org
 
 
-@router.post("/webhook")
-async def stripe_webhook(request: Request):
+def _build_default_plan_for_now() -> BillingPlanPublic:
     """
-    Stripe webhook endpoint. Configure STRIPE_WEBHOOK_SECRET in env for signature verification.
+    Temporary, hard-coded plan so the UI has something to show
+    until we wire real BillingPlan rows.
     """
-    payload = await request.body()
-    sig_header = request.headers.get("stripe-signature")
-    endpoint_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
-    event = None
+    return BillingPlanPublic(
+        key="cei-starter",
+        name="CEI Starter",
+        description="Up to 3 sites, 12-month rolling history, CSV ingestion.",
+        is_default=True,
+    )
+
+
+# ========= Routes =========
+
+
+@router.get(
+    "/overview",
+    response_model=BillingOverviewOut,
+    status_code=status.HTTP_200_OK,
+)
+def get_billing_overview(
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+) -> BillingOverviewOut:
+    """
+    Return a concise view of the current org's billing state.
+
+    Today this is mostly:
+      - org id + name
+      - whether Stripe is configured at all
+      - whatever Stripe IDs we already have on the org (if any)
+
+    Later we can:
+      - read BillingPlan / Subscription tables
+      - compute usage vs plan limits
+    """
+    cfg = get_stripe_config()
+    org = _get_org_for_user(db, user)
+    org_snap = snapshot_org_stripe_state(db, org)
+
+    # For now, everyone is on a single "CEI Starter" plan in the UI.
+    current_plan = _build_default_plan_for_now()
+
+    return BillingOverviewOut(
+        org_id=getattr(org, "id", None),
+        org_name=getattr(org, "name", None),
+
+        current_plan=current_plan,
+        billing_status=org_snap.stripe_status or "unknown",
+
+        stripe_enabled=cfg.enabled,
+        stripe_api_key_present=cfg.api_key_present,
+        stripe_webhook_secret_present=cfg.webhook_secret_present,
+
+        stripe_customer_id=org_snap.stripe_customer_id,
+        stripe_subscription_id=org_snap.stripe_subscription_id,
+        stripe_status=org_snap.stripe_status,
+    )
+
+
+@router.post(
+    "/checkout-session",
+    response_model=CheckoutSessionCreateOut,
+    status_code=status.HTTP_200_OK,
+)
+def create_billing_checkout_session(
+    payload: CheckoutSessionCreateIn,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+) -> CheckoutSessionCreateOut:
+    """
+    Start a Stripe Checkout session for the current org.
+
+    *Important at this stage:*
+      - If Stripe is NOT configured, we fail fast with a 400 and a clear message.
+      - The underlying service function still raises NotImplementedError
+        in this step of the roadmap – that's expected until we wire real Stripe.
+    """
+    cfg = get_stripe_config()
+    if not cfg.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Stripe is not configured (no usable API key). "
+                "Set STRIPE_API_KEY / stripe_api_key in backend settings "
+                "before using the billing checkout flow."
+            ),
+        )
+
+    org = _get_org_for_user(db, user)
+
+    params = CheckoutSessionParams(
+        plan_key=payload.plan_key,
+        success_url=payload.success_url,
+        cancel_url=payload.cancel_url,
+    )
 
     try:
-        if endpoint_secret:
-            event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
-        else:
-            # insecure fallback for dev only - log heavily if used
-            logger.warning("⚠️ STRIPE_WEBHOOK_SECRET not set — using insecure webhook parsing (dev only)")
-            event = stripe.Event.construct_from(stripe.util.json.loads(payload), stripe.api_key)
-    except ValueError:
-        logger.exception("Invalid payload from Stripe webhook")
-        return JSONResponse(status_code=400, content={"error": "Invalid payload"})
-    except stripe.error.SignatureVerificationError:
-        logger.exception("Stripe webhook signature verification failed")
-        return JSONResponse(status_code=400, content={"error": "Invalid signature"})
+        result = create_checkout_session_for_org(db, org, params)
+    except NotImplementedError as e:
+        # Step 2: we deliberately surface a 501 so it's obvious in testing
+        logger.warning("Checkout requested but not implemented: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=(
+                "Stripe Checkout is not implemented yet at this step of the CEI "
+                "billing roadmap. The API surface is in place and ready to be wired."
+            ),
+        )
+    except RuntimeError as e:
+        # e.g. Stripe disabled at service layer
+        logger.warning("Stripe runtime error during checkout: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:  # ultra-defensive
+        logger.exception("Unexpected error creating checkout session: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error creating Stripe checkout session.",
+        )
 
-    # Handle relevant events
-    typ = event.get("type")
-    logger.info("Received Stripe event: %s", typ)
+    # Once we wire Stripe for real, result.url will be a hosted checkout URL.
+    return CheckoutSessionCreateOut(checkout_url=result.url)
 
-    # NOTE: implement DB write logic here (lookup by metadata, session.customer, or session.metadata)
-    try:
-        if typ == "checkout.session.completed":
-            session = event["data"]["object"]
-            # session.subscription contains the subscription id
-            # Use session.customer or session.metadata["user_id"] to locate CEI user
-            logger.info("Checkout session completed: %s", session.get("id"))
-            # TODO: write subscription record in DB using stripe subscription id
-        elif typ == "invoice.payment_succeeded":
-            invoice = event["data"]["object"]
-            logger.info("Invoice payment succeeded: %s", invoice.get("id"))
-            # TODO: mark subscription active / update status
-        elif typ == "customer.subscription.updated":
-            sub = event["data"]["object"]
-            logger.info("Subscription updated: %s", sub.get("id"))
-            # TODO: sync subscription status and current_period_end to DB
-        elif typ == "customer.subscription.deleted":
-            sub = event["data"]["object"]
-            logger.info("Subscription canceled/deleted: %s", sub.get("id"))
-            # TODO: mark subscription canceled in DB
-        else:
-            logger.debug("Unhandled Stripe event type: %s", typ)
-    except Exception:
-        logger.exception("Error handling Stripe webhook event")
 
-    return JSONResponse(status_code=200, content={"received": True})
+@router.post(
+    "/portal-session",
+    response_model=PortalSessionCreateOut,
+    status_code=status.HTTP_200_OK,
+)
+def create_billing_portal_session(
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+) -> PortalSessionCreateOut:
+    """
+    Skeleton for a Stripe Billing Portal session.
+
+    In a later step we will:
+      - ensure the org has a stripe_customer_id
+      - call stripe.billing_portal.Session.create(...)
+      - return the hosted portal URL
+
+    For now, we just:
+      - validate that Stripe is configured
+      - return a 501 Not Implemented, so frontend knows the capability
+        exists but isn't active yet.
+    """
+    cfg = get_stripe_config()
+    if not cfg.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Stripe is not configured (no usable API key). "
+                "Set STRIPE_API_KEY / stripe_api_key in backend settings "
+                "before using the billing portal."
+            ),
+        )
+
+    # We still resolve org so we can log / audit
+    org = _get_org_for_user(db, user)
+    logger.info(
+        "Billing portal requested for org %s – Stripe portal integration "
+        "not implemented at this step.",
+        getattr(org, "id", None),
+    )
+
+    # 501 signals: "this endpoint is legit but not yet implemented"
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=(
+            "Stripe Billing Portal integration is not implemented yet. "
+            "The endpoint is reserved and ready for wiring in a later step."
+        ),
+    )

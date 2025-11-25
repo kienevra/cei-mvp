@@ -1,18 +1,17 @@
-# backend/app/api/v1/alerts.py
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Literal
+from typing import List, Optional, Dict, Literal, Any
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.db.session import get_db
-from app.models import TimeseriesRecord  # and Site if available
+from app.models import TimeseriesRecord  # and Site / Organization if available
 
 logger = logging.getLogger("cei")
 
@@ -51,7 +50,7 @@ class AlertThresholdsConfig(BaseModel):
     # Portfolio dominance
     portfolio_share_info_ratio: float = 1.5  # >= 1.5x avg per site -> info
 
-    # NEW: Weekend vs weekday baseline
+    # Weekend vs weekday baseline
     weekend_warning_ratio: float = 0.6   # weekend >= 60% of weekday -> warning
     weekend_critical_ratio: float = 0.8  # weekend >= 80% of weekday -> critical
 
@@ -80,6 +79,66 @@ def get_thresholds_for_site(site_id: Optional[str]) -> AlertThresholdsConfig:
     return SITE_THRESHOLDS.get(site_id, DEFAULT_THRESHOLDS)
 
 
+def _user_has_alerts_enabled(db: Session, user: Any) -> bool:
+    """
+    Plan-level guard for alerts.
+
+    Logic:
+    - If we can't resolve an org at all -> default to True (single-tenant/dev).
+    - If org.enable_alerts exists -> trust it.
+    - Else, derive from plan_key/subscription_plan_key:
+        - "cei-starter" or "cei-growth" -> True
+        - anything else -> False
+    - On any exception, default to True so we don't brick the app.
+    """
+    try:
+        org = None
+
+        # Relationship style: user.organization
+        if hasattr(user, "organization") and getattr(user, "organization") is not None:
+            org = getattr(user, "organization")
+        else:
+            # Fallback: look up by organization_id if possible
+            org_id = getattr(user, "organization_id", None)
+            if org_id:
+                try:
+                    from app.models import Organization  # type: ignore
+                except Exception:
+                    org = None
+                else:
+                    org = (
+                        db.query(Organization)
+                        .filter(Organization.id == org_id)
+                        .first()
+                    )
+
+        if not org:
+            # No org concept -> treat as dev/single-tenant -> alerts allowed
+            return True
+
+        explicit_flag = getattr(org, "enable_alerts", None)
+        if explicit_flag is not None:
+            return bool(explicit_flag)
+
+        plan_key = (
+            getattr(org, "subscription_plan_key", None)
+            or getattr(org, "plan_key", None)
+        )
+
+        if not plan_key:
+            # No plan info -> default to enabled to avoid surprise lockouts
+            return True
+
+        # Starter / Growth tiers get alerts; others (e.g. free) do not
+        return plan_key in ("cei-starter", "cei-growth")
+
+    except Exception:
+        logger.exception(
+            "Failed to resolve alerts plan flag; defaulting to enabled."
+        )
+        return True
+
+
 @router.get(
     "/",
     response_model=List[AlertOut],
@@ -102,8 +161,21 @@ def list_alerts(
     - High night-time baseline (critical / warning)
     - Peak spikes vs average (warning)
     - Site dominating portfolio energy (info)
-    - NEW: weekend baseline too close to weekday baseline (warning / critical)
+    - Weekend baseline too close to weekday baseline (warning / critical)
     """
+
+    # --- Plan / feature gating ---
+    if not _user_has_alerts_enabled(db, user):
+        logger.info(
+            "Alerts disabled by plan for user=%s org_id=%s",
+            getattr(user, "email", None),
+            getattr(user, "organization_id", None),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Alerts are not enabled for this organization/plan.",
+        )
+
     # Clamp any silly values
     if window_hours <= 0:
         window_hours = 24
@@ -213,7 +285,7 @@ def _generate_alerts_for_window(db: Session, window_hours: int) -> List[AlertOut
         points = int(row.points or 0)
         avg_value = float(row.avg_value or 0)
         max_value = float(row.max_value or 0)
-        min_value = float(row.min_value or 0)  # noqa: F841  # reserved for future rules
+        min_value = float(row.min_value or 0)  # reserved for future rules
         last_ts = row.last_ts or datetime.utcnow()
         site_name = site_name_map.get(site_id)
 
@@ -311,8 +383,7 @@ def _generate_alerts_for_window(db: Session, window_hours: int) -> List[AlertOut
                 )
                 alert_id_counter += 1
 
-        # ---------- NEW Rule 3: Weekend baseline vs weekday baseline ----------
-        # Only meaningful if we actually have both weekday and weekend data
+        # ---------- Rule 3: Weekend baseline vs weekday baseline ----------
         if avg_weekday > 0 and avg_weekend > 0:
             weekend_ratio = avg_weekend / avg_weekday
 

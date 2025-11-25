@@ -1,10 +1,17 @@
-// frontend/src/services/api.ts
-import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
+import axios, {
+  AxiosError,
+  AxiosRequestConfig,
+  AxiosResponse,
+} from "axios";
 
 const rawEnv = (import.meta as any).env || {};
 const envBase = rawEnv.VITE_API_URL || "";
 const base = envBase.replace(/\/+$/, "");
-const baseURL = base ? (base.endsWith("/api/v1") ? base : `${base}/api/v1`) : "/api/v1";
+export const baseURL = base
+  ? base.endsWith("/api/v1")
+    ? base
+    : `${base}/api/v1`
+  : "/api/v1";
 
 const api = axios.create({
   baseURL,
@@ -37,7 +44,9 @@ api.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error: AxiosError) => {
     const status = error.response?.status;
-    const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
+    const originalRequest = error.config as AxiosRequestConfig & {
+      _retry?: boolean;
+    };
 
     if (status !== 401 || !originalRequest) {
       return Promise.reject(error);
@@ -77,7 +86,9 @@ api.interceptors.response.use(
               timeout: 8000,
             }
           );
-          const newToken = (resp.data as any)?.access_token as string | undefined;
+          const newToken = (resp.data as any)?.access_token as
+            | string
+            | undefined;
           if (!newToken) {
             throw new Error("No access_token in refresh response");
           }
@@ -128,7 +139,10 @@ export async function getSite(id: string | number) {
   return r.data;
 }
 
-export async function createSite(payload: { name: string; location?: string }) {
+export async function createSite(payload: {
+  name: string;
+  location?: string;
+}) {
   const r = await api.post("/sites", payload);
   return r.data;
 }
@@ -180,14 +194,51 @@ export async function getSiteInsights(
   return resp.data;
 }
 
+export async function getAlerts(params: { window_hours?: number } = {}) {
+  const resp = await api.get("/alerts", { params });
+  return resp.data;
+}
+
 /**
- * Fetch alerts from backend.
- * Optionally filter by window_hours (e.g. 24, 168).
+ * Fetch current account/org info from the auth layer.
+ * This is the single source of truth for plan + feature flags.
  */
-export async function getAlerts(params?: { window_hours?: number }) {
-  const r = await api.get("/alerts", { params });
-  // Backend is expected to return an array; if not, normalize.
-  return Array.isArray(r.data) ? r.data : [];
+export async function getAccountMe() {
+  const resp = await api.get("/auth/me");
+  return resp.data;
+}
+
+/**
+ * Start a Stripe Checkout session for a given plan.
+ * Backend is expected to return: { url: string }
+ */
+export async function startCheckout(planKey: string) {
+  const origin =
+    typeof window !== "undefined" ? window.location.origin : "";
+  const success_url = `${origin}/account?billing=success`;
+  const cancel_url = `${origin}/account?billing=cancel`;
+
+  const resp = await api.post("/billing/checkout", {
+    plan_key: planKey,
+    success_url,
+    cancel_url,
+  });
+  return resp.data as { url?: string };
+}
+
+/**
+ * Open the Stripe Billing Portal for the current org.
+ * Backend is expected to return: { url: string }
+ */
+export async function openBillingPortal() {
+  const origin =
+    typeof window !== "undefined" ? window.location.origin : "";
+  const return_url = `${origin}/account`;
+
+  const resp = await api.post("/billing/portal", {
+    return_url,
+  });
+  return resp.data as { url?: string };
 }
 
 export default api;

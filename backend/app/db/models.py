@@ -4,6 +4,7 @@ from sqlalchemy.sql import func
 
 Base = declarative_base()
 
+
 class TimeseriesRecord(Base):
     __tablename__ = "timeseries_records"
     id = Column(Integer, primary_key=True, index=True)
@@ -13,6 +14,7 @@ class TimeseriesRecord(Base):
     value = Column(Numeric(18, 6))
     unit = Column(String(32))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 
 class StagingUpload(Base):
     __tablename__ = "staging_uploads"

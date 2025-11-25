@@ -1,7 +1,5 @@
-# backend/app/core/config.py
-
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,6 +16,7 @@ class Settings(BaseSettings):
     - CORS / allowed origins
     - docs toggle
     - auth / token settings
+    - Stripe / billing settings
     """
 
     # Pydantic Settings config
@@ -78,6 +77,18 @@ class Settings(BaseSettings):
         description="If true, exposes /api/v1/docs and /api/v1/redoc.",
     )
 
+    # Stripe / billing
+    stripe_api_key: Optional[str] = Field(
+        default=None,
+        env="STRIPE_API_KEY",
+        description="Secret key for Stripe API; leave empty in dev if billing disabled.",
+    )
+    stripe_webhook_secret: Optional[str] = Field(
+        default=None,
+        env="STRIPE_WEBHOOK_SECRET",
+        description="Stripe webhook signing secret; required to validate Stripe webhooks.",
+    )
+
     def origins_list(self) -> List[str]:
         """
         Split ALLOWED_ORIGINS into a list for CORSMiddleware.
@@ -85,6 +96,13 @@ class Settings(BaseSettings):
         if not self.allowed_origins:
             return []
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+
+    @property
+    def stripe_enabled(self) -> bool:
+        """
+        Convenience flag: Stripe is 'enabled' only if both API key and webhook secret are present.
+        """
+        return bool(self.stripe_api_key and self.stripe_webhook_secret)
 
 
 @lru_cache()

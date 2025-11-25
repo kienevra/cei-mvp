@@ -39,6 +39,7 @@
     sans-serif;
 }
 
+
 /* Pills for alerts/status tags */
 .cei-pill-critical,
 .cei-pill-warning,
@@ -49,6 +50,34 @@
   border-radius: 999px;
   font-size: 0.7rem;
   font-weight: 500;
+}
+
+/* Danger pill – for "Delete account" in Account.tsx */
+.cei-pill-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  border: 1px solid rgba(248, 113, 113, 0.9);  /* red-400 border */
+  background: rgba(127, 29, 29, 0.85);         /* red-900 bg-ish */
+  color: #fee2e2;                               /* red-100 text */
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+}
+
+.cei-pill-danger:hover {
+  background: rgba(153, 27, 27, 0.95);         /* red-800 hover */
+  border-color: rgba(252, 165, 165, 1);        /* red-300 border */
+  transform: translateY(-0.5px);
+}
+
+.cei-pill-danger:active {
+  transform: translateY(0.5px);
+  background: rgba(127, 29, 29, 1);
 }
 
 .cei-pill-critical {

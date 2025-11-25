@@ -1,10 +1,22 @@
 # backend/app/models.py
 from sqlalchemy import (
-    Column, Integer, String, Float, ForeignKey, TIMESTAMP, Text, JSON, Index, DateTime, Numeric
+    Column,
+    Integer,
+    String,
+    Float,
+    ForeignKey,
+    TIMESTAMP,
+    Text,
+    JSON,
+    Index,
+    DateTime,
+    Numeric,
+    Boolean,   # <-- added
 )
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text  # <-- text added here
 from app.db.base import Base
+
 
 class Organization(Base):
     __tablename__ = "organization"
@@ -14,6 +26,35 @@ class Organization(Base):
 
     sites = relationship("Site", back_populates="organization", cascade="all, delete-orphan")
     users = relationship("User", back_populates="organization", cascade="all, delete-orphan")
+
+    # -------- NEW SaaS / billing fields --------
+    # Plan & feature flags
+    plan_key = Column(String, nullable=True)  # e.g. "free", "cei-starter"
+    subscription_plan_key = Column(String, nullable=True)  # Stripe / logical plan
+
+    enable_alerts = Column(
+        Boolean,
+        nullable=False,
+        server_default=text("1"),  # default ON for dev
+    )
+    enable_reports = Column(
+        Boolean,
+        nullable=False,
+        server_default=text("1"),  # default ON for dev
+    )
+
+    subscription_status = Column(
+        String,
+        nullable=True,
+    )  # e.g. "active", "past_due", "canceled"
+
+    # Stripe wiring (optional but future-proof)
+    stripe_customer_id = Column(String, nullable=True)
+    stripe_subscription_id = Column(String, nullable=True)
+    stripe_status = Column(String, nullable=True)
+
+    # Optional billing email override
+    billing_email = Column(String, nullable=True)
 
 
 class User(Base):
