@@ -15,6 +15,20 @@ type AlertRecord = {
   metric?: string | null;
   window_hours?: number | null;
   triggered_at?: string | null;
+
+  // Statistical / baseline extras from backend
+  deviation_pct?: number | null;
+  total_actual_kwh?: number | null;
+  total_expected_kwh?: number | null;
+  baseline_lookback_days?: number | null;
+  global_mean_kwh?: number | null;
+  global_p50_kwh?: number | null;
+  global_p90_kwh?: number | null;
+  critical_hours?: number | null;
+  elevated_hours?: number | null;
+  below_baseline_hours?: number | null;
+  stats_source?: string | null;
+
   // keep it flexible so we don't break on backend changes
   [key: string]: any;
 };
@@ -25,6 +39,17 @@ function toSiteRouteId(raw: string): string {
     return raw.substring("site-".length);
   }
   return raw;
+}
+
+// Compact formatter for kWh/MWh values
+function formatEnergyShort(kwh: number | null | undefined): string {
+  if (kwh === null || kwh === undefined) return "—";
+  const val = Number(kwh);
+  if (!Number.isFinite(val)) return "—";
+  if (Math.abs(val) >= 1000) {
+    return `${(val / 1000).toFixed(1)} MWh`;
+  }
+  return `${val.toFixed(0)} kWh`;
 }
 
 const Alerts: React.FC = () => {
@@ -559,6 +584,44 @@ const Alerts: React.FC = () => {
                       ? toSiteRouteId(siteIdRaw)
                       : String(siteIdRaw);
 
+                  // Stats from backend (optional)
+                  const dev =
+                    typeof alert.deviation_pct === "number"
+                      ? alert.deviation_pct
+                      : null;
+                  const totalActual =
+                    typeof alert.total_actual_kwh === "number"
+                      ? alert.total_actual_kwh
+                      : null;
+                  const totalExpected =
+                    typeof alert.total_expected_kwh === "number"
+                      ? alert.total_expected_kwh
+                      : null;
+                  const baselineDays =
+                    typeof alert.baseline_lookback_days === "number"
+                      ? alert.baseline_lookback_days
+                      : null;
+                  const critHours =
+                    typeof alert.critical_hours === "number"
+                      ? alert.critical_hours
+                      : null;
+                  const elevHours =
+                    typeof alert.elevated_hours === "number"
+                      ? alert.elevated_hours
+                      : null;
+                  const belowHours =
+                    typeof alert.below_baseline_hours === "number"
+                      ? alert.below_baseline_hours
+                      : null;
+
+                  const hasStatsBand =
+                    dev !== null ||
+                    (totalActual !== null && totalExpected !== null) ||
+                    baselineDays !== null ||
+                    critHours !== null ||
+                    elevHours !== null ||
+                    belowHours !== null;
+
                   return (
                     <div
                       key={key}
@@ -669,6 +732,61 @@ const Alerts: React.FC = () => {
                           )}
                         </div>
                       </div>
+
+                      {hasStatsBand && (
+                        <div
+                          style={{
+                            marginTop: "0.55rem",
+                            paddingTop: "0.45rem",
+                            borderTop:
+                              "1px solid rgba(148,163,184,0.45)",
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: "0.75rem",
+                            fontSize: "0.75rem",
+                            color: "var(--cei-text-muted)",
+                          }}
+                        >
+                          {dev !== null && (
+                            <span>
+                              Δ vs baseline:{" "}
+                              <strong>
+                                {dev > 0 ? "+" : ""}
+                                {dev.toFixed(1)}%
+                              </strong>
+                            </span>
+                          )}
+                          {totalActual !== null &&
+                            totalExpected !== null && (
+                              <span>
+                                Actual vs expected:{" "}
+                                <strong>
+                                  {formatEnergyShort(totalActual)}
+                                </strong>{" "}
+                                vs{" "}
+                                <strong>
+                                  {formatEnergyShort(totalExpected)}
+                                </strong>
+                              </span>
+                            )}
+                          {baselineDays !== null && (
+                            <span>
+                              Baseline window: {baselineDays} days
+                            </span>
+                          )}
+                          {(critHours !== null ||
+                            elevHours !== null ||
+                            belowHours !== null) && (
+                            <span>
+                              Hours – critical:{" "}
+                              <strong>{critHours ?? 0}</strong>, elevated:{" "}
+                              <strong>{elevHours ?? 0}</strong>, below
+                              baseline:{" "}
+                              <strong>{belowHours ?? 0}</strong>
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

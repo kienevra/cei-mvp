@@ -14,6 +14,8 @@ type OrgInfo = {
   plan_key?: string | null;
   subscription_plan_key?: string | null;
   subscription_status?: string | null;
+  enable_alerts?: boolean | null;
+  enable_reports?: boolean | null;
   [key: string]: any;
 };
 
@@ -23,6 +25,10 @@ type AccountMe = {
   role?: string | null;
   org?: OrgInfo | null;
   organization?: OrgInfo | null;
+  subscription_plan_key?: string | null;
+  enable_alerts?: boolean | null;
+  enable_reports?: boolean | null;
+  subscription_status?: string | null;
   [key: string]: any;
 };
 
@@ -54,8 +60,8 @@ const Account: React.FC = () => {
 
         setAccount({
           email: data?.email,
-          full_name: data?.full_name ?? data?.name ?? null,
-          role: data?.role ?? data?.user_role ?? null,
+          full_name: data?.full_name ?? (data as any)?.name ?? null,
+          role: data?.role ?? (data as any)?.user_role ?? null,
           org,
           ...data,
         });
@@ -105,6 +111,21 @@ const Account: React.FC = () => {
     org?.subscription_status ||
     account?.subscription_status ||
     "Not connected";
+
+  // Respect explicit false; only default to true when we truly have no signal.
+  const alertsEnabled =
+    typeof account?.enable_alerts === "boolean"
+      ? account.enable_alerts
+      : typeof org?.enable_alerts === "boolean"
+      ? (org.enable_alerts as boolean)
+      : true;
+
+  const reportsEnabled =
+    typeof account?.enable_reports === "boolean"
+      ? account.enable_reports
+      : typeof org?.enable_reports === "boolean"
+      ? (org.enable_reports as boolean)
+      : true;
 
   const handleStartStarterCheckout = async () => {
     setBillingError(null);
@@ -223,6 +244,11 @@ const Account: React.FC = () => {
               Role: <strong>{account.role}</strong>
             </div>
           )}
+          <div style={{ marginTop: "0.2rem" }}>
+            <span>
+              Plan: <strong>{planLabel}</strong>
+            </span>
+          </div>
         </div>
       </section>
 
@@ -340,6 +366,23 @@ const Account: React.FC = () => {
             </div>
             <div style={{ marginTop: "0.2rem" }}>
               <strong>Status:</strong> {subscriptionStatus}
+            </div>
+          </div>
+
+          {/* Feature flags summary */}
+          <div
+            style={{
+              marginTop: "0.4rem",
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            <div>
+              <strong>Alerts:</strong> {alertsEnabled ? "Enabled" : "Disabled"}
+            </div>
+            <div style={{ marginTop: "0.1rem" }}>
+              <strong>Reports:</strong>{" "}
+              {reportsEnabled ? "Enabled" : "Disabled"}
             </div>
           </div>
 

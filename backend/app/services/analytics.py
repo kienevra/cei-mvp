@@ -4,7 +4,9 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timedelta
 from math import sqrt
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from statistics import mean, pstdev
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -52,6 +54,171 @@ def _load_site_recent(
     return q.all()
 
 
+# ========= Statistical baselines (deterministic + statistical layer) =========
+
+
+@dataclass
+class BaselineBucket:
+    """
+    One baseline cell for (hour_of_day, weekend/weekday).
+
+    Example: "weekday 08:00–09:00 has mean 900 kWh with std 120 kWh".
+    """
+
+    hour_of_day: int       # 0–23
+    is_weekend: bool       # True = Saturday/Sunday
+    mean_kwh: float
+    std_kwh: float         # 0 if we only have 1 point
+
+
+@dataclass
+class BaselineProfile:
+    """
+    Baseline profile for a given (site_id, meter_id) over a lookback window.
+
+    This is the core statistical object we will reuse in:
+      - /analytics/sites/{site_id}/insights
+      - /alerts (statistical anomaly rule)
+      - /reports (distribution metrics)
+    """
+
+    site_id: Optional[str]
+    meter_id: Optional[str]
+    lookback_days: int
+
+    buckets: List[BaselineBucket]
+
+    # Global distribution metrics across all points in the lookback
+    global_mean: Optional[float]
+    global_p50: Optional[float]
+    global_p90: Optional[float]
+
+    # Total number of points used
+    n_points: int
+
+
+def compute_baseline_profile(
+    db: Session,
+    *,
+    site_id: Optional[str] = None,
+    meter_id: Optional[str] = None,
+    lookback_days: int = 30,
+    now: Optional[datetime] = None,
+    allowed_site_ids: Optional[List[str]] = None,
+) -> Optional[BaselineProfile]:
+    """
+    Compute a statistical baseline profile for a given site/meter.
+
+    - Pulls last `lookback_days` worth of TimeseriesRecord rows.
+    - Groups values by (hour_of_day, weekend/weekday).
+    - For each group: computes mean and std (population std).
+    - Also computes global mean, p50, p90 across all points.
+
+    Returns:
+        BaselineProfile if we have data, otherwise None.
+
+    This does NOT change any existing behaviour yet; it's a reusable
+    building block for richer insights/alerts.
+    """
+    if now is None:
+        now = _utcnow()
+
+    start = now - timedelta(days=lookback_days)
+
+    q = db.query(TimeseriesRecord).filter(TimeseriesRecord.timestamp >= start)
+
+    # Multi-tenant safety: optional org-level scoping via allowed_site_ids
+    if allowed_site_ids:
+        q = q.filter(TimeseriesRecord.site_id.in_(allowed_site_ids))
+
+    if site_id:
+        q = q.filter(TimeseriesRecord.site_id == site_id)
+    if meter_id:
+        q = q.filter(TimeseriesRecord.meter_id == meter_id)
+
+    rows = q.all()
+    if not rows:
+        # No data in the lookback window – caller must handle None gracefully
+        return None
+
+    # Group values by (hour_of_day, is_weekend)
+    group_values: Dict[Tuple[int, bool], List[float]] = defaultdict(list)
+    all_values: List[float] = []
+
+    for row in rows:
+        ts: datetime = row.timestamp
+        if not ts:
+            continue
+        try:
+            val = float(row.value)
+        except Exception:
+            continue
+
+        hour_of_day = ts.hour
+        is_weekend = ts.weekday() >= 5
+
+        group_values[(hour_of_day, is_weekend)].append(val)
+        all_values.append(val)
+
+    # Build per-bucket statistics
+    buckets: List[BaselineBucket] = []
+    for (hour_of_day, is_weekend), vals in group_values.items():
+        if not vals:
+            continue
+
+        if len(vals) == 1:
+            m = float(vals[0])
+            s = 0.0
+        else:
+            m = float(mean(vals))
+            try:
+                s = float(pstdev(vals))
+            except Exception:
+                # Extremely defensive; we never want baselines to break the app
+                s = 0.0
+
+        buckets.append(
+            BaselineBucket(
+                hour_of_day=hour_of_day,
+                is_weekend=is_weekend,
+                mean_kwh=m,
+                std_kwh=s,
+            )
+        )
+
+    # Stable sort: weekend flag then hour
+    buckets.sort(key=lambda b: (b.is_weekend, b.hour_of_day))
+
+    # Global distribution metrics
+    all_values.sort()
+    n = len(all_values)
+
+    def _percentile(values: List[float], p: float) -> Optional[float]:
+        if not values:
+            return None
+        # Simple nearest-rank style; operationally good enough
+        idx = int(round((p / 100.0) * (len(values) - 1)))
+        return float(values[idx])
+
+    global_mean = float(sum(all_values) / n) if n > 0 else None
+    global_p50 = _percentile(all_values, 50.0)
+    global_p90 = _percentile(all_values, 90.0)
+
+    return BaselineProfile(
+        site_id=site_id,
+        meter_id=meter_id,
+        lookback_days=lookback_days,
+        buckets=buckets,
+        global_mean=global_mean,
+        global_p50=global_p50,
+        global_p90=global_p90,
+        n_points=n,
+    )
+
+
+# ========= Existing hourly baseline + insights (kept as-is) =========
+
+
 def compute_hourly_baseline(
     db: Session,
     site_id: str,
@@ -91,16 +258,16 @@ def compute_hourly_baseline(
         if not values:
             continue
 
-        mean = sum(values) / len(values)
+        mean_val = sum(values) / len(values)
         if len(values) > 1:
-            variance = sum((v - mean) ** 2 for v in values) / len(values)
-            std = sqrt(variance)
+            variance = sum((v - mean_val) ** 2 for v in values) / len(values)
+            std_val = sqrt(variance)
         else:
-            std = 0.0
+            std_val = 0.0
 
         baseline[hour] = {
-            "mean": float(mean),
-            "std": float(std),
+            "mean": float(mean_val),
+            "std": float(std_val),
         }
 
     return baseline
@@ -163,7 +330,7 @@ def compute_site_insights(
         actual = actual_by_hour.get(hour, 0.0)
         base = baseline.get(hour)
         expected = base["mean"] if base else 0.0
-        std = base["std"] if base else 0.0
+        std_val = base["std"] if base else 0.0
 
         if expected > 0:
             delta = actual - expected
@@ -172,8 +339,8 @@ def compute_site_insights(
             delta = actual
             delta_pct = 0.0 if actual == 0 else 100.0
 
-        if std > 0:
-            z = delta / std
+        if std_val > 0:
+            z = delta / std_val
         else:
             z = 0.0
 
@@ -231,12 +398,14 @@ def generate_alerts_for_all_sites(
     window_hours: int = 24,
     lookback_days: int = 30,
     as_of: Optional[datetime] = None,
+    allowed_site_ids: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Portfolio-level alert generator that uses the baseline/deviation engine.
 
     Strategy:
-      - For each site_id seen in TimeseriesRecord:
+      - For each site_id seen in TimeseriesRecord (optionally restricted to
+        allowed_site_ids for multi-tenant safety):
           * Build insights.
           * If deviation is large or there are many critical/elevated hours,
             emit an alert.
@@ -245,12 +414,13 @@ def generate_alerts_for_all_sites(
     now = as_of or _utcnow()
 
     # Get distinct site_ids from the timeseries table
-    site_rows = (
-        db.query(TimeseriesRecord.site_id)
-        .filter(TimeseriesRecord.site_id.isnot(None))
-        .distinct()
-        .all()
+    q = db.query(TimeseriesRecord.site_id).filter(
+        TimeseriesRecord.site_id.isnot(None)
     )
+    if allowed_site_ids:
+        q = q.filter(TimeseriesRecord.site_id.in_(allowed_site_ids))
+
+    site_rows = q.distinct().all()
     site_ids: List[str] = [row[0] for row in site_rows if row[0]]
 
     alerts: List[Dict[str, Any]] = []

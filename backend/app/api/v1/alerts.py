@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user
 from app.db.session import get_db
 from app.models import TimeseriesRecord  # Site/Organization imported lazily where needed
+from app.services.analytics import compute_site_insights  # <-- statistical engine
 
 logger = logging.getLogger("cei")
 
@@ -29,6 +30,22 @@ class AlertOut(BaseModel):
     metric: Optional[str] = None
     window_hours: int
     triggered_at: datetime
+
+    # --- Optional statistical context (from compute_site_insights / baseline_profile) ---
+    deviation_pct: Optional[float] = None
+    total_actual_kwh: Optional[float] = None
+    total_expected_kwh: Optional[float] = None
+    baseline_lookback_days: Optional[int] = None
+
+    global_mean_kwh: Optional[float] = None
+    global_p50_kwh: Optional[float] = None
+    global_p90_kwh: Optional[float] = None
+
+    critical_hours: Optional[int] = None
+    elevated_hours: Optional[int] = None
+    below_baseline_hours: Optional[int] = None
+
+    stats_source: Optional[str] = None  # e.g. "baseline_v1"
 
     class Config:
         from_attributes = True  # pydantic v2 replacement for orm_mode
@@ -163,6 +180,11 @@ def list_alerts(
     - Peak spikes vs average (warning)
     - Site dominating portfolio energy (info)
     - Weekend baseline too close to weekday baseline (warning / critical)
+
+    Now additionally enriched with:
+    - baseline deviation_pct
+    - global_mean/p50/p90 kWh
+    - critical/elevated/below-baseline hours
     """
 
     # --- Plan / feature gating ---
@@ -213,12 +235,55 @@ def list_alerts(
 # ---- Internal helpers ----
 
 
+def _build_stats_context_from_insights(
+    insights: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Normalize compute_site_insights output into a flat set of optional fields
+    that can be attached to any AlertOut.
+    """
+    if not insights:
+        return {}
+
+    deviation_pct = insights.get("deviation_pct")
+    total_actual_kwh = insights.get("total_actual_kwh")
+    total_expected_kwh = insights.get("total_expected_kwh")
+    baseline_lookback_days = insights.get("baseline_lookback_days")
+
+    critical_hours = insights.get("critical_hours")
+    elevated_hours = insights.get("elevated_hours")
+    below_baseline_hours = insights.get("below_baseline_hours")
+
+    baseline_profile = insights.get("baseline_profile") or {}
+    global_mean_kwh = baseline_profile.get("global_mean_kwh")
+    global_p50_kwh = baseline_profile.get("global_p50_kwh")
+    global_p90_kwh = baseline_profile.get("global_p90_kwh")
+
+    ctx: Dict[str, Any] = {
+        "deviation_pct": float(deviation_pct) if deviation_pct is not None else None,
+        "total_actual_kwh": float(total_actual_kwh) if total_actual_kwh is not None else None,
+        "total_expected_kwh": float(total_expected_kwh) if total_expected_kwh is not None else None,
+        "baseline_lookback_days": int(baseline_lookback_days) if baseline_lookback_days is not None else None,
+        "global_mean_kwh": float(global_mean_kwh) if global_mean_kwh is not None else None,
+        "global_p50_kwh": float(global_p50_kwh) if global_p50_kwh is not None else None,
+        "global_p90_kwh": float(global_p90_kwh) if global_p90_kwh is not None else None,
+        "critical_hours": int(critical_hours) if critical_hours is not None else None,
+        "elevated_hours": int(elevated_hours) if elevated_hours is not None else None,
+        "below_baseline_hours": int(below_baseline_hours) if below_baseline_hours is not None else None,
+        "stats_source": "baseline_v1",
+    }
+
+    # Filter out pure Nones so the JSON stays lean
+    return {k: v for k, v in ctx.items() if v is not None}
+
+
 def _generate_alerts_for_window(
     db: Session,
     window_hours: int,
     allowed_site_ids: Optional[Set[str]] = None,
 ) -> List[AlertOut]:
-    window_start = datetime.utcnow() - timedelta(hours=window_hours)
+    now = datetime.utcnow()
+    window_start = now - timedelta(hours=window_hours)
 
     # Base stats per site_id
     stats_query = (
@@ -241,6 +306,25 @@ def _generate_alerts_for_window(
 
     if not stats_rows:
         return []
+
+    # --- Precompute statistical insights per site (baseline engine) ---
+    insights_by_site: Dict[str, Dict[str, Any]] = {}
+    for row in stats_rows:
+        site_id = row.site_id or "unknown"
+        try:
+            insights = compute_site_insights(
+                db=db,
+                site_id=site_id,
+                window_hours=window_hours,
+                # rely on default lookback_days=30 for now
+                as_of=now,
+            )
+        except Exception:
+            logger.exception("Failed to compute insights for site_id=%s", site_id)
+            insights = None
+
+        if insights:
+            insights_by_site[site_id] = insights
 
     # Aggregate portfolio numbers
     portfolio_total = float(sum((row.total_value or 0) for row in stats_rows))
@@ -320,7 +404,7 @@ def _generate_alerts_for_window(
         avg_value = float(row.avg_value or 0)
         max_value = float(row.max_value or 0)
         min_value = float(row.min_value or 0)  # reserved for future rules
-        last_ts = row.last_ts or datetime.utcnow()
+        last_ts = row.last_ts or now
         site_name = site_name_map.get(site_id)
 
         thresholds = get_thresholds_for_site(site_id)
@@ -345,7 +429,12 @@ def _generate_alerts_for_window(
         avg_weekday = weekday_sum / weekday_count if weekday_count > 0 else 0.0
         avg_weekend = weekend_sum / weekend_count if weekend_count > 0 else 0.0
 
+        # Flattened statistical context for this site (if any)
+        insights = insights_by_site.get(site_id)
+        stats_ctx = _build_stats_context_from_insights(insights)
+
         # ---------- Rule 1: Night-time baseline too high ----------
+
         if avg_day > 0:
             night_ratio = avg_night / avg_day if avg_day > 0 else 0.0
         else:
@@ -370,6 +459,7 @@ def _generate_alerts_for_window(
                     metric="night_baseline_ratio",
                     window_hours=window_hours,
                     triggered_at=last_ts,
+                    **stats_ctx,
                 )
             )
             alert_id_counter += 1
@@ -389,6 +479,7 @@ def _generate_alerts_for_window(
                     metric="night_baseline_ratio",
                     window_hours=window_hours,
                     triggered_at=last_ts,
+                    **stats_ctx,
                 )
             )
             alert_id_counter += 1
@@ -413,6 +504,7 @@ def _generate_alerts_for_window(
                         metric="peak_spike_ratio",
                         window_hours=window_hours,
                         triggered_at=last_ts,
+                        **stats_ctx,
                     )
                 )
                 alert_id_counter += 1
@@ -437,6 +529,7 @@ def _generate_alerts_for_window(
                         metric="weekend_weekday_ratio",
                         window_hours=window_hours,
                         triggered_at=last_ts,
+                        **stats_ctx,
                     )
                 )
                 alert_id_counter += 1
@@ -456,6 +549,7 @@ def _generate_alerts_for_window(
                         metric="weekend_weekday_ratio",
                         window_hours=window_hours,
                         triggered_at=last_ts,
+                        **stats_ctx,
                     )
                 )
                 alert_id_counter += 1
@@ -479,6 +573,7 @@ def _generate_alerts_for_window(
                         metric="relative_share",
                         window_hours=window_hours,
                         triggered_at=last_ts,
+                        **stats_ctx,
                     )
                 )
                 alert_id_counter += 1

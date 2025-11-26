@@ -40,3 +40,57 @@ export interface OpportunitiesResponse {
 export interface MetricsResponse {
   metrics: Metric[];
 }
+
+/**
+ * === Analytics / Insights types ===
+ * These mirror the payload from:
+ *   GET /api/v1/analytics/sites/{site_id}/insights
+ * including the statistical baseline profile.
+ */
+
+export interface BaselineBucket {
+  hour_of_day: number;      // 0–23
+  is_weekend: boolean;
+  mean_kwh: number;
+  std_kwh: number;
+}
+
+export interface BaselineProfile {
+  site_id: string;
+  meter_id?: string | null;
+  lookback_days: number;
+  global_mean_kwh: number;
+  global_p50_kwh: number;
+  global_p90_kwh: number;
+  n_points: number;
+  buckets: BaselineBucket[];
+}
+
+export type InsightBand = "normal" | "elevated" | "critical";
+
+export interface SiteInsightHour {
+  hour: number;          // 0–23
+  actual_kwh: number;
+  expected_kwh: number;
+  delta_kwh: number;
+  delta_pct: number;
+  z_score: number;
+  band: InsightBand;
+}
+
+export interface SiteInsights {
+  site_id: string;
+  window_hours: number;
+  baseline_lookback_days: number;
+  total_actual_kwh: number;
+  total_expected_kwh: number;
+  deviation_pct: number;
+  critical_hours: number;
+  elevated_hours: number;
+  below_baseline_hours: number;
+  hours: SiteInsightHour[];
+  generated_at: string;
+
+  // New statistical baseline profile
+  baseline_profile?: BaselineProfile | null;
+}

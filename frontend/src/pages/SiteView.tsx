@@ -5,10 +5,11 @@ import {
   getSite,
   getTimeseriesSummary,
   getTimeseriesSeries,
-  getSiteInsights, // reserved for backend insights later
+  getSiteInsights, // now actively used
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
+import type { SiteInsights } from "../types/api";
 
 type SiteRecord = {
   id: number | string;
@@ -107,7 +108,6 @@ function formatTimeRange(
   return `${fromLabel} → ${toLabel}`;
 }
 
-
 const SiteView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
 
@@ -122,6 +122,11 @@ const SiteView: React.FC = () => {
   const [series, setSeries] = useState<SeriesResponse | null>(null);
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [seriesError, setSeriesError] = useState<string | null>(null);
+
+  // NEW: analytics / insights state
+  const [insights, setInsights] = useState<SiteInsights | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
 
   // Map numeric route ID -> timeseries site key (e.g. "site-1")
   const siteKey = id ? `site-${id}` : undefined;
@@ -191,6 +196,28 @@ const SiteView: React.FC = () => {
         setSeriesLoading(false);
       });
 
+    // NEW: per-site analytics / insights
+    setInsightsLoading(true);
+    setInsightsError(null);
+    // Your current getSiteInsights signature expects `windowHours: number` as 2nd arg
+    getSiteInsights(siteKey, 24)
+      .then((data) => {
+        if (!isMounted) return;
+        setInsights(data as SiteInsights);
+      })
+      .catch((e: any) => {
+        if (!isMounted) return;
+        setInsightsError(
+          e?.response?.data?.detail ||
+            e?.message ||
+            "Failed to load analytics insights."
+        );
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setInsightsLoading(false);
+      });
+
     return () => {
       isMounted = false;
     };
@@ -205,13 +232,12 @@ const SiteView: React.FC = () => {
     : "—";
 
   const lastUpdatedLabel = hasSummaryData
-  ? formatDateTimeLabel(summary!.to_timestamp)
-  : null;
+    ? formatDateTimeLabel(summary!.to_timestamp)
+    : null;
 
   const dataWindowLabel = hasSummaryData
-  ? formatTimeRange(summary!.from_timestamp, summary!.to_timestamp)
-  : null;
-
+    ? formatTimeRange(summary!.from_timestamp, summary!.to_timestamp)
+    : null;
 
   // Build trend points from API data (force numeric, 24h labels)
   let trendPoints: TrendPoint[] = [];
@@ -265,7 +291,7 @@ const SiteView: React.FC = () => {
     )} hours · Min hourly: ${minVal.toFixed(1)} kWh/h.`;
   }
 
-  const anyError = siteError || summaryError || seriesError;
+  const anyError = siteError || summaryError || seriesError || insightsError;
 
   // Site-level efficiency suggestions card (frontend-only heuristics)
   const suggestions = buildSiteEfficiencySuggestions(
@@ -273,6 +299,17 @@ const SiteView: React.FC = () => {
     hasSummaryData ? summary!.points : null,
     site?.name || null
   );
+
+  // NEW: convenience references for baseline view
+  const baselineProfile = insights?.baseline_profile || null;
+  const deviationPct =
+    typeof insights?.deviation_pct === "number" ? insights.deviation_pct : null;
+  const insightWindowHours =
+    typeof insights?.window_hours === "number" ? insights.window_hours : 24;
+  const insightLookbackDays =
+    typeof insights?.baseline_lookback_days === "number"
+      ? insights.baseline_lookback_days
+      : baselineProfile?.lookback_days ?? 30;
 
   return (
     <div
@@ -361,6 +398,7 @@ const SiteView: React.FC = () => {
               setSiteError(null);
               setSummaryError(null);
               setSeriesError(null);
+              setInsightsError(null);
             }}
           />
         </section>
@@ -577,8 +615,7 @@ const SiteView: React.FC = () => {
                     if (hasTrend && maxVal > 0) {
                       if (maxVal > minVal) {
                         const ratio = (val - minVal) / (maxVal - minVal || 1);
-                        heightPx =
-                          baseBarHeightPx + ratio * maxBarHeightPx;
+                        heightPx = baseBarHeightPx + ratio * maxBarHeightPx;
                       } else {
                         // all equal > 0
                         heightPx = baseBarHeightPx + maxBarHeightPx;
@@ -731,7 +768,7 @@ const SiteView: React.FC = () => {
         </div>
       </section>
 
-      {/* Site-level efficiency opportunities card */}
+      {/* Site-level efficiency opportunities / INSIGHTS card */}
       <section>
         <div className="cei-card">
           <div
@@ -745,7 +782,7 @@ const SiteView: React.FC = () => {
                 fontWeight: 600,
               }}
             >
-              Efficiency opportunities for this site
+              Efficiency opportunities & baseline insights
             </div>
             <div
               style={{
@@ -757,6 +794,56 @@ const SiteView: React.FC = () => {
               Targeted ideas based on the last 24 hours of energy at this site.
               Use this to brief local operations on where to focus next.
             </div>
+
+            {/* NEW: statistical baseline summary from analytics engine */}
+            {insightsLoading && (
+              <div
+                style={{
+                  marginTop: "0.35rem",
+                  fontSize: "0.78rem",
+                  color: "var(--cei-text-muted)",
+                }}
+              >
+                Loading baseline profile for this site…
+              </div>
+            )}
+
+            {!insightsLoading && baselineProfile && (
+              <div
+                style={{
+                  marginTop: "0.35rem",
+                  fontSize: "0.78rem",
+                  color: "var(--cei-text-muted)",
+                }}
+              >
+                Baseline (last{" "}
+                <strong>{insightLookbackDays.toFixed(0)} days</strong>): global
+                mean around{" "}
+                <strong>
+                  {baselineProfile.global_mean_kwh.toFixed(1)} kWh/hour
+                </strong>
+                , median hour about{" "}
+                <strong>
+                  {baselineProfile.global_p50_kwh.toFixed(1)} kWh
+                </strong>
+                , and a high-load {`p90`} near{" "}
+                <strong>
+                  {baselineProfile.global_p90_kwh.toFixed(1)} kWh
+                </strong>
+                . The last{" "}
+                <strong>{insightWindowHours.toFixed(0)} hours</strong> ran{" "}
+                {deviationPct !== null ? (
+                  <strong>
+                    {deviationPct >= 0 ? "+" : ""}
+                    {deviationPct.toFixed(1)}%
+                  </strong>
+                ) : (
+                  "—"
+                )}{" "}
+                vs this learned baseline.
+              </div>
+            )}
+
             <div
               style={{
                 marginTop: "0.35rem",

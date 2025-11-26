@@ -4,6 +4,7 @@ import {
   getSites,
   getTimeseriesSummary,
   getAccountMe,
+  getSiteInsights, // <-- typed to accept 1–2 args
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
@@ -32,6 +33,11 @@ type SiteReportRow = {
   totalKwh7d: number;
   points7d: number;
   avgPerPoint7d: number | null;
+  // statistical enrichments from analytics insights (7-day window)
+  deviationPct7d: number | null;
+  expectedKwh7d: number | null;
+  criticalHours7d: number | null;
+  elevatedHours7d: number | null;
 };
 
 const Reports: React.FC = () => {
@@ -106,41 +112,70 @@ const Reports: React.FC = () => {
         if (!isMounted) return;
         setPortfolioSummary(portfolio);
 
-        // 3) Per-site summaries
+        // 3) Per-site summaries + statistical insights (7-day window)
         const siteSummaries = await Promise.all(
           normalizedSites.map(async (site) => {
             const idStr = String(site.id);
             const siteKey = `site-${idStr}`;
 
+            let summary: SummaryResponse | null = null;
+            let insights: any | null = null;
+
             try {
-              const summary = (await getTimeseriesSummary({
+              summary = (await getTimeseriesSummary({
                 site_id: siteKey,
                 window_hours: 168,
               })) as SummaryResponse;
-              return { site, summary, error: null as string | null };
             } catch (e: any) {
-              return {
-                site,
-                summary: null,
-                error:
-                  e?.message ||
-                  `Failed to load 7-day summary for site ${
-                    site.name || idStr
-                  }`,
-              };
+              summary = null;
             }
+
+            try {
+              // FIX: only pass 2 args (siteId, window_hours), rely on backend default lookback_days
+              insights = await getSiteInsights(siteKey, 168).catch(
+                () => null
+              );
+            } catch (_e) {
+              insights = null;
+            }
+
+            return { site, summary, insights };
           })
         );
 
         if (!isMounted) return;
 
         const rows: SiteReportRow[] = siteSummaries.map(
-          ({ site, summary }) => {
+          ({ site, summary, insights }) => {
             const idStr = String(site.id);
             const total = summary?.total_value || 0;
             const points = summary?.points || 0;
             const avgPerPoint =
               points > 0 ? total / points : null;
+
+            const deviationPct7d =
+              typeof insights?.deviation_pct === "number"
+                ? Number.isFinite(insights.deviation_pct)
+                  ? insights.deviation_pct
+                  : null
+                : null;
+
+            const expectedKwh7d =
+              typeof insights?.total_expected_kwh === "number"
+                ? Number.isFinite(insights.total_expected_kwh)
+                  ? insights.total_expected_kwh
+                  : null
+                : null;
+
+            const criticalHours7d =
+              typeof insights?.critical_hours === "number"
+                ? insights.critical_hours
+                : null;
+
+            const elevatedHours7d =
+              typeof insights?.elevated_hours === "number"
+                ? insights.elevated_hours
+                : null;
 
             return {
               siteId: idStr,
@@ -149,6 +184,10 @@ const Reports: React.FC = () => {
               totalKwh7d: total,
               points7d: points,
               avgPerPoint7d: avgPerPoint,
+              deviationPct7d,
+              expectedKwh7d,
+              criticalHours7d,
+              elevatedHours7d,
             };
           }
         );
@@ -207,6 +246,10 @@ const Reports: React.FC = () => {
       "total_kwh_7d",
       "points_7d",
       "avg_kwh_per_point_7d",
+      "deviation_pct_7d",
+      "expected_kwh_7d",
+      "critical_hours_7d",
+      "elevated_hours_7d",
     ];
 
     const lines = [header.join(",")];
@@ -220,6 +263,18 @@ const Reports: React.FC = () => {
         row.points7d.toString(),
         row.avgPerPoint7d !== null
           ? row.avgPerPoint7d.toFixed(4)
+          : "",
+        row.deviationPct7d !== null
+          ? row.deviationPct7d.toFixed(2)
+          : "",
+        row.expectedKwh7d !== null
+          ? row.expectedKwh7d.toFixed(2)
+          : "",
+        row.criticalHours7d !== null
+          ? row.criticalHours7d.toString()
+          : "",
+        row.elevatedHours7d !== null
+          ? row.elevatedHours7d.toString()
           : "",
       ];
       lines.push(cells.join(","));
@@ -271,7 +326,7 @@ const Reports: React.FC = () => {
           >
             Portfolio snapshot for the last 7 days. This is your first
             production-ready report layer built directly on top of the CEI
-            timeseries engine.
+            timeseries engine and its learned baselines.
           </p>
         </div>
         <div
@@ -495,8 +550,9 @@ const Reports: React.FC = () => {
                     color: "var(--cei-text-muted)",
                   }}
                 >
-                  Per-site energy and point counts over the last week. This is
-                  the backbone for exportable operational reports.
+                  Per-site energy, point counts, and deviation vs baseline
+                  over the last week. This is the backbone for exportable
+                  operational reports.
                 </div>
               </div>
 
@@ -547,39 +603,76 @@ const Reports: React.FC = () => {
                       <th>Energy (7 days)</th>
                       <th>Points</th>
                       <th>Energy / point</th>
+                      <th>Deviation vs baseline</th>
+                      <th>Expected (7 days)</th>
+                      <th>Critical / Elevated hours</th>
                       <th />
                     </tr>
                   </thead>
                   <tbody>
-                    {siteRows.map((row) => (
-                      <tr key={row.siteId}>
-                        <td>{row.siteName}</td>
-                        <td>{row.location || "—"}</td>
-                        <td>
-                          {row.totalKwh7d > 0
-                            ? `${row.totalKwh7d.toFixed(1)} kWh`
-                            : "—"}
-                        </td>
-                        <td>{row.points7d > 0 ? row.points7d : "—"}</td>
-                        <td>
-                          {row.avgPerPoint7d !== null
-                            ? `${row.avgPerPoint7d.toFixed(2)} kWh`
-                            : "—"}
-                        </td>
-                        <td>
-                          <Link
-                            to={`/sites/${row.siteId}`}
-                            style={{
-                              fontSize: "0.8rem",
-                              color: "var(--cei-text-accent)",
-                              textDecoration: "none",
-                            }}
-                          >
-                            View site →
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
+                    {siteRows.map((row) => {
+                      const deviationLabel =
+                        row.deviationPct7d !== null
+                          ? `${row.deviationPct7d.toFixed(1)}%`
+                          : "—";
+
+                      const expectedLabel =
+                        row.expectedKwh7d !== null
+                          ? row.expectedKwh7d >= 1000
+                            ? `${(row.expectedKwh7d / 1000).toFixed(
+                                2
+                              )} MWh`
+                            : `${row.expectedKwh7d.toFixed(1)} kWh`
+                          : "—";
+
+                      const critLabel =
+                        row.criticalHours7d !== null
+                          ? row.criticalHours7d
+                          : 0;
+                      const elevLabel =
+                        row.elevatedHours7d !== null
+                          ? row.elevatedHours7d
+                          : 0;
+
+                      return (
+                        <tr key={row.siteId}>
+                          <td>{row.siteName}</td>
+                          <td>{row.location || "—"}</td>
+                          <td>
+                            {row.totalKwh7d > 0
+                              ? `${row.totalKwh7d.toFixed(1)} kWh`
+                              : "—"}
+                          </td>
+                          <td>
+                            {row.points7d > 0 ? row.points7d : "—"}
+                          </td>
+                          <td>
+                            {row.avgPerPoint7d !== null
+                              ? `${row.avgPerPoint7d.toFixed(2)} kWh`
+                              : "—"}
+                          </td>
+                          <td>{deviationLabel}</td>
+                          <td>{expectedLabel}</td>
+                          <td>
+                            {critLabel === 0 && elevLabel === 0
+                              ? "—"
+                              : `Crit: ${critLabel}, Warn: ${elevLabel}`}
+                          </td>
+                          <td>
+                            <Link
+                              to={`/sites/${row.siteId}`}
+                              style={{
+                                fontSize: "0.8rem",
+                                color: "var(--cei-text-accent)",
+                                textDecoration: "none",
+                              }}
+                            >
+                              View site →
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
