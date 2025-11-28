@@ -46,6 +46,99 @@ type TrendPoint = {
   value: number;
 };
 
+type HybridNarrative = {
+  headline: string;
+  bullets: string[];
+};
+
+function buildHybridNarrative(insights: any, forecast: any): HybridNarrative | null {
+  if (!insights || !forecast || !Array.isArray(forecast.points) || forecast.points.length === 0) {
+    return null;
+  }
+
+  const deviation = typeof insights.deviation_pct === "number" ? insights.deviation_pct : null;
+  const totalActual = typeof insights.total_actual_kwh === "number" ? insights.total_actual_kwh : null;
+  const totalExpected = typeof insights.total_expected_kwh === "number" ? insights.total_expected_kwh : null;
+  const critHours = typeof insights.critical_hours === "number" ? insights.critical_hours : null;
+  const elevHours = typeof insights.elevated_hours === "number" ? insights.elevated_hours : null;
+  const belowHours = typeof insights.below_baseline_hours === "number" ? insights.below_baseline_hours : null;
+  const baselineDays =
+    typeof insights.baseline_lookback_days === "number" ? insights.baseline_lookback_days : null;
+
+  // Forecast aggregation
+  const points = forecast.points as Array<{ ts: string; expected_kwh: number }>;
+  let totalNext24 = 0;
+  let peak = { ts: "", value: 0 };
+
+  for (const p of points) {
+    const v = Number(p.expected_kwh || 0);
+    totalNext24 += v;
+    if (v > peak.value) {
+      peak = { ts: p.ts, value: v };
+    }
+  }
+
+  const peakDate = peak.ts ? new Date(peak.ts) : null;
+  const peakLabel =
+    peakDate && !isNaN(peakDate.getTime())
+      ? peakDate.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+      : "—";
+
+  const headlineParts: string[] = [];
+  if (deviation !== null) {
+    headlineParts.push(
+      deviation > 0
+        ? `Running +${deviation.toFixed(1)}% vs baseline`
+        : `${deviation.toFixed(1)}% vs baseline`
+    );
+  }
+  if (totalActual !== null && totalExpected !== null) {
+    headlineParts.push(
+      `Actual ${totalActual.toFixed(0)} kWh vs expected ${totalExpected.toFixed(0)} kWh`
+    );
+  }
+
+  const headline =
+    headlineParts.length > 0
+      ? headlineParts.join(" · ")
+      : "Hybrid view: baseline deviation and 24h forecast";
+
+  const bullets: string[] = [];
+
+  if (critHours !== null || elevHours !== null || belowHours !== null) {
+    bullets.push(
+      `Baseline bands (last window): critical ${critHours ?? 0}h, warning ${elevHours ?? 0}h, below-baseline ${belowHours ?? 0}h.`
+    );
+  }
+
+  bullets.push(
+    `Next 24h forecast: ~${totalNext24.toFixed(0)} kWh total, peak ~${peak.value.toFixed(
+      1
+    )} kWh around ${peakLabel}.`
+  );
+
+  if (baselineDays !== null) {
+    bullets.push(`Baseline trained on the last ${baselineDays} days of data.`);
+  }
+
+  // Simple ops takeaway
+  if (deviation !== null && deviation > 30) {
+    bullets.push(
+      "Takeaway: this site is materially above its learned baseline. Prioritize shutdown routines, night/weekend idle loads, and peak smoothing."
+    );
+  } else if (deviation !== null && deviation < -10) {
+    bullets.push(
+      "Takeaway: this site is running below its learned baseline. Check if recent changes are deliberate (efficiency project) or due to under-utilization."
+    );
+  } else {
+    bullets.push(
+      "Takeaway: this site is roughly in line with its baseline. Focus on local peaks and specific process steps rather than whole-site baseload."
+    );
+  }
+
+  return { headline, bullets };
+}
+
 function formatDateTimeLabel(raw?: string | null): string | null {
   if (!raw) return null;
   const d = new Date(raw);
@@ -348,6 +441,9 @@ const SiteView: React.FC = () => {
 
   // NEW: derived forecast metrics
   const hasForecast = !!forecast && forecast.points.length > 0;
+
+  // NEW: hybrid deterministic–statistical–predictive narrative
+  const hybrid = buildHybridNarrative(insights, forecast);
 
   const renderForecastCard = () => {
     if (forecastLoading) {
@@ -967,6 +1063,46 @@ const SiteView: React.FC = () => {
 
       {/* NEW: forecast card (predictive stub) */}
       <section style={{ marginTop: "0.75rem" }}>{renderForecastCard()}</section>
+
+      {/* CEI hybrid view card */}
+      {hybrid && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <div className="cei-card">
+            <div
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              CEI hybrid view
+            </div>
+            <div
+              style={{
+                marginTop: "0.3rem",
+                fontSize: "0.9rem",
+                fontWeight: 600,
+              }}
+            >
+              {hybrid.headline}
+            </div>
+            <ul
+              style={{
+                marginTop: "0.5rem",
+                paddingLeft: "1.1rem",
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+                lineHeight: 1.6,
+              }}
+            >
+              {hybrid.bullets.map((b, idx) => (
+                <li key={idx}>{b}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
 
       {/* Site-level efficiency opportunities / INSIGHTS card */}
       <section>
