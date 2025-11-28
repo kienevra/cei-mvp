@@ -1,11 +1,10 @@
-# backend/app/api/v1/alerts.py
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Literal, Any, Set
+from typing import List, Optional, Dict, Literal, Any, Set, Tuple
 
-from fastapi import APIRouter, Depends, Query, status, HTTPException
+from fastapi import APIRouter, Depends, Query, status, HTTPException, Path
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -13,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user
 from app.db.session import get_db
 from app.models import TimeseriesRecord  # Site/Organization imported lazily where needed
+from app.db.models import AlertEvent, SiteEvent
 from app.services.analytics import compute_site_insights  # <-- statistical engine
 
 logger = logging.getLogger("cei")
@@ -49,6 +49,36 @@ class AlertOut(BaseModel):
 
     class Config:
         from_attributes = True  # pydantic v2 replacement for orm_mode
+
+
+AlertStatus = Literal["open", "ack", "resolved", "muted"]
+
+
+class AlertEventOut(BaseModel):
+    id: int
+    site_id: Optional[str] = None
+    site_name: Optional[str] = None
+    severity: str
+    title: str
+    message: str
+    metric: Optional[str] = None
+    window_hours: Optional[int] = None
+
+    status: AlertStatus
+    owner_user_id: Optional[int] = None
+    note: Optional[str] = None
+
+    triggered_at: datetime
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AlertEventUpdate(BaseModel):
+    status: Optional[AlertStatus] = None
+    note: Optional[str] = None
 
 
 class AlertThresholdsConfig(BaseModel):
@@ -157,6 +187,57 @@ def _user_has_alerts_enabled(db: Session, user: Any) -> bool:
         return True
 
 
+def _resolve_org_context(user: Any) -> Tuple[Optional[int], Optional[Set[str]]]:
+    """
+    Resolve organization_id and allowed_site_ids from the current user.
+
+    - organization_id: org.id or user.organization_id
+    - allowed_site_ids: {'site-4', '4', ...} if org.sites is available; otherwise None.
+    """
+    organization_id: Optional[int] = None
+    allowed_site_ids: Optional[Set[str]] = None
+
+    try:
+        org = getattr(user, "organization", None)
+        if org is not None:
+            if getattr(org, "id", None) is not None:
+                try:
+                    organization_id = int(getattr(org, "id"))
+                except Exception:
+                    organization_id = getattr(org, "id")
+
+            if hasattr(org, "sites"):
+                allowed_site_ids = {
+                    f"site-{s.id}"
+                    for s in getattr(org, "sites", [])
+                    if getattr(s, "id", None) is not None
+                }
+                # Also allow raw numeric IDs if ingestion ever uses them
+                if allowed_site_ids is None:
+                    allowed_site_ids = set()
+                allowed_site_ids.update(
+                    {
+                        str(s.id)
+                        for s in getattr(org, "sites", [])
+                        if getattr(s, "id", None) is not None
+                    }
+                )
+        else:
+            org_id = getattr(user, "organization_id", None)
+            if org_id is not None:
+                try:
+                    organization_id = int(org_id)
+                except Exception:
+                    organization_id = org_id
+    except Exception:
+        logger.exception(
+            "Failed to resolve organization/allowed_site_ids; falling back to unrestricted."
+        )
+        # leave organization_id / allowed_site_ids as-is (None)
+
+    return organization_id, allowed_site_ids
+
+
 @router.get(
     "/",
     response_model=List[AlertOut],
@@ -181,10 +262,14 @@ def list_alerts(
     - Site dominating portfolio energy (info)
     - Weekend baseline too close to weekday baseline (warning / critical)
 
-    Now additionally enriched with:
+    Enriched with:
     - baseline deviation_pct
     - global_mean/p50/p90 kWh
     - critical/elevated/below-baseline hours
+
+    Phase 4.1:
+    - When this endpoint is called, alerts are best-effort persisted into
+      alert_events + site_events for history/workflow.
     """
 
     # --- Plan / feature gating ---
@@ -199,23 +284,9 @@ def list_alerts(
             detail="Alerts are not enabled for this organization/plan.",
         )
 
-    # --- Org-scoped site IDs (multi-tenant safety) ---
-    allowed_site_ids: Optional[Set[str]] = None
-    try:
-        org = getattr(user, "organization", None)
-        if org is not None and hasattr(org, "sites"):
-            allowed_site_ids = {
-                f"site-{s.id}"
-                for s in getattr(org, "sites", [])
-                if getattr(s, "id", None) is not None
-            }
-            # Also allow raw numeric IDs if your ingestion ever uses them
-            allowed_site_ids.update(
-                {str(s.id) for s in getattr(org, "sites", []) if getattr(s, "id", None) is not None}
-            )
-    except Exception:
-        logger.exception("Failed to compute allowed_site_ids; falling back to unrestricted.")
-        allowed_site_ids = None
+    # --- Org + site scoping (multi-tenant safety) ---
+    organization_id, allowed_site_ids = _resolve_org_context(user)
+    user_id: Optional[int] = getattr(user, "id", None)
 
     # Clamp any silly values
     if window_hours <= 0:
@@ -227,9 +298,237 @@ def list_alerts(
         db=db,
         window_hours=window_hours,
         allowed_site_ids=allowed_site_ids,
+        persist_events=True,  # Phase 4.1: append-only history
+        organization_id=organization_id,
+        user_id=user_id,
     )
     logger.info("Generated %d alerts for window_hours=%s", len(alerts), window_hours)
     return alerts
+
+
+@router.get(
+    "/history",
+    response_model=List[AlertEventOut],
+    status_code=status.HTTP_200_OK,
+)
+def list_alert_history(
+    site_id: Optional[str] = Query(
+        None,
+        description="Optional timeseries site_id filter (e.g. 'site-1').",
+    ),
+    status_filter: Optional[AlertStatus] = Query(
+        None,
+        alias="status",
+        description="Optional alert status filter: open, ack, resolved, muted.",
+    ),
+    severity: Optional[str] = Query(
+        None,
+        description="Optional severity filter: critical, warning, info.",
+    ),
+    limit: int = Query(
+        50,
+        ge=1,
+        le=200,
+        description="Maximum number of historical alerts to return.",
+    ),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+) -> List[AlertEventOut]:
+    """
+    Historical alert stream backed by alert_events.
+
+    This is append-only and populated opportunistically whenever /alerts is called.
+    """
+
+    if not _user_has_alerts_enabled(db, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Alerts are not enabled for this organization/plan.",
+        )
+
+    # Org scoping
+    organization_id, _ = _resolve_org_context(user)
+
+    q = db.query(AlertEvent)
+
+    if organization_id is not None:
+        q = q.filter(AlertEvent.organization_id == organization_id)
+
+    if site_id:
+        q = q.filter(AlertEvent.site_id == site_id)
+
+    if status_filter:
+        q = q.filter(AlertEvent.status == status_filter)
+
+    if severity:
+        q = q.filter(AlertEvent.severity == severity)
+
+    q = q.order_by(AlertEvent.triggered_at.desc()).limit(limit)
+
+    rows = q.all()
+
+    # Basic best-effort site name mapping for convenience
+    site_ids = {r.site_id for r in rows if r.site_id}
+    site_name_map: Dict[str, str] = {}
+    if site_ids:
+        try:
+            from app.models import Site  # type: ignore
+
+            # Site IDs here are in timeseries form (e.g. "site-1"); resolve numeric part
+            numeric_ids = set()
+            for raw in site_ids:
+                parsed = _try_parse_site_numeric_id(raw)
+                if parsed is not None:
+                    numeric_ids.add(parsed)
+
+            if numeric_ids:
+                site_rows = db.query(Site).filter(Site.id.in_(numeric_ids)).all()
+                for s in site_rows:
+                    label = s.name or f"Site {s.id}"
+                    site_name_map[f"site-{s.id}"] = label
+                    site_name_map[str(s.id)] = label
+        except Exception:
+            logger.exception("Failed to build site name map for history; continuing without names.")
+
+    output: List[AlertEventOut] = []
+    for r in rows:
+        site_name = site_name_map.get(r.site_id)
+        out = AlertEventOut.model_validate(
+            {
+                "id": r.id,
+                "site_id": r.site_id,
+                "site_name": site_name,
+                "severity": r.severity,
+                "title": r.title,
+                "message": r.message,
+                "metric": r.metric,
+                "window_hours": r.window_hours,
+                "status": r.status,
+                "owner_user_id": r.owner_user_id,
+                "note": r.note,
+                "triggered_at": r.triggered_at,
+                "created_at": r.created_at,
+                "updated_at": r.updated_at,
+            }
+        )
+        output.append(out)
+
+    return output
+
+
+@router.patch(
+    "/{alert_id}",
+    response_model=AlertEventOut,
+    status_code=status.HTTP_200_OK,
+)
+def update_alert_event(
+    alert_id: int = Path(..., description="Primary key of the alert_events row."),
+    payload: AlertEventUpdate = ...,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+) -> AlertEventOut:
+    """
+    Update status/note for a persisted alert event.
+
+    The owning organization is inferred from the current user.
+    """
+
+    if not _user_has_alerts_enabled(db, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Alerts are not enabled for this organization/plan.",
+        )
+
+    organization_id, _ = _resolve_org_context(user)
+    user_id: Optional[int] = getattr(user, "id", None)
+
+    q = db.query(AlertEvent).filter(AlertEvent.id == alert_id)
+    if organization_id is not None:
+        q = q.filter(AlertEvent.organization_id == organization_id)
+
+    alert_row = q.first()
+    if not alert_row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert event not found.",
+        )
+
+    changed_fields: Dict[str, Any] = {}
+
+    if payload.status is not None and payload.status != alert_row.status:
+        alert_row.status = payload.status
+        changed_fields["status"] = payload.status
+
+    if payload.note is not None and payload.note != alert_row.note:
+        alert_row.note = payload.note
+        changed_fields["note"] = payload.note
+
+    if changed_fields:
+        # Set owner to current user if they touched it
+        if user_id is not None:
+            alert_row.owner_user_id = user_id
+
+        try:
+            # Log into site_events for future timelines
+            se_type = "alert_status_changed" if "status" in changed_fields else "alert_note_updated"
+            body_parts = []
+            if "status" in changed_fields:
+                body_parts.append(f"Status set to '{changed_fields['status']}'.")
+            if "note" in changed_fields:
+                body_parts.append("Note updated.")
+            body = " ".join(body_parts) or "Alert updated."
+
+            site_event = SiteEvent(
+                organization_id=alert_row.organization_id,
+                site_id=alert_row.site_id,
+                type=se_type,
+                title=alert_row.title,
+                body=body,
+                created_by_user_id=user_id,
+            )
+            db.add(site_event)
+        except Exception:
+            logger.exception("Failed to create SiteEvent for alert_id=%s", alert_id)
+
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to update AlertEvent %s", alert_id)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update alert event.",
+            )
+        db.refresh(alert_row)
+
+    # Fill site_name via helper (best-effort)
+    site_name_map: Dict[str, str] = {}
+    if alert_row.site_id:
+        try:
+            site_name_map = _build_site_name_map(db, [alert_row])
+        except Exception:
+            site_name_map = {}
+
+    site_name = site_name_map.get(getattr(alert_row, "site_id", None))
+
+    return AlertEventOut.model_validate(
+        {
+            "id": alert_row.id,
+            "site_id": alert_row.site_id,
+            "site_name": site_name,
+            "severity": alert_row.severity,
+            "title": alert_row.title,
+            "message": alert_row.message,
+            "metric": alert_row.metric,
+            "window_hours": alert_row.window_hours,
+            "status": alert_row.status,
+            "owner_user_id": alert_row.owner_user_id,
+            "note": alert_row.note,
+            "triggered_at": alert_row.triggered_at,
+            "created_at": alert_row.created_at,
+            "updated_at": alert_row.updated_at,
+        }
+    )
 
 
 # ---- Internal helpers ----
@@ -277,10 +576,65 @@ def _build_stats_context_from_insights(
     return {k: v for k, v in ctx.items() if v is not None}
 
 
+def _persist_alert_events(
+    db: Session,
+    alerts: List[AlertOut],
+    organization_id: Optional[int],
+    user_id: Optional[int],
+) -> None:
+    """
+    Best-effort append-only persistence of live alerts into alert_events + site_events.
+
+    This MUST NOT break the read path; any exception is logged and swallowed.
+    """
+    if not alerts:
+        return
+
+    try:
+        for a in alerts:
+            try:
+                ev = AlertEvent(
+                    organization_id=organization_id,
+                    site_id=a.site_id,
+                    rule_key=a.metric or "rule",
+                    severity=a.severity,
+                    title=a.title,
+                    message=a.message,
+                    metric=a.metric,
+                    window_hours=a.window_hours,
+                    status="open",
+                    owner_user_id=None,
+                    note=None,
+                    triggered_at=a.triggered_at,
+                )
+                db.add(ev)
+
+                se = SiteEvent(
+                    organization_id=organization_id,
+                    site_id=a.site_id,
+                    type="alert_triggered",
+                    title=a.title,
+                    body=a.message,
+                    created_by_user_id=user_id,
+                )
+                db.add(se)
+            except Exception:
+                logger.exception("Failed to persist alert event for site_id=%s", a.site_id)
+
+        db.commit()
+    except Exception:
+        logger.exception("AlertEvent persistence failed; continuing without history.")
+        db.rollback()
+
+
 def _generate_alerts_for_window(
     db: Session,
     window_hours: int,
     allowed_site_ids: Optional[Set[str]] = None,
+    *,
+    persist_events: bool = False,
+    organization_id: Optional[int] = None,
+    user_id: Optional[int] = None,
 ) -> List[AlertOut]:
     now = datetime.utcnow()
     window_start = now - timedelta(hours=window_hours)
@@ -675,6 +1029,15 @@ def _generate_alerts_for_window(
                             )
                             alert_id_counter += 1
 
+    # Best-effort persistence (does not affect return value)
+    if persist_events and alerts:
+        _persist_alert_events(
+            db=db,
+            alerts=alerts,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
+
     return alerts
 
 
@@ -691,7 +1054,7 @@ def _build_site_name_map(db: Session, stats_rows) -> Dict[str, str]:
 
         numeric_ids = set()
         for row in stats_rows:
-            raw_id = row.site_id
+            raw_id = getattr(row, "site_id", None)
             if not raw_id:
                 continue
             parsed = _try_parse_site_numeric_id(raw_id)

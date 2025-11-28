@@ -1,4 +1,3 @@
-# backend/app/services/analytics.py
 from __future__ import annotations
 
 from collections import defaultdict
@@ -216,7 +215,7 @@ def compute_baseline_profile(
     )
 
 
-# ========= Existing hourly baseline + insights (kept as-is) =========
+# ========= Existing hourly baseline + insights (kept as-is, now enriched) =========
 
 
 def compute_hourly_baseline(
@@ -285,12 +284,17 @@ def compute_site_insights(
       1) Builds a per-hour baseline from historical data.
       2) Compares the last `window_hours` of actuals vs that baseline.
       3) Returns structured "insights" that both /analytics and /alerts can use.
+
+    Phase 4.1 enrichment:
+      - Attach a 'baseline_profile' payload built via compute_baseline_profile:
+          * global_mean_kwh, global_p50_kwh, global_p90_kwh
+          * buckets[{hour_of_day, is_weekend, mean_kwh, std_kwh}]
     """
     now = as_of or _utcnow()
     recent_end = now
     recent_start = now - timedelta(hours=window_hours)
 
-    # 1) Baseline
+    # 1) Baseline (hour-of-day dict used for deviation logic)
     baseline = compute_hourly_baseline(
         db=db,
         site_id=site_id,
@@ -300,6 +304,45 @@ def compute_site_insights(
     # No baseline -> nothing to say
     if not baseline:
         return None
+
+    # 1b) Statistical baseline profile for richer context (best-effort)
+    baseline_profile_obj: Optional[BaselineProfile] = None
+    try:
+        baseline_profile_obj = compute_baseline_profile(
+            db=db,
+            site_id=site_id,
+            meter_id=None,
+            lookback_days=lookback_days,
+            now=now,
+            allowed_site_ids=None,
+        )
+    except Exception:
+        baseline_profile_obj = None
+
+    baseline_profile_payload: Optional[Dict[str, Any]] = None
+    if baseline_profile_obj is not None:
+        try:
+            baseline_profile_payload = {
+                "site_id": baseline_profile_obj.site_id,
+                "meter_id": baseline_profile_obj.meter_id,
+                "lookback_days": baseline_profile_obj.lookback_days,
+                "global_mean_kwh": baseline_profile_obj.global_mean,
+                "global_p50_kwh": baseline_profile_obj.global_p50,
+                "global_p90_kwh": baseline_profile_obj.global_p90,
+                "n_points": baseline_profile_obj.n_points,
+                "buckets": [
+                    {
+                        "hour_of_day": b.hour_of_day,
+                        "is_weekend": b.is_weekend,
+                        "mean_kwh": b.mean_kwh,
+                        "std_kwh": b.std_kwh,
+                    }
+                    for b in baseline_profile_obj.buckets
+                ],
+            }
+        except Exception:
+            # Never let baseline-profile enrichment break the core insights
+            baseline_profile_payload = None
 
     # 2) Recent actuals
     recent_records = _load_site_recent(db, site_id, recent_start, recent_end)
@@ -390,6 +433,11 @@ def compute_site_insights(
         "hours": hours_output,
         "generated_at": now.isoformat(),
     }
+
+    # Phase 4.1: attach statistical baseline profile if available
+    if baseline_profile_payload is not None:
+        insights["baseline_profile"] = baseline_profile_payload
+
     return insights
 
 
