@@ -613,6 +613,10 @@ const Alerts: React.FC = () => {
                     typeof alert.below_baseline_hours === "number"
                       ? alert.below_baseline_hours
                       : null;
+                  const statsSource =
+                    typeof alert.stats_source === "string"
+                      ? alert.stats_source
+                      : null;
 
                   const hasStatsBand =
                     dev !== null ||
@@ -783,6 +787,16 @@ const Alerts: React.FC = () => {
                               <strong>{elevHours ?? 0}</strong>, below
                               baseline:{" "}
                               <strong>{belowHours ?? 0}</strong>
+                            </span>
+                          )}
+                          {statsSource && (
+                            <span
+                              style={{
+                                opacity: 0.9,
+                              }}
+                            >
+                              Stats:{" "}
+                              <code>{statsSource}</code>
                             </span>
                           )}
                         </div>
