@@ -578,6 +578,103 @@ def _generate_alerts_for_window(
                 )
                 alert_id_counter += 1
 
+        # ---------- Rule 5: Forecasted night-time baseline (next 24h) ----------
+        # Use the baseline_profile buckets from compute_site_insights as a simple forecast
+        # for the next 24 hours, then compare forecasted night vs day averages.
+        try:
+            baseline_profile = (insights or {}).get("baseline_profile") if insights else None
+        except Exception:
+            baseline_profile = None
+
+        if baseline_profile and isinstance(baseline_profile, dict):
+            buckets = baseline_profile.get("buckets") or []
+            # key format: "hour|is_weekend"
+            bucket_map: Dict[str, float] = {}
+
+            for b in buckets:
+                try:
+                    h = int(b.get("hour_of_day"))
+                    is_we = bool(b.get("is_weekend"))
+                    mean = float(b.get("mean_kwh") or 0.0)
+                except Exception:
+                    continue
+                key = f"{h}|{1 if is_we else 0}"
+                bucket_map[key] = mean
+
+            if bucket_map:
+                future_night_sum = 0.0
+                future_night_count = 0.0
+                future_day_sum = 0.0
+                future_day_count = 0.0
+
+                # Look ahead 24 hours from "now"
+                for offset in range(24):
+                    ts_future = now + timedelta(hours=offset + 1)
+                    h = ts_future.hour
+                    is_we = ts_future.weekday() >= 5
+                    key = f"{h}|{1 if is_we else 0}"
+                    mean = bucket_map.get(key, 0.0)
+
+                    if h in night_hours:
+                        future_night_sum += mean
+                        future_night_count += 1
+                    if h in day_hours:
+                        future_day_sum += mean
+                        future_day_count += 1
+
+                if future_day_count > 0 and future_night_count > 0:
+                    forecast_night_avg = future_night_sum / future_night_count
+                    forecast_day_avg = future_day_sum / future_day_count
+
+                    if forecast_day_avg > 0:
+                        forecast_night_ratio = forecast_night_avg / forecast_day_avg
+
+                        # Reuse the same thresholds as the historical night baseline rule
+                        if (
+                            forecast_night_ratio >= thresholds.night_critical_ratio
+                            and is_material
+                        ):
+                            alerts.append(
+                                AlertOut(
+                                    id=f"{alert_id_counter}",
+                                    site_id=site_id,
+                                    site_name=site_name,
+                                    severity="critical",
+                                    title="Forecast: high night-time baseline next 24h",
+                                    message=(
+                                        f"{site_name or site_id} is projected to run with a night-time "
+                                        f"baseline at {forecast_night_ratio:.0%} of the day-time forecast "
+                                        "over the next 24h. Without changes, off-shift hours are likely to "
+                                        "carry significant idle losses."
+                                    ),
+                                    metric="forecast_night_baseline_ratio",
+                                    window_hours=window_hours,
+                                    triggered_at=now,
+                                    **stats_ctx,
+                                )
+                            )
+                            alert_id_counter += 1
+                        elif forecast_night_ratio >= thresholds.night_warning_ratio:
+                            alerts.append(
+                                AlertOut(
+                                    id=f"{alert_id_counter}",
+                                    site_id=site_id,
+                                    site_name=site_name,
+                                    severity="warning",
+                                    title="Forecast: elevated night-time baseline next 24h",
+                                    message=(
+                                        f"{site_name or site_id} is forecast to have night-time consumption at "
+                                        f"{forecast_night_ratio:.0%} of day-time levels over the next 24h. "
+                                        "Tighten shutdown procedures now to avoid avoidable off-shift waste."
+                                    ),
+                                    metric="forecast_night_baseline_ratio",
+                                    window_hours=window_hours,
+                                    triggered_at=now,
+                                    **stats_ctx,
+                                )
+                            )
+                            alert_id_counter += 1
+
     return alerts
 
 
