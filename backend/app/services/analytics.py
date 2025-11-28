@@ -478,3 +478,142 @@ def generate_alerts_for_all_sites(
         )
 
     return alerts
+
+
+# ========= Forecast stub (predictive layer v0) =========
+
+
+def compute_site_forecast_stub(
+    db: Session,
+    *,
+    site_id: str,
+    history_window_hours: int = 24,
+    horizon_hours: int = 24,
+    lookback_days: int = 30,
+    as_of: Optional[datetime] = None,
+    allowed_site_ids: Optional[List[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Very simple baseline-driven forecast stub.
+
+    Uses:
+      - compute_baseline_profile(...) over `lookback_days` to get typical hourly levels
+      - compute_site_insights(...) over `history_window_hours` to get recent deviation_pct
+        and folds that into a single uplift factor.
+
+    Returns a dict with:
+      {
+        "site_id": str,
+        "history_window_hours": int,
+        "horizon_hours": int,
+        "baseline_lookback_days": int,
+        "generated_at": iso-str,
+        "method": "stub_baseline_v1",
+        "points": [
+           {
+             "ts": iso-str,
+             "expected_kwh": float,
+             "lower_kwh": float,
+             "upper_kwh": float,
+             "basis": "stub_baseline_v1",
+           },
+           ...
+        ],
+      }
+
+    If there is not enough data to build a baseline, returns None.
+    """
+    now = as_of or _utcnow()
+
+    # 1) Statistical baseline profile
+    baseline = compute_baseline_profile(
+        db=db,
+        site_id=site_id,
+        meter_id=None,
+        lookback_days=lookback_days,
+        now=now,
+        allowed_site_ids=allowed_site_ids,
+    )
+    if baseline is None or not baseline.buckets:
+        return None
+
+    # 2) Recent deviation vs baseline (deterministic/statistical)
+    insights = compute_site_insights(
+        db=db,
+        site_id=site_id,
+        window_hours=history_window_hours,
+        lookback_days=lookback_days,
+        as_of=now,
+    )
+
+    deviation_pct = 0.0
+    if insights is not None:
+        try:
+            deviation_pct = float(insights.get("deviation_pct", 0.0))
+        except Exception:
+            deviation_pct = 0.0
+
+    # Turn deviation into a simple uplift factor and clamp to sane bounds
+    uplift_factor = 1.0 + (deviation_pct / 100.0)
+    if uplift_factor < 0.1:
+        uplift_factor = 0.1
+    if uplift_factor > 3.0:
+        uplift_factor = 3.0
+
+    # Index baseline buckets by (hour_of_day, is_weekend)
+    bucket_index: Dict[Tuple[int, bool], BaselineBucket] = {}
+    for b in baseline.buckets:
+        key = (int(b.hour_of_day), bool(b.is_weekend))
+        bucket_index[key] = b
+
+    def _get_baseline_for(ts: datetime) -> float:
+        hour = ts.hour
+        is_weekend = ts.weekday() >= 5
+
+        # Prefer exact (hour, weekend_flag)
+        b = bucket_index.get((hour, is_weekend))
+        if b is None:
+            # Fallback: any bucket with same hour
+            b = bucket_index.get((hour, True)) or bucket_index.get((hour, False))
+
+        if b is not None:
+            try:
+                return float(b.mean_kwh)
+            except Exception:
+                pass
+
+        gm = baseline.global_mean
+        try:
+            return float(gm) if gm is not None else 0.0
+        except Exception:
+            return 0.0
+
+    points: List[Dict[str, Any]] = []
+    for h in range(1, horizon_hours + 1):
+        ts = now + timedelta(hours=h)
+        base = _get_baseline_for(ts)
+        expected = base * uplift_factor
+
+        # Very simple symmetric band; intentionally conservative placeholder.
+        lower = expected * 0.9 if expected > 0 else 0.0
+        upper = expected * 1.1 if expected > 0 else 0.0
+
+        points.append(
+            {
+                "ts": ts.isoformat(),
+                "expected_kwh": float(round(expected, 3)),
+                "lower_kwh": float(round(lower, 3)),
+                "upper_kwh": float(round(upper, 3)),
+                "basis": "stub_baseline_v1",
+            }
+        )
+
+    return {
+        "site_id": site_id,
+        "history_window_hours": history_window_hours,
+        "horizon_hours": horizon_hours,
+        "baseline_lookback_days": lookback_days,
+        "generated_at": now.isoformat(),
+        "method": "stub_baseline_v1",
+        "points": points,
+    }

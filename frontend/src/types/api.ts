@@ -94,3 +94,27 @@ export interface SiteInsights {
   // New statistical baseline profile
   baseline_profile?: BaselineProfile | null;
 }
+
+/**
+ * === Forecast types ===
+ * These mirror the payload from:
+ *   GET /api/v1/analytics/sites/{site_id}/forecast
+ */
+
+export interface ForecastPoint {
+  ts: string;               // ISO timestamp
+  expected_kwh: number;
+  lower_kwh: number | null;
+  upper_kwh: number | null;
+  basis?: string;           // e.g. "stub_baseline_v1"
+}
+
+export interface SiteForecast {
+  site_id: string;
+  history_window_hours?: number;
+  horizon_hours: number;
+  baseline_lookback_days?: number;
+  generated_at: string;
+  method?: string;          // e.g. "stub_baseline_v1"
+  points: ForecastPoint[];
+}

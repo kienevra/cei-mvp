@@ -1,4 +1,3 @@
-// frontend/src/pages/SiteView.tsx
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
@@ -6,10 +5,11 @@ import {
   getTimeseriesSummary,
   getTimeseriesSeries,
   getSiteInsights, // now actively used
+  getSiteForecast, // NEW: typed forecast helper
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
-import type { SiteInsights } from "../types/api";
+import type { SiteInsights, SiteForecast } from "../types/api";
 
 type SiteRecord = {
   id: number | string;
@@ -128,6 +128,11 @@ const SiteView: React.FC = () => {
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [insightsError, setInsightsError] = useState<string | null>(null);
 
+  // NEW: forecast state (predictive stub)
+  const [forecast, setForecast] = useState<SiteForecast | null>(null);
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const [forecastError, setForecastError] = useState<string | null>(null);
+
   // Map numeric route ID -> timeseries site key (e.g. "site-1")
   const siteKey = id ? `site-${id}` : undefined;
 
@@ -199,7 +204,7 @@ const SiteView: React.FC = () => {
     // NEW: per-site analytics / insights
     setInsightsLoading(true);
     setInsightsError(null);
-    // Your current getSiteInsights signature expects `windowHours: number` as 2nd arg
+    // Your current getSiteInsights signature expects `windowDays: number` as 2nd arg
     getSiteInsights(siteKey, 24)
       .then((data) => {
         if (!isMounted) return;
@@ -216,6 +221,36 @@ const SiteView: React.FC = () => {
       .finally(() => {
         if (!isMounted) return;
         setInsightsLoading(false);
+      });
+
+    // NEW: per-site forecast (baseline-driven stub) via shared API helper
+    setForecastLoading(true);
+    setForecastError(null);
+    setForecast(null);
+
+    getSiteForecast(siteKey, {
+      history_window_hours: 24,
+      horizon_hours: 24,
+      lookback_days: 30,
+    })
+      .then((data) => {
+        if (!isMounted) return;
+        setForecast(data);
+      })
+      .catch((e: any) => {
+        if (!isMounted) return;
+        const status = e?.response?.status;
+        if (status === 404) {
+          // Not enough data: quietly hide forecast card
+          setForecast(null);
+          return;
+        }
+        // Non-fatal: SiteView should still work if forecast is down
+        setForecastError(e?.message || "Unable to load forecast right now.");
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setForecastLoading(false);
       });
 
     return () => {
@@ -310,6 +345,168 @@ const SiteView: React.FC = () => {
     typeof insights?.baseline_lookback_days === "number"
       ? insights.baseline_lookback_days
       : baselineProfile?.lookback_days ?? 30;
+
+  // NEW: derived forecast metrics
+  const hasForecast = !!forecast && forecast.points.length > 0;
+
+  const renderForecastCard = () => {
+    if (forecastLoading) {
+      return (
+        <section className="cei-card">
+          <div className="cei-card-header">
+            <h2 style={{ fontSize: "0.95rem", fontWeight: 600 }}>
+              Next 24h forecast
+            </h2>
+            <span className="cei-pill cei-pill-neutral">Loading</span>
+          </div>
+          <p
+            style={{
+              marginTop: "0.3rem",
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Building a baseline-driven forecast for this site…
+          </p>
+        </section>
+      );
+    }
+
+    if (!hasForecast || forecastError) {
+      // Forecast is optional; if it's not available, we hide the card.
+      return null;
+    }
+
+    const totalExpected = forecast!.points.reduce(
+      (sum, p) => sum + p.expected_kwh,
+      0
+    );
+    const peak = forecast!.points.reduce((max, p) =>
+      p.expected_kwh > max.expected_kwh ? p : max
+    );
+
+    const firstSix = forecast!.points.slice(0, 6);
+
+    return (
+      <section className="cei-card">
+        <div
+          className="cei-card-header"
+          style={{ display: "flex", justifyContent: "space-between" }}
+        >
+          <div>
+            <h2 style={{ fontSize: "0.95rem", fontWeight: 600 }}>
+              Next 24h forecast
+            </h2>
+            <p
+              style={{
+                marginTop: "0.1rem",
+                fontSize: "0.78rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Baseline-driven preview of expected energy over the next 24 hours.
+            </p>
+          </div>
+          <span className="cei-pill cei-pill-neutral">
+            Stub: {forecast!.method}
+          </span>
+        </div>
+
+        <div
+          className="cei-card-kpis"
+          style={{
+            marginTop: "0.7rem",
+            display: "flex",
+            gap: "1rem",
+            flexWrap: "wrap",
+          }}
+        >
+          <div className="cei-kpi">
+            <div className="cei-kpi-label">Expected next 24h</div>
+            <div className="cei-kpi-value">
+              {totalExpected.toFixed(1)} kWh
+            </div>
+          </div>
+          <div className="cei-kpi">
+            <div className="cei-kpi-label">Peak hour (forecast)</div>
+            <div className="cei-kpi-value">
+              {new Date(peak.ts).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </div>
+            <div className="cei-kpi-subvalue">
+              {peak.expected_kwh.toFixed(1)} kWh
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="cei-forecast-strip"
+          style={{
+            marginTop: "0.9rem",
+            display: "flex",
+            gap: "0.6rem",
+            overflowX: "auto",
+          }}
+        >
+          {firstSix.map((p) => {
+            const dt = new Date(p.ts);
+            const label = dt.toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+            return (
+              <div
+                key={p.ts}
+                className="cei-forecast-slot"
+                style={{
+                  flex: "0 0 auto",
+                  minWidth: "70px",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className="cei-forecast-value"
+                  style={{
+                    fontSize: "0.8rem",
+                    fontWeight: 600,
+                  }}
+                >
+                  {p.expected_kwh.toFixed(1)}
+                </div>
+                <div
+                  className="cei-forecast-time"
+                  style={{
+                    marginTop: "0.15rem",
+                    fontSize: "0.7rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  {label}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <p
+          style={{
+            marginTop: "0.8rem",
+            fontSize: "0.75rem",
+            color: "var(--cei-text-muted)",
+          }}
+        >
+          Based on a{" "}
+          <strong>{forecast!.baseline_lookback_days}-day</strong> baseline and{" "}
+          <strong>{forecast!.history_window_hours}-hour</strong> recent
+          performance window.
+        </p>
+      </section>
+    );
+  };
 
   return (
     <div
@@ -767,6 +964,9 @@ const SiteView: React.FC = () => {
           )}
         </div>
       </section>
+
+      {/* NEW: forecast card (predictive stub) */}
+      <section style={{ marginTop: "0.75rem" }}>{renderForecastCard()}</section>
 
       {/* Site-level efficiency opportunities / INSIGHTS card */}
       <section>

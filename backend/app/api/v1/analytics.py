@@ -12,6 +12,7 @@ from app.api.v1.auth import get_current_user
 from app.services.analytics import (
     compute_site_insights,
     compute_baseline_profile,
+    compute_site_forecast_stub,  # <-- NEW
 )
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -83,6 +84,28 @@ class SiteInsightsOut(BaseModel):
 
     # New: richer statistical baseline (optional)
     baseline_profile: Optional[BaselineProfileOut] = None
+
+
+# --- NEW: Forecast schemas ---
+
+
+class ForecastPointOut(BaseModel):
+    ts: str
+    expected_kwh: float
+    lower_kwh: Optional[float] = None
+    upper_kwh: Optional[float] = None
+    basis: Optional[str] = None  # e.g. "stub_baseline_v1", "arima_v2" later
+
+
+class SiteForecastOut(BaseModel):
+    site_id: str
+    history_window_hours: int
+    horizon_hours: int
+    baseline_lookback_days: int
+    generated_at: str
+    method: str  # e.g. "stub_baseline_v1"
+
+    points: List[ForecastPointOut]
 
 
 # ========= Routes =========
@@ -193,4 +216,92 @@ def get_site_insights(
         hours=hours_out,
         generated_at=str(insights.get("generated_at", "")),
         baseline_profile=baseline_profile_out,
+    )
+
+
+# --- NEW: Forecast route ---
+
+
+@router.get(
+    "/sites/{site_id}/forecast",
+    response_model=SiteForecastOut,
+    status_code=status.HTTP_200_OK,
+)
+def get_site_forecast(
+    site_id: str,
+    history_window_hours: int = Query(
+        24,
+        ge=1,
+        le=24 * 7,
+        description="History window in hours used to compute recent deviation vs baseline.",
+    ),
+    horizon_hours: int = Query(
+        24,
+        ge=1,
+        le=24 * 7,
+        description="Forecast horizon in hours.",
+    ),
+    lookback_days: int = Query(
+        30,
+        ge=7,
+        le=365,
+        description="Lookback window in days used to build the statistical baseline.",
+    ),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+) -> SiteForecastOut:
+    """
+    Short-term forecast endpoint (stub implementation).
+
+    For now:
+      - Builds a statistical baseline over `lookback_days`.
+      - Computes recent deviation over `history_window_hours`.
+      - Projects the baseline forward `horizon_hours` with a simple uplift factor.
+
+    The shape is stable so we can swap in a real ML model later without breaking
+    the front-end or any API consumers.
+    """
+    forecast = compute_site_forecast_stub(
+        db=db,
+        site_id=site_id,
+        history_window_hours=history_window_hours,
+        horizon_hours=horizon_hours,
+        lookback_days=lookback_days,
+    )
+
+    if not forecast:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not enough data to generate a forecast for this site.",
+        )
+
+    raw_points = forecast.get("points", []) or []
+    points_out: List[ForecastPointOut] = []
+    for p in raw_points:
+        points_out.append(
+            ForecastPointOut(
+                ts=str(p.get("ts")),
+                expected_kwh=float(p.get("expected_kwh", 0.0)),
+                lower_kwh=(
+                    float(p["lower_kwh"]) if "lower_kwh" in p and p["lower_kwh"] is not None else None
+                ),
+                upper_kwh=(
+                    float(p["upper_kwh"]) if "upper_kwh" in p and p["upper_kwh"] is not None else None
+                ),
+                basis=p.get("basis"),
+            )
+        )
+
+    return SiteForecastOut(
+        site_id=str(forecast.get("site_id", site_id)),
+        history_window_hours=int(
+            forecast.get("history_window_hours", history_window_hours)
+        ),
+        horizon_hours=int(forecast.get("horizon_hours", horizon_hours)),
+        baseline_lookback_days=int(
+            forecast.get("baseline_lookback_days", lookback_days)
+        ),
+        generated_at=str(forecast.get("generated_at", "")),
+        method=str(forecast.get("method", "stub_baseline_v1")),
+        points=points_out,
     )

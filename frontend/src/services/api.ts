@@ -4,6 +4,7 @@ import axios, {
   AxiosRequestConfig,
   AxiosResponse,
 } from "axios";
+import { SiteForecast } from "../types/api";
 
 const rawEnv = (import.meta as any).env || {};
 const envBase = rawEnv.VITE_API_URL || "";
@@ -193,6 +194,39 @@ export async function getSiteInsights(
     params: { window_days: windowDays },
   });
   return resp.data;
+}
+
+/**
+ * Stub predictive forecast: hits analytics/sites/{id}/forecast on the backend.
+ * Uses the same axios client and baseURL (/api/v1) as the rest of the API.
+ */
+export async function getSiteForecast(
+  siteId: number | string,
+  params: {
+    horizon_hours?: number;
+    lookback_days?: number;
+    resolution?: "hour" | "day";
+    history_window_hours?: number;
+  } = {}
+): Promise<SiteForecast> {
+  const idStr = String(siteId);
+  const {
+    horizon_hours = 24,
+    lookback_days = 30,
+    resolution = "hour",
+    history_window_hours = 24,
+  } = params;
+
+  const resp = await api.get(`analytics/sites/${idStr}/forecast`, {
+    params: {
+      horizon_hours,
+      lookback_days,
+      resolution,
+      history_window_hours,
+    },
+  });
+
+  return resp.data as SiteForecast;
 }
 
 export async function getAlerts(params: { window_hours?: number } = {}) {
