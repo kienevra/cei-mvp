@@ -38,6 +38,9 @@ type SiteReportRow = {
   expectedKwh7d: number | null;
   criticalHours7d: number | null;
   elevatedHours7d: number | null;
+  belowBaselineHours7d: number | null;
+  baselineDays7d: number | null;
+  statsSource: string | null;
 };
 
 const Reports: React.FC = () => {
@@ -126,12 +129,12 @@ const Reports: React.FC = () => {
                 site_id: siteKey,
                 window_hours: 168,
               })) as SummaryResponse;
-            } catch (e: any) {
+            } catch (_e: any) {
               summary = null;
             }
 
             try {
-              // FIX: only pass 2 args (siteId, window_hours), rely on backend default lookback_days
+              // only pass 2 args (siteId, window_hours), rely on backend default lookback_days
               insights = await getSiteInsights(siteKey, 168).catch(
                 () => null
               );
@@ -177,6 +180,21 @@ const Reports: React.FC = () => {
                 ? insights.elevated_hours
                 : null;
 
+            const belowBaselineHours7d =
+              typeof insights?.below_baseline_hours === "number"
+                ? insights.below_baseline_hours
+                : null;
+
+            const baselineDays7d =
+              typeof insights?.baseline_lookback_days === "number"
+                ? insights.baseline_lookback_days
+                : null;
+
+            const statsSource =
+              typeof insights?.stats_source === "string"
+                ? insights.stats_source
+                : null;
+
             return {
               siteId: idStr,
               siteName: site.name || `Site ${idStr}`,
@@ -188,6 +206,9 @@ const Reports: React.FC = () => {
               expectedKwh7d,
               criticalHours7d,
               elevatedHours7d,
+              belowBaselineHours7d,
+              baselineDays7d,
+              statsSource,
             };
           }
         );
@@ -250,6 +271,9 @@ const Reports: React.FC = () => {
       "expected_kwh_7d",
       "critical_hours_7d",
       "elevated_hours_7d",
+      "below_baseline_hours_7d",
+      "baseline_lookback_days_7d",
+      "stats_source",
     ];
 
     const lines = [header.join(",")];
@@ -276,6 +300,13 @@ const Reports: React.FC = () => {
         row.elevatedHours7d !== null
           ? row.elevatedHours7d.toString()
           : "",
+        row.belowBaselineHours7d !== null
+          ? row.belowBaselineHours7d.toString()
+          : "",
+        row.baselineDays7d !== null
+          ? row.baselineDays7d.toString()
+          : "",
+        row.statsSource || "",
       ];
       lines.push(cells.join(","));
     }
@@ -605,7 +636,8 @@ const Reports: React.FC = () => {
                       <th>Energy / point</th>
                       <th>Deviation vs baseline</th>
                       <th>Expected (7 days)</th>
-                      <th>Critical / Elevated hours</th>
+                      <th>Baseline hours (crit / warn / below)</th>
+                      <th>Stats</th>
                       <th />
                     </tr>
                   </thead>
@@ -633,6 +665,10 @@ const Reports: React.FC = () => {
                         row.elevatedHours7d !== null
                           ? row.elevatedHours7d
                           : 0;
+                      const belowLabel =
+                        row.belowBaselineHours7d !== null
+                          ? row.belowBaselineHours7d
+                          : 0;
 
                       return (
                         <tr key={row.siteId}>
@@ -654,9 +690,32 @@ const Reports: React.FC = () => {
                           <td>{deviationLabel}</td>
                           <td>{expectedLabel}</td>
                           <td>
-                            {critLabel === 0 && elevLabel === 0
+                            {critLabel === 0 &&
+                            elevLabel === 0 &&
+                            belowLabel === 0
                               ? "—"
-                              : `Crit: ${critLabel}, Warn: ${elevLabel}`}
+                              : `Crit: ${critLabel}, Warn: ${elevLabel}, Below: ${belowLabel}`}
+                          </td>
+                          <td>
+                            {row.statsSource || row.baselineDays7d !== null ? (
+                              <>
+                                {row.statsSource && (
+                                  <code>{row.statsSource}</code>
+                                )}
+                                {row.baselineDays7d !== null && (
+                                  <span
+                                    style={{
+                                      marginLeft: "0.25rem",
+                                      opacity: 0.8,
+                                    }}
+                                  >
+                                    ({row.baselineDays7d} d)
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              "—"
+                            )}
                           </td>
                           <td>
                             <Link
