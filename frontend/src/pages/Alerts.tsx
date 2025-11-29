@@ -10,6 +10,8 @@ import {
 import type { AlertStatus, AlertEvent } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
+import { downloadCsv } from "../utils/csv";
+
 
 type AlertRecord = {
   id?: string | number;
@@ -58,38 +60,7 @@ function formatEnergyShort(kwh: number | null | undefined): string {
   return `${val.toFixed(0)} kWh`;
 }
 
-// Simple CSV download helper
-function downloadCsv(filename: string, rows: Record<string, any>[]) {
-  if (!rows.length) return;
 
-  const headers = Object.keys(rows[0]);
-
-  const escape = (value: any) => {
-    if (value === null || value === undefined) return "";
-    const str = String(value);
-    if (str.includes('"') || str.includes(",") || str.includes("\n")) {
-      return `"${str.replace(/"/g, '""')}"`;
-    }
-    return str;
-  };
-
-  const lines = [
-    headers.join(","),
-    ...rows.map((row) => headers.map((h) => escape(row[h])).join(",")),
-  ];
-
-  const blob = new Blob([lines.join("\n")], {
-    type: "text/csv;charset=utf-8;",
-  });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.setAttribute("download", filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
 
 const Alerts: React.FC = () => {
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
