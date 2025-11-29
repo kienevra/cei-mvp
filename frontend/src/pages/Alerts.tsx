@@ -58,6 +58,39 @@ function formatEnergyShort(kwh: number | null | undefined): string {
   return `${val.toFixed(0)} kWh`;
 }
 
+// Simple CSV download helper
+function downloadCsv(filename: string, rows: Record<string, any>[]) {
+  if (!rows.length) return;
+
+  const headers = Object.keys(rows[0]);
+
+  const escape = (value: any) => {
+    if (value === null || value === undefined) return "";
+    const str = String(value);
+    if (str.includes('"') || str.includes(",") || str.includes("\n")) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const lines = [
+    headers.join(","),
+    ...rows.map((row) => headers.map((h) => escape(row[h])).join(",")),
+  ];
+
+  const blob = new Blob([lines.join("\n")], {
+    type: "text/csv;charset=utf-8;",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 const Alerts: React.FC = () => {
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -247,6 +280,83 @@ const Alerts: React.FC = () => {
 
   const windowLabel = windowHours === 24 ? "last 24 hours" : "last 7 days";
 
+  // --- Portfolio "top sites" aggregation (based on current alerts list) ---
+  const siteAggregates: {
+    siteKey: string;
+    siteLabel: string;
+    total: number;
+    critical: number;
+    warning: number;
+    info: number;
+    routeId: string | null;
+  }[] = [];
+
+  if (alerts.length > 0) {
+    const map = new Map<
+      string,
+      {
+        siteLabel: string;
+        total: number;
+        critical: number;
+        warning: number;
+        info: number;
+        routeId: string | null;
+      }
+    >();
+
+    for (const alert of alerts) {
+      const rawId = alert.site_id || alert.site_name || "—";
+      const siteKey = String(rawId);
+      const siteLabel = alert.site_name || siteKey;
+      const sev = alert.severity || "info";
+
+      let agg = map.get(siteKey);
+      if (!agg) {
+        const routeId =
+          typeof rawId === "string"
+            ? toSiteRouteId(rawId)
+            : String(rawId);
+
+        agg = {
+          siteLabel,
+          total: 0,
+          critical: 0,
+          warning: 0,
+          info: 0,
+          routeId,
+        };
+        map.set(siteKey, agg);
+      }
+
+      agg.total += 1;
+      if (sev === "critical") {
+        agg.critical += 1;
+      } else if (sev === "warning") {
+        agg.warning += 1;
+      } else {
+        agg.info += 1;
+      }
+    }
+
+    siteAggregates.push(
+      ...Array.from(map.entries()).map(([siteKey, agg]) => ({
+        siteKey,
+        siteLabel: agg.siteLabel,
+        total: agg.total,
+        critical: agg.critical,
+        warning: agg.warning,
+        info: agg.info,
+        routeId: agg.routeId,
+      }))
+    );
+
+    // Sort by total alerts desc, then alphabetically by site label
+    siteAggregates.sort((a, b) => {
+      if (b.total !== a.total) return b.total - a.total;
+      return a.siteLabel.localeCompare(b.siteLabel);
+    });
+  }
+
   function formatTimestamp(ts?: string | null): string {
     if (!ts) return "—";
     const d = new Date(ts);
@@ -326,6 +436,55 @@ const Alerts: React.FC = () => {
     } finally {
       setUpdatingAlertId(null);
     }
+  }
+
+  // --- CSV export handlers ---
+
+  function handleExportCurrentAlertsCsv() {
+    if (!alerts.length) return;
+
+    const rows = alerts.map((a) => ({
+      id: a.id ?? "",
+      site_id: a.site_id ?? "",
+      site_name: a.site_name ?? "",
+      severity: a.severity ?? "",
+      title: a.title ?? "",
+      message: a.message ?? "",
+      metric: a.metric ?? "",
+      window_hours: a.window_hours ?? "",
+      triggered_at: a.triggered_at ?? "",
+      deviation_pct: a.deviation_pct ?? "",
+      total_actual_kwh: a.total_actual_kwh ?? "",
+      total_expected_kwh: a.total_expected_kwh ?? "",
+      baseline_lookback_days: a.baseline_lookback_days ?? "",
+      critical_hours: a.critical_hours ?? "",
+      elevated_hours: a.elevated_hours ?? "",
+      below_baseline_hours: a.below_baseline_hours ?? "",
+      stats_source: a.stats_source ?? "",
+    }));
+
+    downloadCsv("cei_current_alerts.csv", rows);
+  }
+
+  function handleExportHistoryCsv() {
+    if (!historyEvents.length) return;
+
+    const rows = historyEvents.map((ev) => ({
+      id: ev.id ?? "",
+      site_id: ev.site_id ?? "",
+      site_name: ev.site_name ?? "",
+      severity: ev.severity ?? "",
+      status: ev.status ?? "",
+      title: ev.title ?? "",
+      message: ev.message ?? "",
+      note: ev.note ?? "",
+      metric: ev.metric ?? "",
+      window_hours: ev.window_hours ?? "",
+      triggered_at: ev.triggered_at ?? "",
+      updated_at: ev.updated_at ?? "",
+    }));
+
+    downloadCsv("cei_alert_history.csv", rows);
   }
 
   return (
@@ -614,6 +773,222 @@ const Alerts: React.FC = () => {
         </section>
       )}
 
+      {/* Top sites by open alerts – portfolio view */}
+      {enableAlerts && totalAlerts > 0 && siteAggregates.length > 0 && (
+        <section style={{ marginTop: "0.9rem" }}>
+          <div className="cei-card">
+            <div
+              style={{
+                marginBottom: "0.6rem",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "0.75rem",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: "0.9rem",
+                    fontWeight: 600,
+                  }}
+                >
+                  Sites most impacted by alerts
+                </div>
+                <div
+                  style={{
+                    marginTop: "0.2rem",
+                    fontSize: "0.8rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  Ranked by count of current alerts in {windowLabel}. Use this as
+                  your daily triage list.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "0.8rem",
+                }}
+              >
+                <thead>
+                  <tr
+                    style={{
+                      borderBottom: "1px solid rgba(148,163,184,0.5)",
+                    }}
+                  >
+                    <th
+                      style={{
+                        textAlign: "left",
+                        padding: "0.4rem 0.3rem",
+                        fontWeight: 500,
+                        color: "var(--cei-text-muted)",
+                      }}
+                    >
+                      Site
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "right",
+                        padding: "0.4rem 0.3rem",
+                        fontWeight: 500,
+                        color: "var(--cei-text-muted)",
+                      }}
+                    >
+                      Open alerts
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "right",
+                        padding: "0.4rem 0.3rem",
+                        fontWeight: 500,
+                        color: "var(--cei-text-muted)",
+                      }}
+                    >
+                      Critical
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "right",
+                        padding: "0.4rem 0.3rem",
+                        fontWeight: 500,
+                        color: "var(--cei-text-muted)",
+                      }}
+                    >
+                      Warnings
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "right",
+                        padding: "0.4rem 0.3rem",
+                        fontWeight: 500,
+                        color: "var(--cei-text-muted)",
+                      }}
+                    >
+                      Info
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "right",
+                        padding: "0.4rem 0.3rem",
+                        fontWeight: 500,
+                        color: "var(--cei-text-muted)",
+                      }}
+                    >
+                      Navigate
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {siteAggregates.map((row) => (
+                    <tr
+                      key={row.siteKey}
+                      style={{
+                        borderBottom:
+                          "1px solid rgba(30,41,59,0.9)",
+                      }}
+                    >
+                      <td
+                        style={{
+                          padding: "0.45rem 0.3rem",
+                          maxWidth: "16rem",
+                          whiteSpace: "nowrap",
+                          textOverflow: "ellipsis",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontWeight: 500,
+                            color: "#e5e7eb",
+                          }}
+                        >
+                          {row.siteLabel}
+                        </span>{" "}
+                        {row.siteKey !== row.siteLabel && (
+                          <span
+                            style={{
+                              opacity: 0.7,
+                              fontSize: "0.75rem",
+                            }}
+                          >
+                            (<code>{row.siteKey}</code>)
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        style={{
+                          padding: "0.45rem 0.3rem",
+                          textAlign: "right",
+                        }}
+                      >
+                        {row.total}
+                      </td>
+                      <td
+                        style={{
+                          padding: "0.45rem 0.3rem",
+                          textAlign: "right",
+                        }}
+                      >
+                        {row.critical}
+                      </td>
+                      <td
+                        style={{
+                          padding: "0.45rem 0.3rem",
+                          textAlign: "right",
+                        }}
+                      >
+                        {row.warning}
+                      </td>
+                      <td
+                        style={{
+                          padding: "0.45rem 0.3rem",
+                          textAlign: "right",
+                        }}
+                      >
+                        {row.info}
+                      </td>
+                      <td
+                        style={{
+                          padding: "0.45rem 0.3rem",
+                          textAlign: "right",
+                        }}
+                      >
+                        {row.routeId ? (
+                          <Link
+                            to={`/sites/${row.routeId}`}
+                            style={{
+                              color: "var(--cei-text-accent)",
+                              textDecoration: "none",
+                              fontSize: "0.78rem",
+                            }}
+                          >
+                            View site →
+                          </Link>
+                        ) : (
+                          <span
+                            style={{
+                              color: "var(--cei-text-muted)",
+                            }}
+                          >
+                            —
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Alerts list – only when alerts are enabled */}
       {enableAlerts && (
         <section>
@@ -647,6 +1022,20 @@ const Alerts: React.FC = () => {
                   the site dashboard to see the underlying trend.
                 </div>
               </div>
+
+              {totalAlerts > 0 && (
+                <button
+                  type="button"
+                  onClick={handleExportCurrentAlertsCsv}
+                  className="cei-btn"
+                  style={{
+                    fontSize: "0.75rem",
+                    padding: "0.25rem 0.6rem",
+                  }}
+                >
+                  Export current alerts (CSV)
+                </button>
+              )}
             </div>
 
             {loading && (
@@ -957,47 +1346,71 @@ const Alerts: React.FC = () => {
 
               <div
                 style={{
-                  display: "inline-flex",
-                  padding: "0.2rem",
-                  borderRadius: "999px",
-                  border: "1px solid var(--cei-border-subtle)",
-                  background: "rgba(15,23,42,0.95)",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
+                  gap: "0.35rem",
                   fontSize: "0.78rem",
                 }}
               >
-                {["all", "open", "ack", "resolved"].map((key) => {
-                  const k = key as AlertStatus | "all";
-                  const isActive = historyStatusFilter === k;
-                  const label =
-                    k === "all"
-                      ? "All"
-                      : k === "ack"
-                      ? "Ack"
-                      : k === "resolved"
-                      ? "Resolved"
-                      : "Open";
-                  return (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => setHistoryStatusFilter(k)}
-                      style={{
-                        padding: "0.25rem 0.7rem",
-                        borderRadius: "999px",
-                        border: "none",
-                        cursor: "pointer",
-                        background: isActive
-                          ? "rgba(56,189,248,0.18)"
-                          : "transparent",
-                        color: isActive
-                          ? "#e5e7eb"
-                          : "var(--cei-text-muted)",
-                      }}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
+                <div
+                  style={{
+                    display: "inline-flex",
+                    padding: "0.2rem",
+                    borderRadius: "999px",
+                    border: "1px solid var(--cei-border-subtle)",
+                    background: "rgba(15,23,42,0.95)",
+                    fontSize: "0.78rem",
+                  }}
+                >
+                  {["all", "open", "ack", "resolved"].map((key) => {
+                    const k = key as AlertStatus | "all";
+                    const isActive = historyStatusFilter === k;
+                    const label =
+                      k === "all"
+                        ? "All"
+                        : k === "ack"
+                        ? "Ack"
+                        : k === "resolved"
+                        ? "Resolved"
+                        : "Open";
+                    return (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setHistoryStatusFilter(k)}
+                        style={{
+                          padding: "0.25rem 0.7rem",
+                          borderRadius: "999px",
+                          border: "none",
+                          cursor: "pointer",
+                          background: isActive
+                            ? "rgba(56,189,248,0.18)"
+                            : "transparent",
+                          color: isActive
+                            ? "#e5e7eb"
+                            : "var(--cei-text-muted)",
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {historyEvents.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleExportHistoryCsv}
+                    className="cei-btn"
+                    style={{
+                      fontSize: "0.75rem",
+                      padding: "0.25rem 0.6rem",
+                    }}
+                  >
+                    Export history (CSV)
+                  </button>
+                )}
               </div>
             </div>
 

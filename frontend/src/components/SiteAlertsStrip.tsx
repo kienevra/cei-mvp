@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { Link } from "react-router-dom";
-import { getAlertHistory } from "../services/api";
+import api, { getAlertHistory } from "../services/api";
 import LoadingSpinner from "./LoadingSpinner";
 import ErrorBanner from "./ErrorBanner";
+
+type AlertStatus = "open" | "ack" | "resolved";
 
 type AlertHistoryRecord = {
   id?: string | number;
@@ -79,9 +81,10 @@ const SiteAlertsStrip: React.FC<SiteAlertsStripProps> = ({
   const [alerts, setAlerts] = useState<AlertHistoryRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] =
-    useState<"open" | "ack" | "resolved">("open");
+  const [statusFilter, setStatusFilter] = useState<AlertStatus>("open");
+  const [updatingId, setUpdatingId] = useState<string | number | null>(null);
 
+  // Load recent alerts for this site + status
   useEffect(() => {
     let isMounted = true;
 
@@ -92,15 +95,13 @@ const SiteAlertsStrip: React.FC<SiteAlertsStripProps> = ({
 
       try {
         const data = await getAlertHistory({
-          siteId: siteKey,
+          siteId: siteKey, // camelCase param expected by api helper
           status: statusFilter,
           limit,
         });
 
         if (!isMounted) return;
-        const normalized: AlertHistoryRecord[] = Array.isArray(data)
-          ? data
-          : [];
+        const normalized: AlertHistoryRecord[] = Array.isArray(data) ? data : [];
         setAlerts(normalized);
       } catch (e: any) {
         if (!isMounted) return;
@@ -128,6 +129,44 @@ const SiteAlertsStrip: React.FC<SiteAlertsStripProps> = ({
   }, [siteKey, statusFilter, limit]);
 
   const hasAlerts = alerts.length > 0;
+
+  // Inline status update (ack / resolve) from the strip
+  async function handleStatusChange(
+    alertId: string | number | undefined,
+    newStatus: AlertStatus
+  ) {
+    if (!alertId) return;
+    setUpdatingId(alertId);
+    setError(null);
+
+    try {
+      // Use shared axios instance from services/api
+      const idStr = String(alertId);
+      await api.patch(`/alerts/${idStr}`, { status: newStatus });
+
+      // Re-fetch the current list with the same filter
+      const data = await getAlertHistory({
+        siteId: siteKey,
+        status: statusFilter,
+        limit,
+      });
+
+      const normalized: AlertHistoryRecord[] = Array.isArray(data) ? data : [];
+      setAlerts(normalized);
+    } catch (e: any) {
+      if (axios.isAxiosError(e)) {
+        const detail =
+          (e.response?.data as any)?.detail ||
+          e.message ||
+          "Failed to update alert.";
+        setError(detail);
+      } else {
+        setError("Failed to update alert.");
+      }
+    } finally {
+      setUpdatingId(null);
+    }
+  }
 
   return (
     <div className="cei-card">
@@ -286,8 +325,18 @@ const SiteAlertsStrip: React.FC<SiteAlertsStripProps> = ({
           }}
         >
           {alerts.map((alert) => {
-            const key = String(alert.id ?? alert.triggered_at ?? Math.random());
+            const key = String(
+              alert.id ?? alert.triggered_at ?? Math.random()
+            );
             const sev = alert.severity || "info";
+            const currentStatus =
+              (alert.status as AlertStatus | null) || "open";
+            const isUpdating =
+              updatingId !== null &&
+              String(updatingId) === String(alert.id);
+
+            const ackLabel = isUpdating ? "Updating…" : "Mark ack";
+            const resolveLabel = isUpdating ? "Updating…" : "Resolve";
 
             return (
               <div
@@ -334,7 +383,7 @@ const SiteAlertsStrip: React.FC<SiteAlertsStripProps> = ({
                         letterSpacing: "0.06em",
                       }}
                     >
-                      {statusFilter}
+                      {currentStatus}
                     </span>
                   </div>
                   <div
@@ -361,7 +410,7 @@ const SiteAlertsStrip: React.FC<SiteAlertsStripProps> = ({
                     textAlign: "right",
                     fontSize: "0.75rem",
                     color: "var(--cei-text-muted)",
-                    minWidth: "120px",
+                    minWidth: "140px",
                   }}
                 >
                   <div>Triggered: {formatTimestamp(alert.triggered_at)}</div>
@@ -375,16 +424,81 @@ const SiteAlertsStrip: React.FC<SiteAlertsStripProps> = ({
                       Metric: <code>{alert.metric}</code>
                     </div>
                   )}
-                  <div style={{ marginTop: "0.3rem" }}>
-                    <Link
-                      to="/alerts"
+
+                  {/* Inline status actions */}
+                  <div
+                    style={{
+                      marginTop: "0.35rem",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.25rem",
+                      alignItems: "flex-end",
+                    }}
+                  >
+                    <div
                       style={{
-                        color: "var(--cei-text-accent)",
-                        textDecoration: "none",
+                        display: "flex",
+                        gap: "0.35rem",
+                        flexWrap: "wrap",
+                        justifyContent: "flex-end",
                       }}
                     >
-                      View in Alerts →
-                    </Link>
+                      {currentStatus !== "ack" && (
+                        <button
+                          type="button"
+                          disabled={isUpdating || !alert.id}
+                          onClick={() =>
+                            handleStatusChange(alert.id, "ack")
+                          }
+                          style={{
+                            fontSize: "0.72rem",
+                            padding: "0.2rem 0.6rem",
+                            borderRadius: "999px",
+                            border:
+                              "1px solid rgba(148,163,184,0.7)",
+                            background: "rgba(15,23,42,0.9)",
+                            cursor: isUpdating ? "default" : "pointer",
+                            opacity: isUpdating ? 0.7 : 1,
+                          }}
+                        >
+                          {ackLabel}
+                        </button>
+                      )}
+                      {currentStatus !== "resolved" && (
+                        <button
+                          type="button"
+                          disabled={isUpdating || !alert.id}
+                          onClick={() =>
+                            handleStatusChange(alert.id, "resolved")
+                          }
+                          style={{
+                            fontSize: "0.72rem",
+                            padding: "0.2rem 0.6rem",
+                            borderRadius: "999px",
+                            border: "none",
+                            background:
+                              "linear-gradient(to right, rgba(34,197,94,0.9), rgba(22,163,74,0.9))",
+                            cursor: isUpdating ? "default" : "pointer",
+                            opacity: isUpdating ? 0.7 : 1,
+                            color: "#e5e7eb",
+                          }}
+                        >
+                          {resolveLabel}
+                        </button>
+                      )}
+                    </div>
+
+                    <div>
+                      <Link
+                        to="/alerts"
+                        style={{
+                          color: "var(--cei-text-accent)",
+                          textDecoration: "none",
+                        }}
+                      >
+                        View in Alerts →
+                      </Link>
+                    </div>
                   </div>
                 </div>
               </div>
