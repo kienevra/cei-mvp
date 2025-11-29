@@ -12,6 +12,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import type { SiteInsights, SiteForecast } from "../types/api";
 import { buildHybridNarrative } from "../utils/hybridNarrative";
 import SiteAlertsStrip from "../components/SiteAlertsStrip";
+import { downloadCsv } from "../utils/csv";
 
 type SiteRecord = {
   id: number | string;
@@ -353,6 +354,28 @@ const SiteView: React.FC = () => {
 
   // NEW: hybrid deterministic–statistical–predictive narrative
   const hybrid = buildHybridNarrative(insights, forecast);
+
+  // --- CSV export for this site's timeseries ---
+  const handleExportTimeseriesCsv = () => {
+    if (!series || !series.points || series.points.length === 0) {
+      alert("No timeseries data available to export yet.");
+      return;
+    }
+
+    const safeSiteId = siteKey || (id ? `site-${id}` : "site");
+
+    const rows = series.points.map((p, idx) => ({
+      index: idx,
+      site_id: series.site_id ?? safeSiteId ?? "",
+      meter_id: series.meter_id ?? "",
+      window_hours: series.window_hours ?? "",
+      resolution: series.resolution ?? "",
+      timestamp: p.ts,
+      value: p.value,
+    }));
+
+    downloadCsv(`cei_${safeSiteId}_timeseries.csv`, rows);
+  };
 
   const renderForecastCard = () => {
     if (forecastLoading) {
@@ -727,6 +750,8 @@ const SiteView: React.FC = () => {
               display: "flex",
               justifyContent: "space-between",
               marginBottom: "0.7rem",
+              alignItems: "center",
+              gap: "0.75rem",
             }}
           >
             <div>
@@ -751,11 +776,32 @@ const SiteView: React.FC = () => {
             </div>
             <div
               style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-end",
+                gap: "0.35rem",
                 fontSize: "0.75rem",
                 color: "var(--cei-text-muted)",
               }}
             >
-              kWh · hourly
+              <div>kWh · hourly</div>
+              <button
+                type="button"
+                className="cei-btn cei-btn-ghost"
+                onClick={handleExportTimeseriesCsv}
+                disabled={
+                  seriesLoading ||
+                  !series ||
+                  !series.points ||
+                  series.points.length === 0
+                }
+                style={{
+                  fontSize: "0.75rem",
+                  padding: "0.25rem 0.6rem",
+                }}
+              >
+                {seriesLoading ? "Preparing…" : "Download CSV"}
+              </button>
             </div>
           </div>
 
