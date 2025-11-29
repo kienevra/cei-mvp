@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
-import { getAlerts, getAccountMe } from "../services/api";
+import {
+  getAlerts,
+  getAccountMe,
+  getAlertHistory,
+  updateAlertEvent,
+} from "../services/api";
+import type { AlertStatus, AlertEvent } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 
@@ -64,6 +70,15 @@ const Alerts: React.FC = () => {
   const [planKey, setPlanKey] = useState<string>("cei-starter");
   const [enableAlerts, setEnableAlerts] = useState<boolean>(true);
   const [planLoaded, setPlanLoaded] = useState<boolean>(false);
+
+  // --- History / workflow state ---
+  const [historyEvents, setHistoryEvents] = useState<AlertEvent[]>([]);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<
+    AlertStatus | "all"
+  >("open");
+  const [updatingAlertId, setUpdatingAlertId] = useState<number | null>(null);
 
   // --- Load plan / feature flags once ---
   useEffect(() => {
@@ -173,6 +188,58 @@ const Alerts: React.FC = () => {
     };
   }, [windowHours, enableAlerts, planLoaded]);
 
+  // --- Load history whenever plan or status filter changes ---
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadHistory() {
+      if (!planLoaded) return;
+
+      if (!enableAlerts) {
+        if (isMounted) {
+          setHistoryEvents([]);
+          setHistoryLoading(false);
+          setHistoryError(null);
+        }
+        return;
+      }
+
+      setHistoryLoading(true);
+      setHistoryError(null);
+
+      try {
+        const params: { status?: AlertStatus; limit?: number } = {
+          limit: 50,
+        };
+        if (historyStatusFilter !== "all") {
+          params.status = historyStatusFilter;
+        }
+
+        const data = await getAlertHistory(params);
+        if (!isMounted) return;
+
+        setHistoryEvents(Array.isArray(data) ? data : []);
+      } catch (e: any) {
+        if (!isMounted) return;
+        const detail =
+          (axios.isAxiosError(e) &&
+            (e.response?.data as any)?.detail) ||
+          e?.message ||
+          "Failed to load alert history.";
+        setHistoryError(detail);
+      } finally {
+        if (!isMounted) return;
+        setHistoryLoading(false);
+      }
+    }
+
+    loadHistory();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [planLoaded, enableAlerts, historyStatusFilter]);
+
   const totalAlerts = alerts.length;
   const criticalCount = alerts.filter((a) => a.severity === "critical").length;
   const warningCount = alerts.filter((a) => a.severity === "warning").length;
@@ -214,6 +281,50 @@ const Alerts: React.FC = () => {
       case "info":
       default:
         return "Info";
+    }
+  }
+
+  function statusLabel(status?: AlertStatus): string {
+    switch (status) {
+      case "ack":
+        return "Acknowledged";
+      case "resolved":
+        return "Resolved";
+      case "muted":
+        return "Muted";
+      case "open":
+      default:
+        return "Open";
+    }
+  }
+
+  async function handleUpdateAlertStatus(
+    id: number,
+    status: AlertStatus
+  ): Promise<void> {
+    try {
+      setUpdatingAlertId(id);
+      setHistoryError(null);
+      await updateAlertEvent(id, { status });
+
+      // Reload history with the current filter
+      const params: { status?: AlertStatus; limit?: number } = {
+        limit: 50,
+      };
+      if (historyStatusFilter !== "all") {
+        params.status = historyStatusFilter;
+      }
+      const data = await getAlertHistory(params);
+      setHistoryEvents(Array.isArray(data) ? data : []);
+    } catch (e: any) {
+      const detail =
+        (axios.isAxiosError(e) &&
+          (e.response?.data as any)?.detail) ||
+        e?.message ||
+        "Failed to update alert.";
+      setHistoryError(detail);
+    } finally {
+      setUpdatingAlertId(null);
     }
   }
 
@@ -319,7 +430,7 @@ const Alerts: React.FC = () => {
         </div>
       </section>
 
-      {/* Error banner */}
+      {/* Error banner (live alerts) */}
       {error && (
         <section style={{ marginTop: "0.75rem" }}>
           <ErrorBanner message={error} onClose={() => setError(null)} />
@@ -801,6 +912,394 @@ const Alerts: React.FC = () => {
                           )}
                         </div>
                       )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Alert history / workflow – only when alerts are enabled */}
+      {enableAlerts && (
+        <section style={{ marginTop: "1rem" }}>
+          <div className="cei-card">
+            <div
+              style={{
+                marginBottom: "0.7rem",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "0.75rem",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: "0.9rem",
+                    fontWeight: 600,
+                  }}
+                >
+                  Alert history & workflow
+                </div>
+                <div
+                  style={{
+                    marginTop: "0.2rem",
+                    fontSize: "0.8rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  Append-only stream from <code>alert_events</code>. Use this to
+                  track who touched what, and when.
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "inline-flex",
+                  padding: "0.2rem",
+                  borderRadius: "999px",
+                  border: "1px solid var(--cei-border-subtle)",
+                  background: "rgba(15,23,42,0.95)",
+                  fontSize: "0.78rem",
+                }}
+              >
+                {["all", "open", "ack", "resolved"].map((key) => {
+                  const k = key as AlertStatus | "all";
+                  const isActive = historyStatusFilter === k;
+                  const label =
+                    k === "all"
+                      ? "All"
+                      : k === "ack"
+                      ? "Ack"
+                      : k === "resolved"
+                      ? "Resolved"
+                      : "Open";
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setHistoryStatusFilter(k)}
+                      style={{
+                        padding: "0.25rem 0.7rem",
+                        borderRadius: "999px",
+                        border: "none",
+                        cursor: "pointer",
+                        background: isActive
+                          ? "rgba(56,189,248,0.18)"
+                          : "transparent",
+                        color: isActive
+                          ? "#e5e7eb"
+                          : "var(--cei-text-muted)",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {historyError && (
+              <div style={{ marginBottom: "0.6rem" }}>
+                <ErrorBanner
+                  message={historyError}
+                  onClose={() => setHistoryError(null)}
+                />
+              </div>
+            )}
+
+            {historyLoading && (
+              <div
+                style={{
+                  padding: "1.2rem 0.5rem",
+                  display: "flex",
+                  justifyContent: "center",
+                }}
+              >
+                <LoadingSpinner />
+              </div>
+            )}
+
+            {!historyLoading && historyEvents.length === 0 && (
+              <div
+                style={{
+                  fontSize: "0.8rem",
+                  color: "var(--cei-text-muted)",
+                }}
+              >
+                No historical alerts yet for this filter. As /alerts runs over
+                time, events will accumulate here.
+              </div>
+            )}
+
+            {!historyLoading && historyEvents.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.6rem",
+                }}
+              >
+                {historyEvents.map((ev) => {
+                  const sev = ev.severity || "info";
+                  const siteId = ev.site_id || ev.site_name || "—";
+                  const siteLabel = ev.site_name || String(siteId);
+                  const triggeredLabel = formatTimestamp(ev.triggered_at);
+                  const updatedLabel = formatTimestamp(ev.updated_at);
+                  const siteRouteId =
+                    typeof siteId === "string"
+                      ? toSiteRouteId(siteId)
+                      : String(siteId);
+
+                  const isUpdating = updatingAlertId === ev.id;
+
+                  return (
+                    <div
+                      key={ev.id}
+                      style={{
+                        borderRadius: "0.75rem",
+                        border: "1px solid rgba(148,163,184,0.4)",
+                        padding: "0.6rem 0.75rem",
+                        background: "rgba(15,23,42,0.9)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.4rem",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "flex-start",
+                          gap: "0.75rem",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "0.25rem",
+                            flex: 1,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.4rem",
+                            }}
+                          >
+                            <span className={severityPillClass(sev)}>
+                              {severityLabel(sev)}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: "0.75rem",
+                                color: "var(--cei-text-muted)",
+                              }}
+                            >
+                              Site:{" "}
+                              <strong>{siteLabel}</strong>{" "}
+                              {siteId && siteId !== siteLabel && (
+                                <span style={{ opacity: 0.7 }}>
+                                  (<code>{String(siteId)}</code>)
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "0.88rem",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {ev.title}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "0.78rem",
+                              color: "var(--cei-text-muted)",
+                            }}
+                          >
+                            {ev.message}
+                          </div>
+                          {ev.note && (
+                            <div
+                              style={{
+                                marginTop: "0.2rem",
+                                fontSize: "0.78rem",
+                                color: "#e5e7eb",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  opacity: 0.7,
+                                  marginRight: "0.25rem",
+                                }}
+                              >
+                                Note:
+                              </span>
+                              {ev.note}
+                            </div>
+                          )}
+                        </div>
+
+                        <div
+                          style={{
+                            textAlign: "right",
+                            fontSize: "0.75rem",
+                            color: "var(--cei-text-muted)",
+                            minWidth: "150px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              padding: "0.1rem 0.55rem",
+                              borderRadius: "999px",
+                              border:
+                                ev.status === "resolved"
+                                  ? "1px solid rgba(34,197,94,0.7)"
+                                  : ev.status === "ack"
+                                  ? "1px solid rgba(59,130,246,0.7)"
+                                  : ev.status === "muted"
+                                  ? "1px solid rgba(234,179,8,0.7)"
+                                  : "1px solid rgba(148,163,184,0.7)",
+                              background:
+                                ev.status === "resolved"
+                                  ? "rgba(22,163,74,0.2)"
+                                  : ev.status === "ack"
+                                  ? "rgba(37,99,235,0.2)"
+                                  : ev.status === "muted"
+                                  ? "rgba(234,179,8,0.15)"
+                                  : "rgba(15,23,42,0.9)",
+                            }}
+                          >
+                            <span>{statusLabel(ev.status)}</span>
+                          </div>
+
+                          <div style={{ marginTop: "0.25rem" }}>
+                            Triggered: {triggeredLabel}
+                          </div>
+                          <div style={{ marginTop: "0.1rem" }}>
+                            Updated: {updatedLabel}
+                          </div>
+
+                          {siteRouteId && (
+                            <div style={{ marginTop: "0.3rem" }}>
+                              <Link
+                                to={`/sites/${siteRouteId}`}
+                                style={{
+                                  color: "var(--cei-text-accent)",
+                                  fontSize: "0.75rem",
+                                  textDecoration: "none",
+                                }}
+                              >
+                                View site →
+                              </Link>
+                            </div>
+                          )}
+
+                          <div
+                            style={{
+                              marginTop: "0.35rem",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "0.25rem",
+                              alignItems: "flex-end",
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: "0.72rem",
+                                opacity: 0.7,
+                              }}
+                            >
+                              Update status:
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                flexWrap: "wrap",
+                                gap: "0.25rem",
+                                justifyContent: "flex-end",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                disabled={isUpdating}
+                                onClick={() =>
+                                  handleUpdateAlertStatus(
+                                    ev.id,
+                                    "ack"
+                                  )
+                                }
+                                className="cei-btn"
+                                style={{
+                                  padding:
+                                    "0.15rem 0.5rem",
+                                  fontSize: "0.72rem",
+                                  opacity:
+                                    isUpdating &&
+                                    updatingAlertId === ev.id
+                                      ? 0.6
+                                      : 1,
+                                }}
+                              >
+                                Ack
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isUpdating}
+                                onClick={() =>
+                                  handleUpdateAlertStatus(
+                                    ev.id,
+                                    "resolved"
+                                  )
+                                }
+                                className="cei-btn"
+                                style={{
+                                  padding:
+                                    "0.15rem 0.5rem",
+                                  fontSize: "0.72rem",
+                                  opacity:
+                                    isUpdating &&
+                                    updatingAlertId === ev.id
+                                      ? 0.6
+                                      : 1,
+                                }}
+                              >
+                                Resolve
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isUpdating}
+                                onClick={() =>
+                                  handleUpdateAlertStatus(
+                                    ev.id,
+                                    "open"
+                                  )
+                                }
+                                className="cei-btn"
+                                style={{
+                                  padding:
+                                    "0.15rem 0.5rem",
+                                  fontSize: "0.72rem",
+                                  opacity:
+                                    isUpdating &&
+                                    updatingAlertId === ev.id
+                                      ? 0.6
+                                      : 1,
+                                }}
+                              >
+                                Re-open
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}

@@ -234,6 +234,66 @@ export async function getAlerts(params: { window_hours?: number } = {}) {
   return resp.data;
 }
 
+/* ===== Alerts history + workflow (backend: /alerts/history, PATCH /alerts/{id}) ===== */
+
+export type AlertStatus = "open" | "ack" | "resolved" | "muted";
+
+export interface AlertEvent {
+  id: number;
+  site_id: string | null;
+  site_name: string | null;
+  severity: "critical" | "warning" | "info";
+  title: string;
+  message: string;
+  metric: string | null;
+  window_hours: number | null;
+
+  status: AlertStatus;
+  owner_user_id: number | null;
+  note: string | null;
+
+  triggered_at: string;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface AlertEventUpdatePayload {
+  status?: AlertStatus;
+  note?: string;
+}
+
+/**
+ * Fetch historical alert stream from /alerts/history.
+ * Mirrors backend query params.
+ */
+export async function getAlertHistory(params: {
+  siteId?: string;
+  status?: AlertStatus;
+  severity?: "critical" | "warning" | "info";
+  limit?: number;
+} = {}): Promise<AlertEvent[]> {
+  const query: Record<string, string | number> = {};
+
+  if (params.siteId) query["site_id"] = params.siteId;
+  if (params.status) query["status"] = params.status;
+  if (params.severity) query["severity"] = params.severity;
+  if (params.limit) query["limit"] = params.limit;
+
+  const res = await api.get<AlertEvent[]>("/alerts/history", { params: query });
+  return res.data;
+}
+
+/**
+ * Update a single alert event (status / note).
+ */
+export async function updateAlertEvent(
+  id: number,
+  payload: AlertEventUpdatePayload
+): Promise<AlertEvent> {
+  const res = await api.patch<AlertEvent>(`/alerts/${id}`, payload);
+  return res.data;
+}
+
 /**
  * Fetch current account/org info, if the backend exposes it.
  * This is best-effort; UI will degrade gracefully if it fails.
