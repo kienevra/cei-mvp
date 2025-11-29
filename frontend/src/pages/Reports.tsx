@@ -8,6 +8,7 @@ import {
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
+import { downloadCsv } from "../utils/csv";
 
 type SiteRecord = {
   id: number | string;
@@ -250,6 +251,7 @@ const Reports: React.FC = () => {
       ? `${(avgPerSite / 1000).toFixed(2)} MWh`
       : `${avgPerSite.toFixed(1)} kWh`;
 
+  // --- CSV export via shared helper ---
   const handleDownloadCsv = () => {
     if (!enableReports) {
       alert("Reports are not enabled for this plan.");
@@ -260,71 +262,44 @@ const Reports: React.FC = () => {
       return;
     }
 
-    const header = [
-      "site_id",
-      "site_name",
-      "location",
-      "total_kwh_7d",
-      "points_7d",
-      "avg_kwh_per_point_7d",
-      "deviation_pct_7d",
-      "expected_kwh_7d",
-      "critical_hours_7d",
-      "elevated_hours_7d",
-      "below_baseline_hours_7d",
-      "baseline_lookback_days_7d",
-      "stats_source",
-    ];
-
-    const lines = [header.join(",")];
-
-    for (const row of siteRows) {
-      const cells = [
-        row.siteId,
-        row.siteName.replace(/,/g, " "),
-        (row.location || "").replace(/,/g, " "),
-        row.totalKwh7d.toFixed(2),
-        row.points7d.toString(),
-        row.avgPerPoint7d !== null
+    const rows = siteRows.map((row) => ({
+      // keep keys ordered to match your previous header
+      site_id: row.siteId,
+      site_name: row.siteName,
+      location: row.location ?? "",
+      total_kwh_7d: Number.isFinite(row.totalKwh7d)
+        ? row.totalKwh7d.toFixed(2)
+        : "",
+      points_7d: row.points7d,
+      avg_kwh_per_point_7d:
+        row.avgPerPoint7d !== null &&
+        Number.isFinite(row.avgPerPoint7d)
           ? row.avgPerPoint7d.toFixed(4)
           : "",
-        row.deviationPct7d !== null
+      deviation_pct_7d:
+        row.deviationPct7d !== null &&
+        Number.isFinite(row.deviationPct7d)
           ? row.deviationPct7d.toFixed(2)
           : "",
-        row.expectedKwh7d !== null
+      expected_kwh_7d:
+        row.expectedKwh7d !== null &&
+        Number.isFinite(row.expectedKwh7d)
           ? row.expectedKwh7d.toFixed(2)
           : "",
-        row.criticalHours7d !== null
-          ? row.criticalHours7d.toString()
-          : "",
-        row.elevatedHours7d !== null
-          ? row.elevatedHours7d.toString()
-          : "",
+      critical_hours_7d:
+        row.criticalHours7d !== null ? row.criticalHours7d : "",
+      elevated_hours_7d:
+        row.elevatedHours7d !== null ? row.elevatedHours7d : "",
+      below_baseline_hours_7d:
         row.belowBaselineHours7d !== null
-          ? row.belowBaselineHours7d.toString()
+          ? row.belowBaselineHours7d
           : "",
-        row.baselineDays7d !== null
-          ? row.baselineDays7d.toString()
-          : "",
-        row.statsSource || "",
-      ];
-      lines.push(cells.join(","));
-    }
+      baseline_lookback_days_7d:
+        row.baselineDays7d !== null ? row.baselineDays7d : "",
+      stats_source: row.statsSource ?? "",
+    }));
 
-    const csvContent = lines.join("\n");
-    const blob = new Blob([csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "cei_7day_site_reports.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    URL.revokeObjectURL(url);
+    downloadCsv("cei_7day_site_reports.csv", rows);
   };
 
   return (
