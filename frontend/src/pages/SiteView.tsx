@@ -11,6 +11,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import type { SiteInsights, SiteForecast } from "../types/api";
 import { buildHybridNarrative } from "../utils/hybridNarrative";
+import SiteAlertsStrip from "../components/SiteAlertsStrip";
 
 type SiteRecord = {
   id: number | string;
@@ -968,6 +969,13 @@ const SiteView: React.FC = () => {
           )}
         </div>
       </section>
+
+      {/* NEW: site-level alerts strip */}
+      {siteKey && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <SiteAlertsStrip siteKey={siteKey} limit={3} />
+        </section>
+      )}
 
       {/* NEW: forecast card (predictive stub) */}
       <section style={{ marginTop: "0.75rem" }}>{renderForecastCard()}</section>
