@@ -1,14 +1,18 @@
-# backend/app/api/v1/analytics.py
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.api.v1.auth import get_current_user
+from app.api import deps
+from app.db import models
 from app.services.analytics import (
     compute_site_insights,
     compute_baseline_profile,
@@ -106,6 +110,22 @@ class SiteForecastOut(BaseModel):
     method: str  # e.g. "stub_baseline_v1"
 
     points: List[ForecastPointOut]
+
+
+# --- NEW: KPI schema ---
+
+
+class SiteKpiOut(BaseModel):
+    site_id: str
+    now_utc: datetime
+
+    last_24h_kwh: float
+    baseline_24h_kwh: Optional[float] = None
+    deviation_pct_24h: Optional[float] = None
+
+    last_7d_kwh: float
+    prev_7d_kwh: Optional[float] = None
+    deviation_pct_7d: Optional[float] = None
 
 
 # ========= Routes =========
@@ -219,6 +239,92 @@ def get_site_insights(
     )
 
 
+# --- NEW: KPI route ---
+
+
+@router.get(
+    "/sites/{site_id}/kpi",
+    response_model=SiteKpiOut,
+    status_code=status.HTTP_200_OK,
+)
+def get_site_kpi(
+    site_id: str,
+    lookback_days: int = Query(
+        30,
+        ge=7,
+        le=365,
+        description="Lookback window in days used to build the statistical baseline for 24h comparison.",
+    ),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+) -> SiteKpiOut:
+    """
+    Site-level KPI snapshot using the existing analytics engine:
+
+      - Last 24h vs baseline (expected 24h) via compute_site_insights(window_hours=24)
+      - Last 7 days total kWh via compute_site_insights(window_hours=168)
+
+    For now, prev_7d_kwh and deviation_pct_7d are left as None (neutral in UI).
+    """
+    now = datetime.now(timezone.utc)
+
+    # --- 24h: actual vs expected (baseline) ---
+    insights_24h: Optional[Dict[str, Any]] = compute_site_insights(
+        db=db,
+        site_id=site_id,
+        window_hours=24,
+        lookback_days=lookback_days,
+    )
+
+    if not insights_24h:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No KPI data available for this site in the last 24 hours.",
+        )
+
+    last_24h_kwh = float(insights_24h.get("total_actual_kwh", 0.0))
+
+    baseline_expected = insights_24h.get("total_expected_kwh")
+    baseline_24h_kwh: Optional[float] = (
+        float(baseline_expected) if baseline_expected is not None else None
+    )
+
+    deviation_pct_24h: Optional[float] = None
+    if baseline_24h_kwh is not None and baseline_24h_kwh != 0.0:
+        deviation_pct_24h = (
+            (last_24h_kwh - baseline_24h_kwh) / baseline_24h_kwh * 100.0
+        )
+
+    # --- 7d: total actual over last 168h ---
+    insights_7d: Optional[Dict[str, Any]] = compute_site_insights(
+        db=db,
+        site_id=site_id,
+        window_hours=24 * 7,
+        lookback_days=lookback_days,
+    )
+
+    if insights_7d:
+        last_7d_kwh = float(insights_7d.get("total_actual_kwh", 0.0))
+    else:
+        last_7d_kwh = 0.0
+
+    # Not implemented yet: previous 7d comparison (keep neutral)
+    prev_7d_kwh: Optional[float] = None
+    deviation_pct_7d: Optional[float] = None
+
+    return SiteKpiOut(
+        site_id=site_id,
+        now_utc=now,
+        last_24h_kwh=last_24h_kwh,
+        baseline_24h_kwh=baseline_24h_kwh,
+        deviation_pct_24h=deviation_pct_24h,
+        last_7d_kwh=last_7d_kwh,
+        prev_7d_kwh=prev_7d_kwh,
+        deviation_pct_7d=deviation_pct_7d,
+    )
+
+
+
 # --- NEW: Forecast route ---
 
 
@@ -303,5 +409,6 @@ def get_site_forecast(
         ),
         generated_at=str(forecast.get("generated_at", "")),
         method=str(forecast.get("method", "stub_baseline_v1")),
+
         points=points_out,
     )

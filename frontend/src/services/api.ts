@@ -1,4 +1,3 @@
-// frontend/src/services/api.ts
 import axios, {
   AxiosError,
   AxiosRequestConfig,
@@ -121,6 +120,21 @@ api.interceptors.response.use(
   }
 );
 
+/* ===== KPI type for /analytics/sites/{site_id}/kpi ===== */
+
+export type SiteKpi = {
+  site_id: string;
+  now_utc: string;
+
+  last_24h_kwh: number;
+  baseline_24h_kwh: number | null;
+  deviation_pct_24h: number | null;
+
+  last_7d_kwh: number;
+  prev_7d_kwh: number | null;
+  deviation_pct_7d: number | null;
+};
+
 /* ===== Typed helper functions ===== */
 
 export async function getSites() {
@@ -193,6 +207,18 @@ export async function getSiteInsights(
   const resp = await api.get(`/analytics/sites/${idStr}/insights`, {
     params: { window_days: windowDays },
   });
+  return resp.data;
+}
+
+/**
+ * Site KPI snapshot: hits /analytics/sites/{id}/kpi on the backend.
+ * Used by SiteView for 24h vs baseline and 7d vs previous 7d.
+ */
+export async function getSiteKpi(
+  siteId: number | string
+): Promise<SiteKpi> {
+  const idStr = String(siteId);
+  const resp = await api.get<SiteKpi>(`/analytics/sites/${idStr}/kpi`);
   return resp.data;
 }
 

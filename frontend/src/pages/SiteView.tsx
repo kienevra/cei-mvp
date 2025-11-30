@@ -6,10 +6,12 @@ import {
   getTimeseriesSeries,
   getSiteInsights, // now actively used
   getSiteForecast, // NEW: typed forecast helper
+  getSiteKpi, // NEW: KPI helper
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import type { SiteInsights, SiteForecast } from "../types/api";
+import type { SiteKpi } from "../services/api";
 import { buildHybridNarrative } from "../utils/hybridNarrative";
 import SiteAlertsStrip from "../components/SiteAlertsStrip";
 import { downloadCsv } from "../utils/csv";
@@ -136,6 +138,11 @@ const SiteView: React.FC = () => {
   const [forecastLoading, setForecastLoading] = useState(false);
   const [forecastError, setForecastError] = useState<string | null>(null);
 
+  // NEW: KPI state (24h vs baseline, 7d vs previous 7d)
+  const [kpi, setKpi] = useState<SiteKpi | null>(null);
+  const [kpiLoading, setKpiLoading] = useState(false);
+  const [kpiError, setKpiError] = useState<string | null>(null);
+
   // Map numeric route ID -> timeseries site key (e.g. "site-1")
   const siteKey = id ? `site-${id}` : undefined;
 
@@ -261,6 +268,38 @@ const SiteView: React.FC = () => {
     };
   }, [id, siteKey]);
 
+  // NEW: KPI fetch (separate effect to avoid touching existing logic)
+  useEffect(() => {
+    if (!siteKey) return;
+    let cancelled = false;
+
+    setKpiLoading(true);
+    setKpiError(null);
+
+    getSiteKpi(siteKey)
+      .then((data) => {
+        if (cancelled) return;
+        setKpi(data);
+      })
+      .catch((e: any) => {
+        if (cancelled) return;
+        // Non-fatal: SiteView continues, just no KPI snapshot
+        setKpiError(
+          e?.response?.data?.detail ||
+            e?.message ||
+            "Unable to load KPI comparison."
+        );
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setKpiLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [siteKey]);
+
   const hasSummaryData = summary && summary.points > 0;
   const totalKwh = hasSummaryData ? summary!.total_value : 0;
   const formattedKwh = hasSummaryData
@@ -375,6 +414,22 @@ const SiteView: React.FC = () => {
     }));
 
     downloadCsv(`cei_${safeSiteId}_timeseries.csv`, rows);
+  };
+
+  // NEW: small helpers for KPI block
+  const formatPct = (value: number | null | undefined): string => {
+    if (value === null || value === undefined) return "—";
+    const rounded = Math.round(value);
+    const sign = rounded > 0 ? "+" : "";
+    return `${sign}${rounded}%`;
+  };
+
+  const kpiDeltaBadgeClass = (value: number | null | undefined): string => {
+    if (value === null || value === undefined) return "cei-pill-neutral";
+    if (value > 10) return "cei-pill-bad";
+    if (value > 2) return "cei-pill-watch";
+    if (value < -10) return "cei-pill-good";
+    return "cei-pill-neutral";
   };
 
   const renderForecastCard = () => {
@@ -736,6 +791,180 @@ const SiteView: React.FC = () => {
             Simple heuristic status based on whether we see any recent
             timeseries for this site.
           </div>
+        </div>
+      </section>
+
+      {/* NEW: KPI snapshot row – 24h vs baseline, 7d vs previous 7d */}
+      <section className="dashboard-row">
+        <div className="cei-card">
+          <div className="cei-card-header">
+            <div>
+              <div
+                style={{
+                  fontSize: "0.9rem",
+                  fontWeight: 600,
+                }}
+              >
+                Performance snapshot
+              </div>
+              <div
+                style={{
+                  marginTop: "0.2rem",
+                  fontSize: "0.8rem",
+                  color: "var(--cei-text-muted)",
+                }}
+              >
+                Last 24h vs baseline, and last 7 days vs previous 7 days for
+                this site.
+              </div>
+            </div>
+            {kpiLoading && (
+              <span className="cei-pill cei-pill-neutral">Updating…</span>
+            )}
+          </div>
+
+          {kpiError && (
+            <div
+              style={{
+                marginTop: "0.35rem",
+                fontSize: "0.78rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              {kpiError}
+            </div>
+          )}
+
+          {kpi && (
+            <div
+              style={{
+                marginTop: "0.6rem",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(0, 1fr))",
+                gap: "0.9rem",
+                fontSize: "0.8rem",
+              }}
+            >
+              {/* 24h vs baseline */}
+              <div>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: "var(--cei-text-muted)",
+                    marginBottom: "0.25rem",
+                  }}
+                >
+                  Last 24h vs baseline
+                </div>
+                <div>
+                  <span
+                    style={{
+                      fontFamily: "var(--cei-font-mono, monospace)",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {kpi.last_24h_kwh.toFixed(0)} kWh
+                  </span>{" "}
+                  <span
+                    style={{
+                      fontSize: "0.75rem",
+                      color: "var(--cei-text-muted)",
+                    }}
+                  >
+                    / baseline{" "}
+                    {kpi.baseline_24h_kwh != null
+                      ? `${kpi.baseline_24h_kwh.toFixed(0)} kWh`
+                      : "—"}
+                  </span>
+                </div>
+                <div style={{ marginTop: "0.25rem" }}>
+                  <span
+                    className={`cei-pill ${kpiDeltaBadgeClass(
+                      kpi.deviation_pct_24h
+                    )}`}
+                  >
+                    {formatPct(kpi.deviation_pct_24h)} vs baseline
+                  </span>
+                </div>
+              </div>
+
+              {/* Last 7d vs previous 7d */}
+              <div>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: "var(--cei-text-muted)",
+                    marginBottom: "0.25rem",
+                  }}
+                >
+                  Last 7 days vs previous 7 days
+                </div>
+                <div>
+                  <span
+                    style={{
+                      fontFamily: "var(--cei-font-mono, monospace)",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {kpi.last_7d_kwh.toFixed(0)} kWh
+                  </span>{" "}
+                  <span
+                    style={{
+                      fontSize: "0.75rem",
+                      color: "var(--cei-text-muted)",
+                    }}
+                  >
+                    / prev{" "}
+                    {kpi.prev_7d_kwh != null
+                      ? `${kpi.prev_7d_kwh.toFixed(0)} kWh`
+                      : "—"}
+                  </span>
+                </div>
+                <div style={{ marginTop: "0.25rem" }}>
+                  <span
+                    className={`cei-pill ${kpiDeltaBadgeClass(
+                      kpi.deviation_pct_7d
+                    )}`}
+                  >
+                    {formatPct(kpi.deviation_pct_7d)} vs previous 7d
+                  </span>
+                </div>
+              </div>
+
+              {/* Narrative hook */}
+              <div>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: "var(--cei-text-muted)",
+                    marginBottom: "0.25rem",
+                  }}
+                >
+                  Headline
+                </div>
+                <p
+                  style={{
+                    fontSize: "0.78rem",
+                    color: "var(--cei-text-muted)",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {kpi.deviation_pct_7d != null &&
+                  Math.abs(kpi.deviation_pct_7d) > 5
+                    ? kpi.deviation_pct_7d > 0
+                      ? "Energy use is trending above the previous week. Worth a closer look at this site."
+                      : "Energy use is trending below the previous week. Capture what’s working and standardize it."
+                    : "Energy use is roughly in line with last week. Focus attention on spike alerts and anomaly windows."}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
