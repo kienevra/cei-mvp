@@ -39,6 +39,47 @@
     sans-serif;
 }
 
+/* === CEI pill baseline styles === */
+.cei-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  font-size: 0.7rem;
+  line-height: 1;
+  border: 1px solid transparent;
+  background: rgba(148, 163, 184, 0.18); /* slate-ish neutral */
+  color: #e5e7eb;
+  white-space: nowrap;
+}
+
+/* Neutral / baseline */
+.cei-pill-neutral {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: rgba(148, 163, 184, 0.45);
+  color: #e5e7eb;
+}
+
+/* Good: below baseline (green) */
+.cei-pill-positive {
+  background: rgba(22, 163, 74, 0.18); /* green-600 */
+  border-color: rgba(22, 163, 74, 0.6);
+  color: #bbf7d0; /* green-200 */
+}
+
+/* Warning: slightly above baseline (amber) */
+.cei-pill-warning {
+  background: rgba(245, 158, 11, 0.18); /* amber-500 */
+  border-color: rgba(245, 158, 11, 0.7);
+  color: #fef9c3; /* amber-100 */
+}
+
+/* Bad: clearly above baseline (red) */
+.cei-pill-negative {
+  background: rgba(220, 38, 38, 0.22); /* red-600 */
+  border-color: rgba(220, 38, 38, 0.7);
+  color: #fecaca; /* red-200 */
+}
 
 /* Pills for alerts/status tags */
 .cei-pill-critical,

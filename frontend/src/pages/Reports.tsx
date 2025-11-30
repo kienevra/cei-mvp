@@ -251,6 +251,12 @@ const Reports: React.FC = () => {
       ? `${(avgPerSite / 1000).toFixed(2)} MWh`
       : `${avgPerSite.toFixed(1)} kWh`;
 
+  // Max site kWh for bar scaling (used by the mini chart)
+  const maxSiteTotalKwh = siteRows.reduce(
+    (max, row) => (row.totalKwh7d > max ? row.totalKwh7d : max),
+    0
+  );
+
   // --- CSV export via shared helper ---
   const handleDownloadCsv = () => {
     if (!enableReports) {
@@ -596,6 +602,103 @@ const Reports: React.FC = () => {
                 No sites available yet. Once sites and timeseries are
                 configured, this table will populate with 7-day energy
                 metrics per site.
+              </div>
+            )}
+
+            {/* New: simple bar chart of total_kwh_7d per site */}
+            {!loading && siteRows.length > 0 && maxSiteTotalKwh > 0 && (
+              <div
+                style={{
+                  marginTop: "0.75rem",
+                  borderRadius: "0.75rem",
+                  border: "1px solid rgba(148, 163, 184, 0.5)",
+                  background:
+                    "radial-gradient(circle at top left, rgba(56, 189, 248, 0.08), rgba(15, 23, 42, 0.95))",
+                  padding: "0.75rem",
+                  boxSizing: "border-box",
+                  overflowX: "auto",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-end",
+                    justifyContent: "flex-start",
+                    gap: "0.5rem",
+                    minHeight: "180px",
+                  }}
+                >
+                  {siteRows.map((row) => {
+                    const val = row.totalKwh7d;
+                    const ratio =
+                      maxSiteTotalKwh > 0 ? val / maxSiteTotalKwh : 0;
+                    const heightPx =
+                      val > 0
+                        ? 20 + ratio * 140 // base + scaled
+                        : 0;
+
+                    return (
+                      <div
+                        key={row.siteId}
+                        style={{
+                          flex: "0 0 auto",
+                          width: "40px",
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "flex-end",
+                          gap: "0.25rem",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "0.6rem",
+                            color: "var(--cei-text-muted)",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {val > 0 ? val.toFixed(0) : "—"}
+                        </span>
+                        <div
+                          style={{
+                            width: "100%",
+                            height: `${heightPx}px`,
+                            borderRadius: "4px",
+                            background:
+                              "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
+                            boxShadow:
+                              "0 6px 18px rgba(56, 189, 248, 0.45)",
+                            border:
+                              "1px solid rgba(226, 232, 240, 0.8)",
+                          }}
+                        />
+                        <span
+                          style={{
+                            fontSize: "0.65rem",
+                            color: "var(--cei-text-muted)",
+                            textAlign: "center",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {row.siteName.length > 8
+                            ? `${row.siteName.slice(0, 7)}…`
+                            : row.siteName}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div
+                  style={{
+                    marginTop: "0.5rem",
+                    fontSize: "0.75rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  Bar height scales with each site’s 7-day energy. Use this
+                  as a quick “which sites dominate the portfolio?” view
+                  before drilling into the table.
+                </div>
               </div>
             )}
 

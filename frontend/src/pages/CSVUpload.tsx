@@ -17,6 +17,8 @@ type StoredUploadSnapshot = CsvUploadBackendResult & {
   completedAt: string; // ISO timestamp stored on the client
 };
 
+type UploadStatus = "idle" | "ready" | "validating" | "ingesting" | "done" | "error";
+
 const STORAGE_KEY = "cei_last_upload_result";
 
 function formatDateTimeLabel(raw?: string | null): string | null {
@@ -34,7 +36,7 @@ function formatDateTimeLabel(raw?: string | null): string | null {
 
 const CSVUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [status, setStatus] = useState<UploadStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CsvUploadBackendResult | null>(null);
   const [lastSnapshot, setLastSnapshot] = useState<StoredUploadSnapshot | null>(
@@ -58,12 +60,16 @@ const CSVUpload: React.FC = () => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null);
     setResult(null);
+
     if (!e.target.files || e.target.files.length === 0) {
       setFile(null);
+      setStatus("idle");
       return;
     }
+
     const f = e.target.files[0];
     setFile(f);
+    setStatus("ready");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -73,16 +79,22 @@ const CSVUpload: React.FC = () => {
 
     if (!file) {
       setError("Please choose a CSV file to upload.");
+      setStatus("error");
       return;
     }
 
     try {
-      setUploading(true);
+      // Pipeline-style states, even though it's a single backend call
+      setStatus("validating");
 
       const formData = new FormData();
       formData.append("file", file);
 
+      // Treat the single round-trip as validate + ingest
       const data = (await uploadCsv(formData)) as CsvUploadBackendResult;
+
+      // Briefly mark as "ingesting" to show intent, then "done"
+      setStatus("ingesting");
       setResult(data);
 
       const snapshot: StoredUploadSnapshot = {
@@ -97,14 +109,15 @@ const CSVUpload: React.FC = () => {
       } catch {
         // ignore storage failures
       }
+
+      setStatus("done");
     } catch (e: any) {
       const msg =
         e?.response?.data?.detail ||
         e?.message ||
         "Upload failed. Please check the file and try again.";
       setError(msg);
-    } finally {
-      setUploading(false);
+      setStatus("error");
     }
   };
 
@@ -116,6 +129,37 @@ const CSVUpload: React.FC = () => {
   const lastCompletedLabel = lastSnapshot
     ? formatDateTimeLabel(lastSnapshot.completedAt)
     : null;
+
+  const isBusy = status === "validating" || status === "ingesting";
+  const buttonLabel =
+    status === "validating"
+      ? "Validating & ingesting…"
+      : status === "ingesting"
+      ? "Ingesting…"
+      : status === "done"
+      ? "Upload again"
+      : "Upload CSV";
+
+  const statusLabel = (() => {
+    switch (status) {
+      case "idle":
+        return "Waiting for a CSV file.";
+      case "ready":
+        return file
+          ? `Ready to upload: ${file.name}`
+          : "Waiting for a CSV file.";
+      case "validating":
+        return "Validating headers and preparing rows for ingestion…";
+      case "ingesting":
+        return "Ingesting rows into the timeseries engine…";
+      case "done":
+        return "Upload complete. The latest data will feed Dashboard, SiteView, Alerts, and Reports.";
+      case "error":
+        return "Upload failed. Review the error message and adjust the CSV.";
+      default:
+        return null;
+    }
+  })();
 
   return (
     <div className="dashboard-page">
@@ -286,11 +330,21 @@ const CSVUpload: React.FC = () => {
               <button
                 type="submit"
                 className="cei-btn cei-btn-primary"
-                disabled={uploading}
+                disabled={isBusy || !file}
               >
-                {uploading ? "Uploading…" : "Upload CSV"}
+                {buttonLabel}
               </button>
-              {uploading && <LoadingSpinner />}
+              {isBusy && <LoadingSpinner />}
+              {statusLabel && (
+                <div
+                  style={{
+                    fontSize: "0.78rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  {statusLabel}
+                </div>
+              )}
             </div>
           </form>
 
@@ -357,9 +411,7 @@ const CSVUpload: React.FC = () => {
                   {result.sample_site_ids.length === 0 ? (
                     <div>None detected</div>
                   ) : (
-                    <div>
-                      {result.sample_site_ids.join(", ")}
-                    </div>
+                    <div>{result.sample_site_ids.join(", ")}</div>
                   )}
                 </div>
 
@@ -378,9 +430,7 @@ const CSVUpload: React.FC = () => {
                   {result.sample_meter_ids.length === 0 ? (
                     <div>None detected</div>
                   ) : (
-                    <div>
-                      {result.sample_meter_ids.join(", ")}
-                    </div>
+                    <div>{result.sample_meter_ids.join(", ")}</div>
                   )}
                 </div>
               </div>

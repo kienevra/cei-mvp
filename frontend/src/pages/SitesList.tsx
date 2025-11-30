@@ -1,7 +1,12 @@
 // frontend/src/pages/SitesList.tsx
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { getSites, createSite } from "../services/api";
+import {
+  getSites,
+  createSite,
+  getTimeseriesSummary,
+  getSiteInsights,
+} from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 
@@ -10,6 +15,22 @@ type SiteRecord = {
   name: string;
   location?: string | null;
   [key: string]: any;
+};
+
+type SummaryResponse = {
+  site_id: string | null;
+  meter_id: string | null;
+  window_hours: number;
+  total_value: number;
+  points: number;
+  from_timestamp: string | null;
+  to_timestamp: string | null;
+};
+
+type SiteTrendMetrics = {
+  totalKwh24h: number;
+  deviationPct24h: number | null;
+  expectedKwh24h: number | null;
 };
 
 const SitesList: React.FC = () => {
@@ -22,6 +43,11 @@ const SitesList: React.FC = () => {
   const [newLocation, setNewLocation] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
 
+  // Per-site 24h metrics for trend badge
+  const [siteMetrics, setSiteMetrics] = useState<
+    Record<string, SiteTrendMetrics>
+  >({});
+
   useEffect(() => {
     let isMounted = true;
 
@@ -31,8 +57,70 @@ const SitesList: React.FC = () => {
       try {
         const data = await getSites();
         if (!isMounted) return;
+
         const normalized = Array.isArray(data) ? (data as SiteRecord[]) : [];
         setSites(normalized);
+
+        // --- load per-site 24h metrics for trend badges ---
+        if (normalized.length > 0) {
+          const entries = await Promise.all(
+            normalized.map(async (site) => {
+              const idStr = String(site.id);
+              const siteKey = `site-${idStr}`;
+
+              let summary24: SummaryResponse | null = null;
+              let insights24: any | null = null;
+
+              try {
+                summary24 = (await getTimeseriesSummary({
+                  site_id: siteKey,
+                  window_hours: 24,
+                })) as SummaryResponse;
+              } catch (_e) {
+                summary24 = null;
+              }
+
+              try {
+                // 24h insights, let backend use its default lookback_days
+                insights24 = await getSiteInsights(siteKey, 24).catch(
+                  () => null
+                );
+              } catch (_e) {
+                insights24 = null;
+              }
+
+              const totalKwh24 = summary24?.total_value || 0;
+
+              const deviationPct24 =
+                typeof insights24?.deviation_pct === "number" &&
+                Number.isFinite(insights24.deviation_pct)
+                  ? insights24.deviation_pct
+                  : null;
+
+              const expectedKwh24 =
+                typeof insights24?.total_expected_kwh === "number" &&
+                Number.isFinite(insights24.total_expected_kwh)
+                  ? insights24.total_expected_kwh
+                  : null;
+
+              const metrics: SiteTrendMetrics = {
+                totalKwh24h: totalKwh24,
+                deviationPct24h: deviationPct24,
+                expectedKwh24h: expectedKwh24,
+              };
+
+              return [idStr, metrics] as const;
+            })
+          );
+
+          if (!isMounted) return;
+
+          const metricsMap: Record<string, SiteTrendMetrics> = {};
+          for (const [idStr, metrics] of entries) {
+            metricsMap[idStr] = metrics;
+          }
+          setSiteMetrics(metricsMap);
+        }
       } catch (e: any) {
         if (!isMounted) return;
         setError(
@@ -323,6 +411,7 @@ const SitesList: React.FC = () => {
                     <th>ID</th>
                     <th>Site</th>
                     <th>Location</th>
+                    <th>Last 24h trend</th>
                     <th />
                   </tr>
                 </thead>
@@ -331,6 +420,40 @@ const SitesList: React.FC = () => {
                     const idStr = String(site.id);
                     const name = site.name || `Site ${idStr}`;
                     const location = site.location || "—";
+
+                    const metrics = siteMetrics[idStr];
+
+                    let trendLabel = "No 24h data yet";
+                    let pillClassName = "cei-pill cei-pill-neutral";
+
+                    if (metrics && metrics.totalKwh24h > 0) {
+                      const dev = metrics.deviationPct24h;
+                      if (typeof dev === "number") {
+                        const absPct = `${Math.abs(dev).toFixed(1)}%`;
+
+                        // Positive deviation = above baseline (worse)
+                        if (dev >= 10) {
+                          pillClassName = "cei-pill cei-pill-negative";
+                          trendLabel = `▲ ${absPct} above baseline (24h)`;
+                        } else if (dev > 2) {
+                          pillClassName = "cei-pill cei-pill-warning";
+                          trendLabel = `▲ ${absPct} above baseline (24h)`;
+                        } else if (dev <= -5) {
+                          // Clearly below baseline – good
+                          pillClassName = "cei-pill cei-pill-positive";
+                          trendLabel = `▼ ${absPct} below baseline (24h)`;
+                        } else if (dev < -1) {
+                          pillClassName = "cei-pill cei-pill-positive";
+                          trendLabel = `▼ ${absPct} below baseline (24h)`;
+                        } else {
+                          pillClassName = "cei-pill cei-pill-neutral";
+                          trendLabel = "● Near baseline (24h)";
+                        }
+                      } else {
+                        trendLabel = "Baseline not ready (24h)";
+                        pillClassName = "cei-pill cei-pill-neutral";
+                      }
+                    }
 
                     return (
                       <tr key={idStr}>
@@ -359,6 +482,17 @@ const SitesList: React.FC = () => {
                           </Link>
                         </td>
                         <td>{location}</td>
+                        <td>
+                          <span
+                            className={pillClassName}
+                            style={{
+                              fontSize: "0.75rem",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {trendLabel}
+                          </span>
+                        </td>
                         <td>
                           <Link
                             to={`/sites/${idStr}`}
