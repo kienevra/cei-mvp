@@ -298,3 +298,114 @@ def create_billing_portal_session(
         )
 
     return PortalSessionCreateOut(url=result.url)
+
+@router.post(
+    "/checkout-session",
+    status_code=status.HTTP_200_OK,
+)
+def create_billing_checkout_session_v2(
+    payload: CheckoutSessionCreateIn,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    v2 endpoint used by the frontend: /billing/checkout-session
+
+    Returns shape compatible with frontend expectations:
+      { provider: "stripe", checkout_url: <url or null> }
+
+    Internally reuses the same Stripe config and org scoping logic.
+    """
+    cfg = get_stripe_config()
+    if not cfg.enabled:
+        logger.info(
+            "Checkout-session requested but Stripe is not enabled. "
+            "Returning null checkout_url."
+        )
+        return {
+            "provider": "stripe",
+            "checkout_url": None,
+        }
+
+    org = _get_org_for_user(db, user)
+
+    params = CheckoutSessionParams(
+        plan_key=payload.plan_key,
+        success_url=payload.success_url,
+        cancel_url=payload.cancel_url,
+    )
+
+    try:
+        result = create_checkout_session_for_org(db, org, params)
+    except RuntimeError as e:
+        logger.warning("Stripe runtime error during checkout-session: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:  # ultra-defensive
+        logger.exception("Unexpected error creating checkout-session: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error creating Stripe checkout session.",
+        )
+
+    return {
+        "provider": "stripe",
+        "checkout_url": result.url,
+    }
+
+
+@router.post(
+    "/portal-session",
+    status_code=status.HTTP_200_OK,
+)
+def create_billing_portal_session_v2(
+    payload: PortalSessionCreateIn,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    v2 endpoint used by the frontend: /billing/portal-session
+
+    Returns shape compatible with frontend expectations:
+      { provider: "stripe", portal_url: <url or null> }
+
+    Internally reuses the same Stripe config and org scoping logic.
+    """
+    cfg = get_stripe_config()
+    if not cfg.enabled:
+        logger.info(
+            "Portal-session requested but Stripe is not enabled. "
+            "Returning null portal_url."
+        )
+        return {
+            "provider": "stripe",
+            "portal_url": None,
+        }
+
+    org = _get_org_for_user(db, user)
+
+    try:
+        result = create_portal_session_for_org(
+            db=db,
+            org=org,
+            return_url=payload.return_url,
+        )
+    except RuntimeError as e:
+        logger.warning("Stripe runtime error during portal-session: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        logger.exception("Unexpected error creating portal-session: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error creating Stripe billing portal session.",
+        )
+
+    return {
+        "provider": "stripe",
+        "portal_url": result.url,
+    }

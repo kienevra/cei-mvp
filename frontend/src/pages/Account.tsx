@@ -60,7 +60,7 @@ const Account: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [billingError, setBillingError] = useState<string | null>(null);
+  const [billingMessage, setBillingMessage] = useState<string | null>(null);
   const [startingCheckout, setStartingCheckout] = useState(false);
   const [openingPortal, setOpeningPortal] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -151,22 +151,24 @@ const Account: React.FC = () => {
       : true;
 
   const handleStartStarterCheckout = async () => {
-    setBillingError(null);
+    setBillingMessage(null);
     setStartingCheckout(true);
     try {
-      const data = await startCheckout("cei-starter");
-      if (data?.url) {
-        window.location.href = data.url;
-      } else {
-        setBillingError(
-          "Billing is not fully configured for this environment (no checkout URL returned)."
-        );
+      const { url } = await startCheckout("cei-starter");
+
+      if (url) {
+        window.location.href = url;
+        return;
       }
-    } catch (e: any) {
-      setBillingError(
-        e?.response?.data?.detail ||
-          e?.message ||
-          "Failed to start checkout session."
+
+      // Stripe / billing not configured for this environment
+      setBillingMessage(
+        "Billing is not fully configured for this environment. No live checkout page is available."
+      );
+    } catch (err) {
+      console.error("Failed to start checkout:", err);
+      setBillingMessage(
+        "Could not start checkout. Please retry or contact your CEI admin."
       );
     } finally {
       setStartingCheckout(false);
@@ -174,22 +176,23 @@ const Account: React.FC = () => {
   };
 
   const handleOpenPortal = async () => {
-    setBillingError(null);
+    setBillingMessage(null);
     setOpeningPortal(true);
     try {
-      const data = await openBillingPortal();
-      if (data?.url) {
-        window.location.href = data.url;
-      } else {
-        setBillingError(
-          "Billing portal is not fully configured (no portal URL returned)."
-        );
+      const { url } = await openBillingPortal();
+
+      if (url) {
+        window.location.href = url;
+        return;
       }
-    } catch (e: any) {
-      setBillingError(
-        e?.response?.data?.detail ||
-          e?.message ||
-          "Failed to open billing portal."
+
+      setBillingMessage(
+        "The billing portal is not available in this environment. Stripe is not fully configured."
+      );
+    } catch (err) {
+      console.error("Failed to open billing portal:", err);
+      setBillingMessage(
+        "Could not open the billing portal. Please retry or contact your CEI admin."
       );
     } finally {
       setOpeningPortal(false);
@@ -460,15 +463,19 @@ const Account: React.FC = () => {
             </button>
           </div>
 
-          {billingError && (
+          {billingMessage && (
             <div
               style={{
-                marginTop: "0.7rem",
-                fontSize: "0.78rem",
-                color: "#f97373",
+                marginTop: "0.5rem",
+                padding: "0.5rem 0.75rem",
+                borderRadius: "0.5rem",
+                border: "1px solid rgba(250,204,21,0.7)",
+                background: "rgba(30,64,175,0.35)",
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
               }}
             >
-              {billingError}
+              {billingMessage}
             </div>
           )}
         </div>
