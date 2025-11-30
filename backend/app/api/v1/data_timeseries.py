@@ -1,8 +1,11 @@
 # backend/app/api/v1/data_timeseries.py
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
+import csv
+import io
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -155,6 +158,75 @@ def get_timeseries_series(
         resolution=resolution,
         points=points,
     )
+
+
+@router.get("/export", response_class=StreamingResponse)
+def export_timeseries_csv(
+    site_id: Optional[str] = Query(None),
+    meter_id: Optional[str] = Query(None),
+    window_hours: int = Query(24, ge=1, le=24 * 90),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Export raw timeseries rows for the last N hours as CSV.
+
+    Columns:
+      - timestamp_utc (ISO8601)
+      - site_id
+      - meter_id
+      - value
+
+    Multi-tenant behavior:
+    - Same org scoping as /summary and /series.
+    """
+    now = datetime.utcnow()
+    start = now - timedelta(hours=window_hours)
+
+    # Base query
+    q = db.query(TimeseriesRecord).filter(TimeseriesRecord.timestamp >= start)
+
+    # Optional filters
+    if site_id:
+        q = q.filter(TimeseriesRecord.site_id == site_id)
+    if meter_id:
+        q = q.filter(TimeseriesRecord.meter_id == meter_id)
+
+    # Org scoping
+    q = deps.apply_org_scope_to_timeseries_query(q, db, user)
+
+    q = q.order_by(TimeseriesRecord.timestamp.asc())
+
+    def iter_csv():
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+
+        # Header
+        writer.writerow(["timestamp_utc", "site_id", "meter_id", "value"])
+        yield buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
+
+        # Stream rows
+        for row in q.yield_per(1000):
+            writer.writerow(
+                [
+                    row.timestamp.isoformat() if row.timestamp else "",
+                    row.site_id or "",
+                    row.meter_id or "",
+                    float(row.value) if row.value is not None else "",
+                ]
+            )
+            yield buffer.getvalue()
+            buffer.seek(0)
+            buffer.truncate(0)
+
+    filename = "cei_timeseries_export.csv"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"'
+    }
+
+    return StreamingResponse(iter_csv(), media_type="text/csv", headers=headers)
 
 
 def _bucket_timestamp(ts: datetime, resolution: str) -> datetime:
