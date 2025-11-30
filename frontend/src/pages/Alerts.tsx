@@ -12,7 +12,6 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import { downloadCsv } from "../utils/csv";
 
-
 type AlertRecord = {
   id?: string | number;
   site_id?: string | null;
@@ -59,8 +58,6 @@ function formatEnergyShort(kwh: number | null | undefined): string {
   }
   return `${val.toFixed(0)} kWh`;
 }
-
-
 
 const Alerts: React.FC = () => {
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
@@ -633,8 +630,8 @@ const Alerts: React.FC = () => {
         </section>
       )}
 
-      {/* Summary row – only when alerts are enabled */}
-      {enableAlerts && (
+      {/* Summary row – only when alerts are enabled and plan is loaded */}
+      {planLoaded && enableAlerts && (
         <section className="dashboard-row">
           <div className="cei-card">
             <div
@@ -745,7 +742,7 @@ const Alerts: React.FC = () => {
       )}
 
       {/* Top sites by open alerts – portfolio view */}
-      {enableAlerts && totalAlerts > 0 && siteAggregates.length > 0 && (
+      {planLoaded && enableAlerts && totalAlerts > 0 && siteAggregates.length > 0 && (
         <section style={{ marginTop: "0.9rem" }}>
           <div className="cei-card">
             <div
@@ -960,8 +957,8 @@ const Alerts: React.FC = () => {
         </section>
       )}
 
-      {/* Alerts list – only when alerts are enabled */}
-      {enableAlerts && (
+      {/* Alerts list – only when alerts are enabled and plan is loaded */}
+      {planLoaded && enableAlerts && (
         <section>
           <div className="cei-card">
             <div
@@ -1281,8 +1278,8 @@ const Alerts: React.FC = () => {
         </section>
       )}
 
-      {/* Alert history / workflow – only when alerts are enabled */}
-      {enableAlerts && (
+      {/* Alert history / workflow – only when alerts are enabled and plan is loaded */}
+      {planLoaded && enableAlerts && (
         <section style={{ marginTop: "1rem" }}>
           <div className="cei-card">
             <div

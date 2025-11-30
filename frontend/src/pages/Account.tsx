@@ -32,6 +32,29 @@ type AccountMe = {
   [key: string]: any;
 };
 
+// Read environment once from Vite
+const rawEnv = (import.meta as any).env || {};
+const appEnvironment: string =
+  (rawEnv.VITE_ENVIRONMENT as string | undefined) || "dev";
+
+function getEnvironmentLabel(env: string): string {
+  const key = env.toLowerCase();
+  if (key === "prod" || key === "production") return "Production";
+  if (key === "pilot" || key === "staging") return "Pilot / Staging";
+  return "Development";
+}
+
+function getEnvironmentBlurb(env: string): string {
+  const key = env.toLowerCase();
+  if (key === "prod" || key === "production") {
+    return "Production data. Treat this as customer-facing and audit-ready.";
+  }
+  if (key === "pilot" || key === "staging") {
+    return "Pilot / staging data. Suitable for demos and friendly pilots, not for financial sign-off.";
+  }
+  return "Local / dev data. Safe to experiment, break things, and iterate quickly.";
+}
+
 const Account: React.FC = () => {
   const [account, setAccount] = useState<AccountMe | null>(null);
   const [loading, setLoading] = useState(false);
@@ -192,6 +215,9 @@ const Account: React.FC = () => {
       setDeleting(false);
     }
   };
+
+  const envLabel = getEnvironmentLabel(appEnvironment);
+  const envBlurb = getEnvironmentBlurb(appEnvironment);
 
   return (
     <div className="dashboard-page">
@@ -445,6 +471,65 @@ const Account: React.FC = () => {
               {billingError}
             </div>
           )}
+        </div>
+      </section>
+
+      {/* Environment & safety card */}
+      <section>
+        <div className="cei-card">
+          <div
+            style={{
+              fontSize: "0.9rem",
+              fontWeight: 600,
+              marginBottom: "0.4rem",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "0.75rem",
+            }}
+          >
+            <span>Environment & safety</span>
+            <span className="cei-pill cei-pill-neutral">
+              {envLabel} ({appEnvironment})
+            </span>
+          </div>
+          <div
+            style={{
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+              lineHeight: 1.7,
+            }}
+          >
+            {envBlurb}
+          </div>
+          <div
+            style={{
+              marginTop: "0.6rem",
+              fontSize: "0.78rem",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            <ul
+              style={{
+                margin: 0,
+                paddingLeft: "1.1rem",
+              }}
+            >
+              <li>
+                <strong>DEV:</strong> point CSV uploads and tests here; break
+                things safely before promoting changes.
+              </li>
+              <li>
+                <strong>PILOT/STAGING:</strong> use for demos and early
+                customer pilots; data should be realistic but not yet
+                contract-critical.
+              </li>
+              <li>
+                <strong>PROD:</strong> treat as the system of record; align
+                alerts, reports, and exports with contractual expectations.
+              </li>
+            </ul>
+          </div>
         </div>
       </section>
 

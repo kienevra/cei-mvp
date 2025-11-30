@@ -4,8 +4,7 @@ import { Link } from "react-router-dom";
 import {
   getSites,
   createSite,
-  getTimeseriesSummary,
-  getSiteInsights,
+  getSiteKpi, // NEW: use KPI endpoint instead of summary + insights combo
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
@@ -15,16 +14,6 @@ type SiteRecord = {
   name: string;
   location?: string | null;
   [key: string]: any;
-};
-
-type SummaryResponse = {
-  site_id: string | null;
-  meter_id: string | null;
-  window_hours: number;
-  total_value: number;
-  points: number;
-  from_timestamp: string | null;
-  to_timestamp: string | null;
 };
 
 type SiteTrendMetrics = {
@@ -61,53 +50,52 @@ const SitesList: React.FC = () => {
         const normalized = Array.isArray(data) ? (data as SiteRecord[]) : [];
         setSites(normalized);
 
-        // --- load per-site 24h metrics for trend badges ---
+        // --- load per-site 24h metrics for trend badges via KPI endpoint ---
         if (normalized.length > 0) {
           const entries = await Promise.all(
             normalized.map(async (site) => {
               const idStr = String(site.id);
               const siteKey = `site-${idStr}`;
 
-              let summary24: SummaryResponse | null = null;
-              let insights24: any | null = null;
-
-              try {
-                summary24 = (await getTimeseriesSummary({
-                  site_id: siteKey,
-                  window_hours: 24,
-                })) as SummaryResponse;
-              } catch (_e) {
-                summary24 = null;
-              }
-
-              try {
-                // 24h insights, let backend use its default lookback_days
-                insights24 = await getSiteInsights(siteKey, 24).catch(
-                  () => null
-                );
-              } catch (_e) {
-                insights24 = null;
-              }
-
-              const totalKwh24 = summary24?.total_value || 0;
-
-              const deviationPct24 =
-                typeof insights24?.deviation_pct === "number" &&
-                Number.isFinite(insights24.deviation_pct)
-                  ? insights24.deviation_pct
-                  : null;
-
-              const expectedKwh24 =
-                typeof insights24?.total_expected_kwh === "number" &&
-                Number.isFinite(insights24.total_expected_kwh)
-                  ? insights24.total_expected_kwh
-                  : null;
-
-              const metrics: SiteTrendMetrics = {
-                totalKwh24h: totalKwh24,
-                deviationPct24h: deviationPct24,
-                expectedKwh24h: expectedKwh24,
+              let metrics: SiteTrendMetrics = {
+                totalKwh24h: 0,
+                deviationPct24h: null,
+                expectedKwh24h: null,
               };
+
+              try {
+                const kpi: any = await getSiteKpi(siteKey);
+
+                const total24 =
+                  typeof kpi?.last_24h_kwh === "number"
+                    ? kpi.last_24h_kwh
+                    : 0;
+
+                const dev24 =
+                  typeof kpi?.deviation_pct_24h === "number" &&
+                  Number.isFinite(kpi.deviation_pct_24h)
+                    ? kpi.deviation_pct_24h
+                    : null;
+
+                const expected24 =
+                  typeof kpi?.baseline_24h_kwh === "number" &&
+                  Number.isFinite(kpi.baseline_24h_kwh)
+                    ? kpi.baseline_24h_kwh
+                    : null;
+
+                metrics = {
+                  totalKwh24h: total24,
+                  deviationPct24h: dev24,
+                  expectedKwh24h: expected24,
+                };
+              } catch (_e) {
+                // If KPI fails (no data, 404, etc.), keep neutral defaults
+                metrics = {
+                  totalKwh24h: 0,
+                  deviationPct24h: null,
+                  expectedKwh24h: null,
+                };
+              }
 
               return [idStr, metrics] as const;
             })

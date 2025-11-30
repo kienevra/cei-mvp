@@ -26,9 +26,17 @@ logger = logging.getLogger("cei")
 # === JWT / security settings ===
 # Centralized via app.core.config.Settings
 SECRET_KEY = settings.jwt_secret
-ALGORITHM = "HS256"
+ALGORITHM = settings.jwt_algorithm  # now driven by config
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 REFRESH_TOKEN_EXPIRE_DAYS = settings.refresh_token_expire_days
+
+# Hard guard: never allow the default secret in production-like envs
+if settings.is_prod and SECRET_KEY in {"supersecret", "changeme", "secret", "", None}:
+  # Fail fast at import time so you don't accidentally boot prod with a toy key.
+  raise RuntimeError(
+      "Insecure JWT_SECRET configured in production environment. "
+      "Set a strong random secret via the JWT_SECRET env var."
+  )
 
 # Use Argon2 for password hashing (good long-term choice)
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
@@ -38,6 +46,8 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 # Router mounted at /auth but included under /api/v1 in main.py (-> /api/v1/auth/*)
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+REFRESH_COOKIE_NAME = "cei_refresh_token"
 
 
 # === Schemas ===
@@ -123,14 +133,15 @@ def create_refresh_token(data: dict) -> str:
 def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     """
     Set HttpOnly refresh token cookie.
-    NOTE: secure=False for local dev; set True in production over HTTPS.
+    - secure=True automatically in production-like environments.
     """
     max_age = REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
+    secure_flag = settings.is_prod
     response.set_cookie(
-        key="cei_refresh_token",
+        key=REFRESH_COOKIE_NAME,
         value=refresh_token,
         httponly=True,
-        secure=False,  # TODO: flip to True on HTTPS in production
+        secure=secure_flag,
         samesite="lax",
         max_age=max_age,
         path="/",
@@ -138,7 +149,7 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
 
 
 def _clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie("cei_refresh_token", path="/")
+    response.delete_cookie(REFRESH_COOKIE_NAME, path="/")
 
 
 # === Routes ===
@@ -229,7 +240,7 @@ def login(
 )
 def refresh_access_token(
     response: Response,
-    refresh_token: Optional[str] = Cookie(default=None, alias="cei_refresh_token"),
+    refresh_token: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE_NAME),
     db: Session = Depends(get_db),
 ):
     """

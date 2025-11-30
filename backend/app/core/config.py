@@ -49,13 +49,20 @@ class Settings(BaseSettings):
         env="JWT_SECRET",
         description="JWT signing secret; override in all non-dev environments.",
     )
+    jwt_algorithm: str = Field(
+        default="HS256",
+        env="JWT_ALGORITHM",
+        description="JWT signing algorithm. HS256 by default.",
+    )
     access_token_expire_minutes: int = Field(
         default=60,
         env="ACCESS_TOKEN_EXPIRE_MINUTES",
+        description="Access token lifetime in minutes.",
     )
     refresh_token_expire_days: int = Field(
         default=7,
         env="REFRESH_TOKEN_EXPIRE_DAYS",
+        description="Refresh token lifetime in days.",
     )
 
     # CORS / frontends
@@ -103,6 +110,13 @@ class Settings(BaseSettings):
         Convenience flag: Stripe is 'enabled' only if both API key and webhook secret are present.
         """
         return bool(self.stripe_api_key and self.stripe_webhook_secret)
+
+    @property
+    def is_prod(self) -> bool:
+        """
+        Convenience flag: true if running in a production-like environment.
+        """
+        return self.environment.lower() in {"prod", "production"}
 
 
 @lru_cache()

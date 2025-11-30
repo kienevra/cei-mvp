@@ -17,6 +17,8 @@ export const baseURL = base
 const api = axios.create({
   baseURL,
   timeout: 10000,
+  // Needed so the HttpOnly refresh cookie is sent/received for cross-origin calls
+  withCredentials: true,
 });
 
 // Attach access token on every request
@@ -83,6 +85,10 @@ api.interceptors.response.use(
             `${baseURL}/auth/refresh`,
             {},
             {
+              // Ensure HttpOnly refresh cookie is sent and new one is accepted
+              withCredentials: true,
+              // We still send the current access token; backend ignores it and
+              // only trusts the cookie, but this keeps things backwards-safe.
               headers: { Authorization: `Bearer ${currentToken}` },
               timeout: 8000,
             }
@@ -199,13 +205,25 @@ export async function deleteAccount() {
   return r.data;
 }
 
+/**
+ * Analytics insights for a site.
+ *
+ * Second argument is interpreted as window_hours, matching
+ * /analytics/sites/{site_id}/insights?window_hours=...
+ */
 export async function getSiteInsights(
   siteId: number | string,
-  windowDays: number = 7
+  windowHours?: number
 ) {
   const idStr = String(siteId);
+  const params: Record<string, number> = {};
+
+  if (typeof windowHours === "number") {
+    params.window_hours = windowHours;
+  }
+
   const resp = await api.get(`/analytics/sites/${idStr}/insights`, {
-    params: { window_days: windowDays },
+    params,
   });
   return resp.data;
 }
@@ -223,7 +241,7 @@ export async function getSiteKpi(
 }
 
 /**
- * Stub predictive forecast: hits analytics/sites/{id}/forecast on the backend.
+ * Stub predictive forecast: hits /analytics/sites/{id}/forecast on the backend.
  * Uses the same axios client and baseURL (/api/v1) as the rest of the API.
  */
 export async function getSiteForecast(
@@ -243,7 +261,7 @@ export async function getSiteForecast(
     history_window_hours = 24,
   } = params;
 
-  const resp = await api.get(`analytics/sites/${idStr}/forecast`, {
+  const resp = await api.get(`/analytics/sites/${idStr}/forecast`, {
     params: {
       horizon_hours,
       lookback_days,
@@ -292,12 +310,14 @@ export interface AlertEventUpdatePayload {
  * Fetch historical alert stream from /alerts/history.
  * Mirrors backend query params.
  */
-export async function getAlertHistory(params: {
-  siteId?: string;
-  status?: AlertStatus;
-  severity?: "critical" | "warning" | "info";
-  limit?: number;
-} = {}): Promise<AlertEvent[]> {
+export async function getAlertHistory(
+  params: {
+    siteId?: string;
+    status?: AlertStatus;
+    severity?: "critical" | "warning" | "info";
+    limit?: number;
+  } = {}
+): Promise<AlertEvent[]> {
   const query: Record<string, string | number> = {};
 
   if (params.siteId) query["site_id"] = params.siteId;
@@ -305,7 +325,9 @@ export async function getAlertHistory(params: {
   if (params.severity) query["severity"] = params.severity;
   if (params.limit) query["limit"] = params.limit;
 
-  const res = await api.get<AlertEvent[]>("/alerts/history", { params: query });
+  const res = await api.get<AlertEvent[]>("/alerts/history", {
+    params: query,
+  });
   return res.data;
 }
 
