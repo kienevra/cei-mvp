@@ -126,6 +126,45 @@ api.interceptors.response.use(
   }
 );
 
+/* ===== Auth helpers (login + signup) ===== */
+
+export interface LoginPayload {
+  username: string;
+  password: string;
+}
+
+export interface SignupPayload {
+  email: string;
+  password: string;
+  full_name?: string;
+  organization_name?: string;
+  organization_id?: number;
+}
+
+/**
+ * Thin wrapper over POST /auth/login using form-encoded body.
+ * Kept separate so useAuth.tsx can decide how to store the token.
+ */
+export async function login(payload: LoginPayload) {
+  const form = new URLSearchParams();
+  form.set("username", payload.username);
+  form.set("password", payload.password);
+
+  const resp = await api.post("/auth/login", form, {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
+  return resp.data as { access_token: string; token_type: string };
+}
+
+/**
+ * Self-serve signup: POST /auth/signup with JSON body.
+ * Backend returns the same Token shape as login.
+ */
+export async function signup(payload: SignupPayload) {
+  const resp = await api.post("/auth/signup", payload);
+  return resp.data as { access_token: string; token_type: string };
+}
+
 /* ===== KPI type for /analytics/sites/{site_id}/kpi ===== */
 
 export type SiteKpi = {

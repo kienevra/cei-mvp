@@ -32,11 +32,11 @@ REFRESH_TOKEN_EXPIRE_DAYS = settings.refresh_token_expire_days
 
 # Hard guard: never allow the default secret in production-like envs
 if settings.is_prod and SECRET_KEY in {"supersecret", "changeme", "secret", "", None}:
-  # Fail fast at import time so you don't accidentally boot prod with a toy key.
-  raise RuntimeError(
-      "Insecure JWT_SECRET configured in production environment. "
-      "Set a strong random secret via the JWT_SECRET env var."
-  )
+    # Fail fast at import time so you don't accidentally boot prod with a toy key.
+    raise RuntimeError(
+        "Insecure JWT_SECRET configured in production environment. "
+        "Set a strong random secret via the JWT_SECRET env var."
+    )
 
 # Use Argon2 for password hashing (good long-term choice)
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
@@ -56,9 +56,12 @@ REFRESH_COOKIE_NAME = "cei_refresh_token"
 class UserCreate(BaseModel):
     email: str
     password: str
+    full_name: Optional[str] = None
     # Support both canonical `organization_id` and the legacy `org_id`.
     organization_id: Optional[int] = None
     org_id: Optional[int] = None
+    # Optional organization name for self-serve signup
+    organization_name: Optional[str] = None
 
 
 class Token(BaseModel):
@@ -163,14 +166,17 @@ def _clear_refresh_cookie(response: Response) -> None:
 )
 def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
     """
-    Signup endpoint.
-    Accepts either `organization_id` (preferred) or legacy `org_id`.
+    Signup endpoint for self-serve onboarding.
+
+    - If organization_id/org_id is provided, we attach the user to that org (and 400 if it doesn't exist).
+    - Otherwise we auto-create an Organization using organization_name or a name derived from email.
     """
     existing_user = db.query(User).filter(User.email == user.email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     # Resolve org id
+    # Prefer explicit organization_id, then legacy org_id.
     organization_id = (
         user.organization_id if user.organization_id is not None else user.org_id
     )
@@ -179,6 +185,65 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
             "Received deprecated payload field `org_id`; "
             "prefer `organization_id` (will be removed in future)."
         )
+
+    org_obj: Optional[Organization] = None
+
+    if organization_id is not None:
+        # Attach to an existing org; error if not found.
+        org_obj = (
+            db.query(Organization)
+            .filter(Organization.id == organization_id)
+            .first()
+        )
+        if org_obj is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Organization with id={organization_id} not found",
+            )
+    else:
+        # Self-serve path: create or reuse an org based on organization_name or email
+        if user.organization_name and user.organization_name.strip():
+            org_name = user.organization_name.strip()
+        else:
+            # Fallback: derive something sensible from email
+            email_prefix = user.email.split("@")[0] if "@" in user.email else user.email
+            org_name = f"{email_prefix} Org".strip() or "New Organization"
+
+        # Reuse an existing org with that name if it already exists
+        org_obj = (
+            db.query(Organization)
+            .filter(Organization.name == org_name)
+            .first()
+        )
+
+        if org_obj is None:
+            org_obj = Organization(name=org_name)  # only safe ctor arg
+            # Best-effort plan defaults, guarded to not break older schemas.
+            try:
+                org_obj.plan_key = "cei-starter"
+            except Exception:
+                pass
+            try:
+                org_obj.subscription_plan_key = "cei-starter"
+            except Exception:
+                pass
+            try:
+                org_obj.enable_alerts = True
+            except Exception:
+                pass
+            try:
+                org_obj.enable_reports = True
+            except Exception:
+                pass
+            try:
+                org_obj.subscription_status = "active"
+            except Exception:
+                pass
+
+            db.add(org_obj)
+            db.flush()  # ensure org_obj.id is available
+
+        organization_id = org_obj.id
 
     # Hash password
     try:
@@ -193,6 +258,15 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
         hashed_password=hashed_password,
         organization_id=organization_id,
     )
+
+    # Best-effort: populate full_name if the column exists
+    if user.full_name:
+        try:
+            db_user.full_name = user.full_name
+        except Exception:
+            # Column might not exist in older schemas; ignore silently.
+            pass
+
     db.add(db_user)
     db.commit()
     db.refresh(db_user)

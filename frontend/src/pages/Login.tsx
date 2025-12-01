@@ -3,14 +3,20 @@ import React, { useEffect, useState, FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import useAuth from "../hooks/useAuth";
 import ErrorBanner from "../components/ErrorBanner";
+import api from "../services/api";
+
+type AuthMode = "login" | "signup";
 
 const Login: React.FC = () => {
   const { login, isAuthenticated } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
+  const [mode, setMode] = useState<AuthMode>("login");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -39,18 +45,64 @@ const Login: React.FC = () => {
     setError(null);
 
     try {
-      // Backend expects username + password
-      await login({ username: email, password });
+      if (mode === "login") {
+        // ---------- LOGIN FLOW ----------
+        // Backend expects username + password
+        await login({ username: email, password });
+      } else {
+        // ---------- SIGNUP FLOW ----------
+        if (!email || !password) {
+          throw new Error("Email and password are required.");
+        }
+
+        if (password.length < 8) {
+          throw new Error("Password must be at least 8 characters.");
+        }
+
+        if (password !== passwordConfirm) {
+          throw new Error("Passwords do not match.");
+        }
+
+        // 1) Create the user account via /auth/signup
+        await api.post("/auth/signup", {
+          email,
+          password,
+          // organization_id left null for now; we can later
+          // extend to accept organization selection / creation.
+        });
+
+        // 2) Reuse the existing login flow so the Auth context
+        //    is fully wired (token, isAuthenticated, redirects).
+        await login({ username: email, password });
+      }
     } catch (err: any) {
+      const backendDetail =
+        err?.response?.data?.detail ??
+        err?.response?.data?.message ??
+        err?.response?.data;
+
       const msg =
-        err?.response?.data?.detail ||
-        err?.message ||
-        "Login failed. Check your credentials and try again.";
+        typeof backendDetail === "string"
+          ? backendDetail
+          : err?.message || "Authentication failed. Please try again.";
+
       setError(msg);
     } finally {
       setSubmitting(false);
     }
   };
+
+  const toggleMode = (nextMode: AuthMode) => {
+    if (nextMode === mode) return;
+    setMode(nextMode);
+    setError(null);
+    setNotice(null);
+    // Do not auto-clear email; but reset passwords when switching.
+    setPassword("");
+    setPasswordConfirm("");
+  };
+
+  const isSignup = mode === "signup";
 
   return (
     <div className="auth-page">
@@ -75,13 +127,11 @@ const Login: React.FC = () => {
             CEI · Carbon Efficiency Intelligence
           </div>
 
-          {/* >>> Your headline <<< */}
           <div className="auth-title">
             Cut 5–15% of your plant’s energy spend without installing a single
             new sensor.
           </div>
 
-          {/* >>> Your subheadline <<< */}
           <div className="auth-subtitle">
             CEI (Carbon Efficiency Intelligence) connects to the data you
             already have, uncovers hidden operational waste, and turns it into
@@ -89,8 +139,68 @@ const Login: React.FC = () => {
           </div>
         </div>
 
+        {/* Mode toggle: Sign in / Create account */}
+        <div
+          style={{
+            display: "flex",
+            marginBottom: "0.9rem",
+            borderRadius: "999px",
+            background: "rgba(15, 23, 42, 0.7)",
+            padding: "0.15rem",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => toggleMode("login")}
+            className="cei-btn"
+            style={{
+              flex: 1,
+              borderRadius: "999px",
+              fontSize: "0.85rem",
+              padding: "0.4rem 0.75rem",
+              border: "none",
+              background:
+                mode === "login"
+                  ? "linear-gradient(135deg, #22d3ee, #0ea5e9)"
+                  : "transparent",
+              color:
+                mode === "login"
+                  ? "#0f172a"
+                  : "var(--cei-text-muted)",
+              fontWeight: mode === "login" ? 600 : 400,
+              cursor: "pointer",
+            }}
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleMode("signup")}
+            className="cei-btn"
+            style={{
+              flex: 1,
+              borderRadius: "999px",
+              fontSize: "0.85rem",
+              padding: "0.4rem 0.75rem",
+              border: "none",
+              background:
+                mode === "signup"
+                  ? "linear-gradient(135deg, #22d3ee, #0ea5e9)"
+                  : "transparent",
+              color:
+                mode === "signup"
+                  ? "#0f172a"
+                  : "var(--cei-text-muted)",
+              fontWeight: mode === "signup" ? 600 : 400,
+              cursor: "pointer",
+            }}
+          >
+            Create account
+          </button>
+        </div>
+
         {/* Session notice */}
-        {notice && (
+        {notice && mode === "login" && (
           <div
             style={{
               marginBottom: "0.75rem",
@@ -113,10 +223,12 @@ const Login: React.FC = () => {
           </div>
         )}
 
-        {/* Login form */}
+        {/* Auth form (login or signup depending on mode) */}
         <form className="auth-form" onSubmit={handleSubmit}>
           <div>
-            <label htmlFor="email">Work email</label>
+            <label htmlFor="email">
+              {isSignup ? "Work email" : "Work email"}
+            </label>
             <input
               id="email"
               type="email"
@@ -129,17 +241,45 @@ const Login: React.FC = () => {
           </div>
 
           <div>
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">
+              {isSignup ? "Create a password" : "Password"}
+            </label>
             <input
               id="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete={isSignup ? "new-password" : "current-password"}
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
+            {isSignup && (
+              <div
+                style={{
+                  fontSize: "0.75rem",
+                  color: "var(--cei-text-muted)",
+                  marginTop: "0.25rem",
+                }}
+              >
+                Minimum 8 characters. Use a strong password.
+              </div>
+            )}
           </div>
+
+          {isSignup && (
+            <div>
+              <label htmlFor="passwordConfirm">Confirm password</label>
+              <input
+                id="passwordConfirm"
+                type="password"
+                autoComplete="new-password"
+                placeholder="••••••••"
+                value={passwordConfirm}
+                onChange={(e) => setPasswordConfirm(e.target.value)}
+                required
+              />
+            </div>
+          )}
 
           <button
             type="submit"
@@ -151,7 +291,13 @@ const Login: React.FC = () => {
               opacity: submitting ? 0.85 : 1,
             }}
           >
-            {submitting ? "Signing you in…" : "Sign in"}
+            {submitting
+              ? isSignup
+                ? "Creating your account…"
+                : "Signing you in…"
+              : isSignup
+              ? "Create account"
+              : "Sign in"}
           </button>
         </form>
 
@@ -165,7 +311,7 @@ const Login: React.FC = () => {
             paddingTop: "0.8rem",
           }}
         >
-          After signing in you can:
+          After {isSignup ? "creating your account" : "signing in"} you can:
           <ul
             style={{
               margin: "0.4rem 0 0",
