@@ -35,26 +35,25 @@ class Organization(Base):
     enable_alerts = Column(
         Boolean,
         nullable=False,
-        server_default=text("1"),  # default ON for dev
+        server_default=text("TRUE"),   # <-- CHANGED from "1"
     )
     enable_reports = Column(
         Boolean,
         nullable=False,
-        server_default=text("1"),  # default ON for dev
+        server_default=text("TRUE"),   # <-- CHANGED from "1"
     )
 
     subscription_status = Column(
         String,
         nullable=True,
-    )  # e.g. "active", "past_due", "canceled"
+    )
 
-    # Stripe wiring (optional but future-proof)
     stripe_customer_id = Column(String, nullable=True)
     stripe_subscription_id = Column(String, nullable=True)
     stripe_status = Column(String, nullable=True)
 
-    # Optional billing email override
     billing_email = Column(String, nullable=True)
+
 
 
 class User(Base):
@@ -158,7 +157,7 @@ class Metric(Base):
 
 
 class TimeseriesRecord(Base):
-    __tablename__ = "timeseries_records"
+    __tablename__ = "timeseries_record"  # <-- CHANGED FROM "timeseries_records"
     id = Column(Integer, primary_key=True, autoincrement=True)
     site_id = Column(String, nullable=False, index=True)
     meter_id = Column(String, nullable=False)
@@ -173,7 +172,7 @@ class TimeseriesRecord(Base):
 
 
 class StagingUpload(Base):
-    __tablename__ = "staging_uploads"
+    __tablename__ = "staging_upload"
     job_id = Column(String, primary_key=True)
     payload_path = Column(String, nullable=False)
     status = Column(String, nullable=False, default="pending")

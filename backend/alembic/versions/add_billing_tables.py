@@ -28,7 +28,7 @@ def upgrade():
     op.create_table(
         'subscription',
         sa.Column('id', sa.Integer(), primary_key=True),
-        sa.Column('user_id', sa.Integer(), sa.ForeignKey('user.id'), nullable=False, index=True),
+        sa.Column('user_id', sa.Integer(), nullable=False, index=True),
         sa.Column('stripe_customer_id', sa.String(), nullable=True, index=True),
         sa.Column('stripe_subscription_id', sa.String(), nullable=True, unique=True, index=True),
         sa.Column('status', sa.String(), nullable=False, index=True),

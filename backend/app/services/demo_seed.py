@@ -136,7 +136,8 @@ def _get_or_create_user(
     # Try to mark as superuser if the column exists
     if as_admin:
         try:
-            user.is_superuser = True
+            # IMPORTANT: use integer 1 to match INTEGER column in Supabase
+            user.is_superuser = 1
         except Exception:
             pass
 
