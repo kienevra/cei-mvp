@@ -1,18 +1,22 @@
 ﻿{
-    "devDependencies":  {
-                            "@testing-library/jest-dom":  "^6.9.1",
-                            "@testing-library/react":  "^16.3.0",
-                            "@testing-library/user-event":  "^14.6.1",
-                            "@types/axios":  "^0.9.36",
-                            "@types/react":  "^19.2.0",
-                            "@types/react-dom":  "^19.2.0",
-                            "@types/react-router-dom":  "^5.3.3",
-                            "@types/recharts":  "^1.8.29",
-                            "autoprefixer":  "^10.4.21",
-                            "postcss":  "^8.5.6",
-                            "tailwindcss":  "^4.1.14"
-                        },
-    "scripts":  {
-                    "heroku-postbuild":  "cd frontend \u0026\u0026 npm ci \u0026\u0026 npm run build"
-                }
+  "scripts": {
+    "heroku-postbuild": "cd frontend && npm ci && npm run build",
+    "start": "serve -s frontend/dist -l $PORT"
+  },
+  "dependencies": {
+    "serve": "^14.2.3"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/axios": "^0.9.36",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/react-router-dom": "^5.3.3",
+    "@types/recharts": "^1.8.29",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.14"
+  }
 }
