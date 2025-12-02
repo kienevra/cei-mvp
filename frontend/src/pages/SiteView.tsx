@@ -215,7 +215,6 @@ const SiteView: React.FC = () => {
     // NEW: per-site analytics / insights
     setInsightsLoading(true);
     setInsightsError(null);
-    // Your current getSiteInsights signature expects `windowDays: number` as 2nd arg
     getSiteInsights(siteKey, 24)
       .then((data) => {
         if (!isMounted) return;
@@ -662,7 +661,8 @@ const SiteView: React.FC = () => {
             </div>
           )}
           <div>
-            <span style={{ fontWeight: 500 }}>Site ID:</span> {id}
+            <span style={{ fontWeight: 500 }}>Site ID:</span>{" "}
+            {siteKey ?? id ?? "—"}
           </div>
           {lastUpdatedLabel && (
             <div style={{ marginTop: "0.15rem" }}>
@@ -748,8 +748,11 @@ const SiteView: React.FC = () => {
               "Loading per-site energy data…"
             ) : (
               <>
-                No recent data for this site. Ensure your uploaded timeseries
-                includes <code>site_id = {siteKey}</code>.
+                No recent data for this site. Either ensure your uploaded
+                timeseries includes{" "}
+                <code>site_id = {siteKey ?? "site-N"}</code>, or use the{" "}
+                <strong>“Upload CSV for this site”</strong> button so CEI routes
+                rows here automatically when your CSV has no site_id column.
               </>
             )}
           </div>
@@ -1079,7 +1082,9 @@ const SiteView: React.FC = () => {
               }}
             >
               No recent per-site series data. Once your timeseries has matching{" "}
-              <code>site_id = {siteKey}</code>, this chart will light up.
+              <code>site_id = {siteKey}</code>, or you upload via{" "}
+              <strong>“Upload CSV for this site”</strong> with no site_id
+              column, this chart will light up.
             </div>
           ) : (
             <>
@@ -1454,7 +1459,7 @@ function buildSiteEfficiencySuggestions(
 
   if (points === null || points === 0) {
     return [
-      `Confirm that uploads for ${name} include a consistent site_id (e.g. "${name}" or "site-1") in every row.`,
+      `Confirm that uploads for ${name} either (a) include a consistent site_id column, or (b) are sent via the “Upload CSV for this site” button so CEI can route rows automatically.`,
       "Check that timestamps for this site actually land in the last 24 hours – older backfills won’t drive this view.",
       "Start with one or two key meters for this site (e.g. main incomer, compressors) and validate that their profiles look realistic.",
     ];
