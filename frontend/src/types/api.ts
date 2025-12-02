@@ -63,6 +63,12 @@ export interface BaselineProfile {
   global_p50_kwh: number;
   global_p90_kwh: number;
   n_points: number;
+
+  // Warm-up / confidence metadata (additive)
+  total_history_days?: number | null;
+  is_warming_up?: boolean | null;
+  confidence_level?: string | null;
+
   buckets: BaselineBucket[];
 }
 
@@ -91,6 +97,11 @@ export interface SiteInsights {
   hours: SiteInsightHour[];
   generated_at: string;
 
+  // New: warm-up / confidence metadata (top-level from insights engine)
+  total_history_days?: number | null;
+  is_baseline_warming_up?: boolean | null;
+  confidence_level?: string | null;
+
   // New statistical baseline profile
   baseline_profile?: BaselineProfile | null;
 }
@@ -116,5 +127,11 @@ export interface SiteForecast {
   baseline_lookback_days?: number;
   generated_at: string;
   method?: string;          // e.g. "stub_baseline_v1"
+
+  // Warm-up / confidence metadata for the baseline behind the forecast
+  baseline_total_history_days?: number | null;
+  baseline_is_warming_up?: boolean | null;
+  baseline_confidence_level?: string | null;
+
   points: ForecastPoint[];
 }

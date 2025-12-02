@@ -1156,8 +1156,7 @@ const SiteView: React.FC = () => {
                             height: `${heightPx}px`,
                             boxShadow:
                               "0 6px 18px rgba(56, 189, 248, 0.45)",
-                            border:
-                              "1px solid rgba(226, 232, 240, 0.8)",
+                            border: "1px solid rgba(226, 232, 240, 0.8)",
                           }}
                         />
                         <span

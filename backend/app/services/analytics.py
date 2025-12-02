@@ -53,6 +53,12 @@ def _load_site_recent(
     return q.all()
 
 
+# ========= Baseline confidence thresholds =========
+
+# Below this many days of actual history, we treat the baseline as "warming up"
+MIN_HISTORY_DAYS_FOR_CONFIDENT_BASELINE = 7
+
+
 # ========= Statistical baselines (deterministic + statistical layer) =========
 
 
@@ -94,6 +100,14 @@ class BaselineProfile:
 
     # Total number of points used
     n_points: int
+
+    # Warm-up / confidence metadata
+    # How many days of actual data span we have in this baseline (min..max timestamp)
+    total_history_days: Optional[int] = None
+    # True if baseline is still "warming up" (not enough history)
+    is_warming_up: bool = False
+    # "low" / "normal" for now; can be extended later
+    confidence_level: Optional[str] = None
 
 
 def compute_baseline_profile(
@@ -140,6 +154,23 @@ def compute_baseline_profile(
         # No data in the lookback window – caller must handle None gracefully
         return None
 
+    # Compute actual history span for warm-up / confidence metadata
+    valid_timestamps: List[datetime] = [
+        r.timestamp for r in rows if r.timestamp is not None
+    ]
+    total_history_days: Optional[int] = None
+    is_warming_up: bool = False
+    confidence_level: Optional[str] = None
+
+    if valid_timestamps:
+        min_ts = min(valid_timestamps)
+        max_ts = max(valid_timestamps)
+        # Inclusive day span between first and last observation
+        span_days = (max_ts.date() - min_ts.date()).days + 1
+        total_history_days = span_days
+        is_warming_up = span_days < MIN_HISTORY_DAYS_FOR_CONFIDENT_BASELINE
+        confidence_level = "low" if is_warming_up else "normal"
+
     # Group values by (hour_of_day, is_weekend)
     group_values: Dict[Tuple[int, bool], List[float]] = defaultdict(list)
     all_values: List[float] = []
@@ -154,14 +185,14 @@ def compute_baseline_profile(
             continue
 
         hour_of_day = ts.hour
-        is_weekend = ts.weekday() >= 5
+        is_weekend_flag = ts.weekday() >= 5
 
-        group_values[(hour_of_day, is_weekend)].append(val)
+        group_values[(hour_of_day, is_weekend_flag)].append(val)
         all_values.append(val)
 
     # Build per-bucket statistics
     buckets: List[BaselineBucket] = []
-    for (hour_of_day, is_weekend), vals in group_values.items():
+    for (hour_of_day, is_weekend_flag), vals in group_values.items():
         if not vals:
             continue
 
@@ -179,7 +210,7 @@ def compute_baseline_profile(
         buckets.append(
             BaselineBucket(
                 hour_of_day=hour_of_day,
-                is_weekend=is_weekend,
+                is_weekend=is_weekend_flag,
                 mean_kwh=m,
                 std_kwh=s,
             )
@@ -212,6 +243,9 @@ def compute_baseline_profile(
         global_p50=global_p50,
         global_p90=global_p90,
         n_points=n,
+        total_history_days=total_history_days,
+        is_warming_up=is_warming_up,
+        confidence_level=confidence_level,
     )
 
 
@@ -330,6 +364,9 @@ def compute_site_insights(
                 "global_p50_kwh": baseline_profile_obj.global_p50,
                 "global_p90_kwh": baseline_profile_obj.global_p90,
                 "n_points": baseline_profile_obj.n_points,
+                "total_history_days": baseline_profile_obj.total_history_days,
+                "is_warming_up": baseline_profile_obj.is_warming_up,
+                "confidence_level": baseline_profile_obj.confidence_level,
                 "buckets": [
                     {
                         "hour_of_day": b.hour_of_day,
@@ -343,6 +380,19 @@ def compute_site_insights(
         except Exception:
             # Never let baseline-profile enrichment break the core insights
             baseline_profile_payload = None
+
+    # Derive top-level warm-up / confidence flags for this site's insights
+    total_history_days: Optional[int] = None
+    is_baseline_warming_up: bool = False
+    confidence_level: str = "normal"
+
+    if baseline_profile_obj is not None:
+        total_history_days = baseline_profile_obj.total_history_days
+        is_baseline_warming_up = bool(baseline_profile_obj.is_warming_up)
+        if baseline_profile_obj.confidence_level:
+            confidence_level = str(baseline_profile_obj.confidence_level)
+        else:
+            confidence_level = "low" if is_baseline_warming_up else "normal"
 
     # 2) Recent actuals
     recent_records = _load_site_recent(db, site_id, recent_start, recent_end)
@@ -432,6 +482,10 @@ def compute_site_insights(
         "below_baseline_hours": below_baseline_hours,
         "hours": hours_output,
         "generated_at": now.isoformat(),
+        # New warm-up / confidence metadata
+        "total_history_days": total_history_days,
+        "is_baseline_warming_up": is_baseline_warming_up,
+        "confidence_level": confidence_level,
     }
 
     # Phase 4.1: attach statistical baseline profile if available
@@ -616,10 +670,10 @@ def compute_site_forecast_stub(
 
     def _get_baseline_for(ts: datetime) -> float:
         hour = ts.hour
-        is_weekend = ts.weekday() >= 5
+        is_weekend_flag = ts.weekday() >= 5
 
         # Prefer exact (hour, weekend_flag)
-        b = bucket_index.get((hour, is_weekend))
+        b = bucket_index.get((hour, is_weekend_flag))
         if b is None:
             # Fallback: any bucket with same hour
             b = bucket_index.get((hour, True)) or bucket_index.get((hour, False))
@@ -664,4 +718,9 @@ def compute_site_forecast_stub(
         "generated_at": now.isoformat(),
         "method": "stub_baseline_v1",
         "points": points,
+        # Baseline warm-up metadata for the forecast as well
+        "baseline_total_history_days": baseline.total_history_days,
+        "baseline_is_warming_up": baseline.is_warming_up,
+        "baseline_confidence_level": baseline.confidence_level
+        or ("low" if baseline.is_warming_up else "normal"),
     }

@@ -60,6 +60,11 @@ class BaselineProfileOut(BaseModel):
 
     n_points: int
 
+    # Warm-up / confidence metadata
+    total_history_days: Optional[int] = None
+    is_warming_up: Optional[bool] = None
+    confidence_level: Optional[str] = None
+
     buckets: List[BaselineBucketOut]
 
 
@@ -86,6 +91,11 @@ class SiteInsightsOut(BaseModel):
     hours: List[HourBandOut]
     generated_at: str
 
+    # New: warm-up / confidence metadata for the site's baseline
+    total_history_days: Optional[int] = None
+    is_baseline_warming_up: Optional[bool] = None
+    confidence_level: Optional[str] = None
+
     # New: richer statistical baseline (optional)
     baseline_profile: Optional[BaselineProfileOut] = None
 
@@ -109,6 +119,11 @@ class SiteForecastOut(BaseModel):
     generated_at: str
     method: str  # e.g. "stub_baseline_v1"
 
+    # Warm-up metadata for the baseline underpinning this forecast
+    baseline_total_history_days: Optional[int] = None
+    baseline_is_warming_up: Optional[bool] = None
+    baseline_confidence_level: Optional[str] = None
+
     points: List[ForecastPointOut]
 
 
@@ -126,6 +141,11 @@ class SiteKpiOut(BaseModel):
     last_7d_kwh: float
     prev_7d_kwh: Optional[float] = None
     deviation_pct_7d: Optional[float] = None
+
+    # Warm-up / confidence metadata for the baseline used by the KPI
+    total_history_days: Optional[int] = None
+    is_baseline_warming_up: Optional[bool] = None
+    confidence_level: Optional[str] = None
 
 
 # ========= Routes =========
@@ -217,8 +237,21 @@ def get_site_insights(
             global_p50_kwh=baseline.global_p50,
             global_p90_kwh=baseline.global_p90,
             n_points=baseline.n_points,
+            total_history_days=baseline.total_history_days,
+            is_warming_up=baseline.is_warming_up,
+            confidence_level=baseline.confidence_level,
             buckets=bucket_outs,
         )
+
+    # --- Warm-up / confidence metadata from insights engine ---
+    raw_total_history_days = insights.get("total_history_days")
+    total_history_days: Optional[int] = (
+        int(raw_total_history_days) if raw_total_history_days is not None else None
+    )
+    is_baseline_warming_up: Optional[bool] = insights.get(
+        "is_baseline_warming_up"
+    )
+    confidence_level: Optional[str] = insights.get("confidence_level")
 
     # --- Assemble response, preserving existing keys ---
     return SiteInsightsOut(
@@ -235,6 +268,9 @@ def get_site_insights(
         below_baseline_hours=int(insights.get("below_baseline_hours", 0)),
         hours=hours_out,
         generated_at=str(insights.get("generated_at", "")),
+        total_history_days=total_history_days,
+        is_baseline_warming_up=is_baseline_warming_up,
+        confidence_level=confidence_level,
         baseline_profile=baseline_profile_out,
     )
 
@@ -295,6 +331,16 @@ def get_site_kpi(
             (last_24h_kwh - baseline_24h_kwh) / baseline_24h_kwh * 100.0
         )
 
+    # Warm-up / confidence metadata for the baseline underpinning this KPI
+    raw_total_history_days = insights_24h.get("total_history_days")
+    total_history_days: Optional[int] = (
+        int(raw_total_history_days) if raw_total_history_days is not None else None
+    )
+    is_baseline_warming_up: Optional[bool] = insights_24h.get(
+        "is_baseline_warming_up"
+    )
+    confidence_level: Optional[str] = insights_24h.get("confidence_level")
+
     # --- 7d: total actual over last 168h ---
     insights_7d: Optional[Dict[str, Any]] = compute_site_insights(
         db=db,
@@ -321,6 +367,9 @@ def get_site_kpi(
         last_7d_kwh=last_7d_kwh,
         prev_7d_kwh=prev_7d_kwh,
         deviation_pct_7d=deviation_pct_7d,
+        total_history_days=total_history_days,
+        is_baseline_warming_up=is_baseline_warming_up,
+        confidence_level=confidence_level,
     )
 
 
@@ -409,6 +458,8 @@ def get_site_forecast(
         ),
         generated_at=str(forecast.get("generated_at", "")),
         method=str(forecast.get("method", "stub_baseline_v1")),
-
+        baseline_total_history_days=forecast.get("baseline_total_history_days"),
+        baseline_is_warming_up=forecast.get("baseline_is_warming_up"),
+        baseline_confidence_level=forecast.get("baseline_confidence_level"),
         points=points_out,
     )

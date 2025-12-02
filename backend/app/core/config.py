@@ -1,6 +1,8 @@
 from functools import lru_cache
 from typing import List, Optional
 
+from json import loads as json_loads, JSONDecodeError
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -74,7 +76,11 @@ class Settings(BaseSettings):
             "https://cei-mvp.onrender.com"
         ),
         env="ALLOWED_ORIGINS",
-        description="Comma-separated list of allowed frontend origins.",
+        description=(
+            "Allowed frontend origins. Can be either a comma-separated string like "
+            '"http://localhost:5173,http://127.0.0.1:5173" or a JSON list like '
+            '["http://localhost:5173","http://127.0.0.1:5173"].'
+        ),
     )
 
     # API docs toggle
@@ -98,11 +104,44 @@ class Settings(BaseSettings):
 
     def origins_list(self) -> List[str]:
         """
-        Split ALLOWED_ORIGINS into a list for CORSMiddleware.
+        Normalize ALLOWED_ORIGINS / allowed_origins into a clean List[str] for CORSMiddleware.
+
+        Supports two formats:
+        - Comma-separated string:
+            ALLOWED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
+        - JSON array:
+            ALLOWED_ORIGINS=["http://127.0.0.1:5173","http://localhost:5173"]
         """
-        if not self.allowed_origins:
+        raw = self.allowed_origins
+        if not raw:
             return []
-        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+
+        # Already a list (very rare, but future-proof)
+        if isinstance(raw, list):
+            return [str(o).strip() for o in raw if str(o).strip()]
+
+        raw_str = str(raw).strip()
+
+        # Try JSON list first: ["http://...","http://..."]
+        if raw_str.startswith("[") and raw_str.endswith("]"):
+            try:
+                parsed = json_loads(raw_str)
+                if isinstance(parsed, list):
+                    return [str(o).strip() for o in parsed if str(o).strip()]
+            except JSONDecodeError:
+                # Fall back to naive split if JSON is malformed
+                pass
+
+        # Fallback: treat it as comma-separated list
+        return [o.strip() for o in raw_str.split(",") if o.strip()]
+
+    @property
+    def ALLOWED_ORIGINS(self) -> str:
+        """
+        Backwards-compatible alias so code that expects `settings.ALLOWED_ORIGINS`
+        still works. Under the hood we store it in `allowed_origins`.
+        """
+        return self.allowed_origins
 
     @property
     def stripe_enabled(self) -> bool:

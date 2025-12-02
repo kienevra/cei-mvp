@@ -20,6 +20,10 @@ type SiteTrendMetrics = {
   totalKwh24h: number;
   deviationPct24h: number | null;
   expectedKwh24h: number | null;
+
+  // NEW: baseline warm-up metadata (optional; best-effort from KPI)
+  isBaselineWarmingUp?: boolean;
+  totalHistoryDays?: number | null;
 };
 
 const SitesList: React.FC = () => {
@@ -64,6 +68,7 @@ const SitesList: React.FC = () => {
               };
 
               try {
+                // keep this as any so we can read future fields without breaking TS
                 const kpi: any = await getSiteKpi(siteKey);
 
                 const total24 =
@@ -83,10 +88,34 @@ const SitesList: React.FC = () => {
                     ? kpi.baseline_24h_kwh
                     : null;
 
+                // NEW: baseline warm-up flags (best-effort)
+                const isBaselineWarmingUpFromApi =
+                  typeof kpi?.is_baseline_warming_up === "boolean"
+                    ? Boolean(kpi.is_baseline_warming_up)
+                    : undefined;
+
+                const totalHistoryDaysFromApi =
+                  typeof kpi?.total_history_days === "number"
+                    ? kpi.total_history_days
+                    : undefined;
+
+                // Heuristic fallback:
+                // if we have energy but no deviation yet, baseline is effectively still "learning"
+                const heuristicWarmingUp =
+                  isBaselineWarmingUpFromApi === undefined &&
+                  total24 > 0 &&
+                  (dev24 === null || expected24 === null);
+
                 metrics = {
                   totalKwh24h: total24,
                   deviationPct24h: dev24,
                   expectedKwh24h: expected24,
+                  isBaselineWarmingUp:
+                    isBaselineWarmingUpFromApi ?? heuristicWarmingUp,
+                  totalHistoryDays:
+                    totalHistoryDaysFromApi !== undefined
+                      ? totalHistoryDaysFromApi
+                      : null,
                 };
               } catch (_e) {
                 // If KPI fails (no data, 404, etc.), keep neutral defaults
@@ -94,6 +123,8 @@ const SitesList: React.FC = () => {
                   totalKwh24h: 0,
                   deviationPct24h: null,
                   expectedKwh24h: null,
+                  isBaselineWarmingUp: false,
+                  totalHistoryDays: null,
                 };
               }
 
@@ -416,7 +447,20 @@ const SitesList: React.FC = () => {
 
                     if (metrics && metrics.totalKwh24h > 0) {
                       const dev = metrics.deviationPct24h;
-                      if (typeof dev === "number") {
+                      const isWarming =
+                        metrics.isBaselineWarmingUp === true ||
+                        (!Number.isFinite(dev as number) &&
+                          metrics.expectedKwh24h !== null);
+
+                      if (isWarming) {
+                        const days = metrics.totalHistoryDays;
+                        const daysLabel =
+                          typeof days === "number" && days > 0
+                            ? ` · ~${days}d history`
+                            : "";
+                        pillClassName = "cei-pill cei-pill-neutral";
+                        trendLabel = `Learning baseline (24h${daysLabel})`;
+                      } else if (typeof dev === "number") {
                         const absPct = `${Math.abs(dev).toFixed(1)}%`;
 
                         // Positive deviation = above baseline (worse)
@@ -438,8 +482,9 @@ const SitesList: React.FC = () => {
                           trendLabel = "● Near baseline (24h)";
                         }
                       } else {
-                        trendLabel = "Baseline not ready (24h)";
+                        // energy is present but we couldn't classify
                         pillClassName = "cei-pill cei-pill-neutral";
+                        trendLabel = "Learning baseline (24h)";
                       }
                     }
 

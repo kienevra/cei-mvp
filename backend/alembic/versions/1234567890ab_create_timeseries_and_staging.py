@@ -1,12 +1,11 @@
-"""create timeseries_record and staging_upload tables
+"""Initial timeseries/staging migration (no-op for SQLite dev).
 
-Revision ID: 1234567890ab
-Revises: None
-Create Date: 2025-10-23 00:00:00.000000
-
+In this SQLite dev setup, the timeseries-related tables are created via
+SQLAlchemy's Base.metadata.create_all() in app.db.init_sqlite_db, not via Alembic.
 """
-from alembic import op
-import sqlalchemy as sa
+
+from alembic import op  # noqa: F401
+import sqlalchemy as sa  # noqa: F401
 
 # revision identifiers, used by Alembic.
 revision = "1234567890ab"
@@ -15,48 +14,21 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade():
-    op.create_table(
-        "staging_upload",
-        sa.Column("id", sa.String(), primary_key=True),
-        sa.Column("organization_id", sa.Integer(), nullable=False),
-        sa.Column("filename", sa.String(), nullable=False),
-        sa.Column("content", sa.LargeBinary(), nullable=False),
-        sa.Column("content_type", sa.String(), nullable=False),
-        sa.Column("uploaded_by", sa.Integer(), nullable=True),
-        sa.Column("received_at", sa.DateTime(), nullable=True),
-        sa.Column("status", sa.String(), nullable=True),
-        sa.Column("metadata", sa.JSON(), nullable=True),
-    )
+def upgrade() -> None:
+    """
+    No-op for SQLite dev.
 
-    op.create_table(
-        "timeseries_record",
-        sa.Column("id", sa.String(), primary_key=True),
-        sa.Column("organization_id", sa.Integer(), nullable=False),
-        sa.Column("sensor_external_id", sa.String(), nullable=False),
-        sa.Column("timestamp", sa.DateTime(), nullable=False),
-        sa.Column("value", sa.Float(), nullable=False),
-        sa.Column("unit", sa.String(), nullable=True),
-        sa.Column(
-            "source_staging_id",
-            sa.String(),
-            sa.ForeignKey("staging_upload.id"),
-            nullable=True,
-        ),
-        sa.Column("created_at", sa.DateTime(), nullable=True),
-    )
-
-    # Add unique constraint only on databases that support ALTER TABLE properly.
-    # SQLite cannot ALTER constraints the same way Postgres can, so we skip it there.
-    bind = op.get_bind()
-    if bind.dialect.name != "sqlite":
-        op.create_unique_constraint(
-            "uq_sensor_timestamp",
-            "timeseries_record",
-            ["sensor_external_id", "timestamp"],
-        )
+    We intentionally do NOT create staging_upload or timeseries_record here.
+    Those tables are created by Base.metadata.create_all() in app.db.init_sqlite_db
+    so that the DB schema always matches the SQLAlchemy models.
+    """
+    pass
 
 
-def downgrade():
-    op.drop_table("timeseries_record")
-    op.drop_table("staging_upload")
+def downgrade() -> None:
+    """
+    No-op for SQLite dev.
+
+    If you ever need to drop timeseries-related tables, do it manually in SQLite.
+    """
+    pass
