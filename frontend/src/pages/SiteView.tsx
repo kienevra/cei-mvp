@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   getSite,
   getTimeseriesSummary,
@@ -115,6 +115,7 @@ function formatTimeRange(
 
 const SiteView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
   const [site, setSite] = useState<SiteRecord | null>(null);
   const [siteLoading, setSiteLoading] = useState(false);
@@ -416,6 +417,12 @@ const SiteView: React.FC = () => {
     downloadCsv(`cei_${safeSiteId}_timeseries.csv`, rows);
   };
 
+  // NEW: per-site upload entrypoint
+  const handleGoToUploadForSite = () => {
+    if (!siteKey) return;
+    navigate(`/upload?site_id=${encodeURIComponent(siteKey)}`);
+  };
+
   // NEW: small helpers for KPI block
   const formatPct = (value: number | null | undefined): string => {
     if (value === null || value === undefined) return "—";
@@ -642,6 +649,10 @@ const SiteView: React.FC = () => {
             textAlign: "right",
             fontSize: "0.8rem",
             color: "var(--cei-text-muted)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: "0.35rem",
           }}
         >
           {site?.location && (
@@ -666,6 +677,20 @@ const SiteView: React.FC = () => {
               Data window: {dataWindowLabel}
             </div>
           )}
+          {/* NEW: per-site scoped CSV upload entrypoint */}
+          <button
+            type="button"
+            className="cei-btn cei-btn-ghost"
+            onClick={handleGoToUploadForSite}
+            disabled={!siteKey}
+            style={{
+              marginTop: "0.4rem",
+              fontSize: "0.75rem",
+              padding: "0.25rem 0.7rem",
+            }}
+          >
+            Upload CSV for this site
+          </button>
         </div>
       </section>
 

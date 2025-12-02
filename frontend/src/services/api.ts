@@ -232,8 +232,22 @@ export async function getTimeseriesSeries(params: {
   return r.data;
 }
 
-export async function uploadCsv(formData: FormData) {
+/**
+ * CSV upload.
+ * - Global mode (current behaviour): uploadCsv(formData)
+ * - Per-site mode: uploadCsv(formData, { siteId: "site-7" }) -> ?site_id=site-7
+ */
+export async function uploadCsv(
+  formData: FormData,
+  opts?: { siteId?: string }
+) {
+  const params: Record<string, string> = {};
+  if (opts?.siteId) {
+    params.site_id = opts.siteId;
+  }
+
   const r = await api.post("/upload-csv", formData, {
+    params,
     headers: { "Content-Type": "multipart/form-data" },
   });
   return r.data;

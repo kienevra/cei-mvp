@@ -1,5 +1,6 @@
 // frontend/src/pages/CSVUpload.tsx
 import React, { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { uploadCsv } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
@@ -19,7 +20,7 @@ type StoredUploadSnapshot = CsvUploadBackendResult & {
 
 type UploadStatus = "idle" | "ready" | "validating" | "ingesting" | "done" | "error";
 
-const STORAGE_KEY = "cei_last_upload_result";
+const STORAGE_KEY_BASE = "cei_last_upload_result";
 
 function formatDateTimeLabel(raw?: string | null): string | null {
   if (!raw) return null;
@@ -35,6 +36,14 @@ function formatDateTimeLabel(raw?: string | null): string | null {
 }
 
 const CSVUpload: React.FC = () => {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const forcedSiteId = params.get("site_id");
+  const isPerSiteMode = !!forcedSiteId;
+  const storageKey = isPerSiteMode
+    ? `${STORAGE_KEY_BASE}_${forcedSiteId}`
+    : STORAGE_KEY_BASE;
+
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<UploadStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +55,7 @@ const CSVUpload: React.FC = () => {
   // Load last successful upload snapshot from localStorage
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(storageKey);
       if (!raw) return;
       const parsed = JSON.parse(raw) as StoredUploadSnapshot;
       if (parsed && typeof parsed.completedAt === "string") {
@@ -55,7 +64,7 @@ const CSVUpload: React.FC = () => {
     } catch {
       // ignore
     }
-  }, []);
+  }, [storageKey]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null);
@@ -90,8 +99,11 @@ const CSVUpload: React.FC = () => {
       const formData = new FormData();
       formData.append("file", file);
 
-      // Treat the single round-trip as validate + ingest
-      const data = (await uploadCsv(formData)) as CsvUploadBackendResult;
+      // If we have a forced site_id from the URL, route all rows to that site.
+      const data = (await uploadCsv(
+        formData,
+        forcedSiteId ? { siteId: forcedSiteId } : undefined
+      )) as CsvUploadBackendResult;
 
       // Briefly mark as "ingesting" to show intent, then "done"
       setStatus("ingesting");
@@ -105,7 +117,7 @@ const CSVUpload: React.FC = () => {
       setLastSnapshot(snapshot);
 
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+        localStorage.setItem(storageKey, JSON.stringify(snapshot));
       } catch {
         // ignore storage failures
       }
@@ -113,6 +125,7 @@ const CSVUpload: React.FC = () => {
       setStatus("done");
     } catch (e: any) {
       const msg =
+        e?.response?.data?.detail?.message ||
         e?.response?.data?.detail ||
         e?.message ||
         "Upload failed. Please check the file and try again.";
@@ -153,13 +166,19 @@ const CSVUpload: React.FC = () => {
       case "ingesting":
         return "Ingesting rows into the timeseries engine…";
       case "done":
-        return "Upload complete. The latest data will feed Dashboard, SiteView, Alerts, and Reports.";
+        return isPerSiteMode
+          ? "Upload complete. The latest data will feed this site’s charts, alerts, and reports."
+          : "Upload complete. The latest data will feed Dashboard, SiteView, Alerts, and Reports.";
       case "error":
         return "Upload failed. Review the error message and adjust the CSV.";
       default:
         return null;
     }
   })();
+
+  const endpointLabel = isPerSiteMode
+    ? `/api/v1/upload-csv?site_id=${forcedSiteId}`
+    : "/api/v1/upload-csv";
 
   return (
     <div className="dashboard-page">
@@ -180,7 +199,9 @@ const CSVUpload: React.FC = () => {
               letterSpacing: "-0.02em",
             }}
           >
-            Upload timeseries data
+            {isPerSiteMode
+              ? "Upload timeseries data for this site"
+              : "Upload timeseries data"}
           </h1>
           <p
             style={{
@@ -189,12 +210,40 @@ const CSVUpload: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Drag a CSV into CEI and we&apos;ll ingest energy readings into the
-            timeseries engine. Column{" "}
-            <code>order doesn&apos;t matter</code> as long as the headers
-            include <code>timestamp</code>, <code>value</code>,{" "}
-            <code>unit</code>, <code>site_id</code>, and <code>meter_id</code>.
+            {isPerSiteMode ? (
+              <>
+                You&apos;re uploading data for{" "}
+                <code>{forcedSiteId}</code>. CEI will ingest all rows into this
+                site. Column <code>order</code> doesn&apos;t matter; the engine
+                reads the header row. For this scoped upload, your CSV must
+                include at least <code>timestamp</code>, <code>value</code>,{" "}
+                <code>unit</code>, and <code>meter_id</code>. A{" "}
+                <code>site_id</code> column is optional and will be ignored for
+                routing.
+              </>
+            ) : (
+              <>
+                Drag a CSV into CEI and we&apos;ll ingest energy readings into
+                the timeseries engine. Column{" "}
+                <code>order doesn&apos;t matter</code> as long as the headers
+                include <code>timestamp</code>, <code>value</code>,{" "}
+                <code>unit</code>, <code>site_id</code>, and{" "}
+                <code>meter_id</code>.
+              </>
+            )}
           </p>
+          {isPerSiteMode && (
+            <div
+              style={{
+                marginTop: "0.4rem",
+                fontSize: "0.78rem",
+                color: "var(--cei-text-accent)",
+              }}
+            >
+              Scoped mode: all ingested rows will use{" "}
+              <code>site_id = {forcedSiteId}</code>.
+            </div>
+          )}
         </div>
         <div
           style={{
@@ -203,11 +252,14 @@ const CSVUpload: React.FC = () => {
             color: "var(--cei-text-muted)",
           }}
         >
-          <div>Endpoint: /api/v1/upload-csv</div>
+          <div>Endpoint: {endpointLabel}</div>
           <div>Auth: required</div>
           {lastSnapshot && lastCompletedLabel && (
             <div style={{ marginTop: "0.35rem" }}>
-              <div style={{ fontSize: "0.78rem" }}>Last successful upload</div>
+              <div style={{ fontSize: "0.78rem" }}>
+                Last successful upload
+                {isPerSiteMode ? " (this scope)" : ""}
+              </div>
               <div style={{ fontSize: "0.78rem" }}>
                 <span style={{ color: "var(--cei-text-accent)" }}>
                   {lastCompletedLabel}
@@ -277,11 +329,14 @@ const CSVUpload: React.FC = () => {
                     <li>
                       <code>unit</code> – e.g. <code>kWh</code>
                     </li>
+                    {!isPerSiteMode && (
+                      <li>
+                        <code>site_id</code> – e.g. <code>site-1</code>
+                      </li>
+                    )}
                     <li>
-                      <code>site_id</code> – e.g. <code>site-1</code>
-                    </li>
-                    <li>
-                      <code>meter_id</code> – e.g. <code>meter-main-1</code>
+                      <code>meter_id</code> – e.g. <code>meter-main-1</code>{" "}
+                      (if omitted, CEI will default to a generic meter id)
                     </li>
                   </ul>
                 </div>
@@ -310,6 +365,13 @@ const CSVUpload: React.FC = () => {
                   <li>
                     Use stable <code>site_id</code> values so dashboards can
                     build trends over time.
+                    {isPerSiteMode && (
+                      <>
+                        {" "}
+                        For this scoped upload CEI will enforce{" "}
+                        <code>{forcedSiteId}</code> on every row.
+                      </>
+                    )}
                   </li>
                   <li>
                     If you backfill older data, it will not change the “last 24
