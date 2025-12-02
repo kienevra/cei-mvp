@@ -153,12 +153,21 @@ body,
   height: 100%;
 }
 
+/* NEW: lock viewport width and prevent horizontal overflow / iOS auto zoom */
+html {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   font-family: var(--cei-font-sans);
   background: radial-gradient(circle at top left, #082f49 0, #020617 40%, #000 100%);
   color: var(--cei-text-main);
   -webkit-font-smoothing: antialiased;
+  max-width: 100%;
 }
 
 /* Scrollbar */
@@ -570,6 +579,7 @@ tbody tr:hover {
 @media (max-width: 767px) {
   main {
     padding: var(--cei-spacing-md);
+    max-width: 100%; /* NEW: ensure main never exceeds viewport */
   }
 
   .dashboard-page {
@@ -619,8 +629,13 @@ tbody tr:hover {
   }
 
   .cei-topnav {
-    padding: 0 1rem;
+    padding: 0 0.75rem;
     height: 52px;
+  }
+
+  /* NEW: ensure inner nav never exceeds viewport width */
+  .cei-topnav-inner {
+    max-width: 100%;
   }
 
   .cei-topnav-brand-sub {

@@ -16,7 +16,7 @@ export const baseURL = base
 
 const api = axios.create({
   baseURL,
-  timeout: 10000,
+  timeout: 30000, // was 10000 – allow more time for cold starts / slow responses
   // Needed so the HttpOnly refresh cookie is sent/received for cross-origin calls
   withCredentials: true,
 });
