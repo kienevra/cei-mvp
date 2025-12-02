@@ -438,7 +438,7 @@ const SiteView: React.FC = () => {
     return "cei-pill-neutral";
   };
 
-  const renderForecastCard = () => {
+    const renderForecastCard = () => {
     if (forecastLoading) {
       return (
         <section className="cei-card">
@@ -466,15 +466,43 @@ const SiteView: React.FC = () => {
       return null;
     }
 
-    const totalExpected = forecast!.points.reduce(
+    const points = forecast!.points;
+    const totalExpected = points.reduce(
       (sum, p) => sum + p.expected_kwh,
       0
     );
-    const peak = forecast!.points.reduce((max, p) =>
+    const peak = points.reduce((max, p) =>
       p.expected_kwh > max.expected_kwh ? p : max
     );
 
-    const firstSix = forecast!.points.slice(0, 6);
+    // Build forecast trend points for a bar chart (like the 24h site trend)
+    const forecastTrendPoints = points.map((p) => {
+      const dt = new Date(p.ts);
+      const label = dt.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      return {
+        label,
+        value: p.expected_kwh,
+      };
+    });
+
+    const forecastValues = forecastTrendPoints.map((p) => p.value);
+    const hasForecastTrend = forecastValues.length > 0;
+    const forecastMax = hasForecastTrend ? Math.max(...forecastValues) : 0;
+    const forecastMin = hasForecastTrend ? Math.min(...forecastValues) : 0;
+
+    const forecastChartContentWidth = hasForecastTrend
+      ? Math.max(forecastTrendPoints.length * barPixelWidth, minContentWidth)
+      : minContentWidth;
+
+    // Short textual summary
+    const peakTimeLabel = new Date(peak.ts).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
     return (
       <section className="cei-card">
@@ -501,6 +529,7 @@ const SiteView: React.FC = () => {
           </span>
         </div>
 
+        {/* KPI strip at the top, same as before */}
         <div
           className="cei-card-kpis"
           style={{
@@ -518,67 +547,101 @@ const SiteView: React.FC = () => {
           </div>
           <div className="cei-kpi">
             <div className="cei-kpi-label">Peak hour (forecast)</div>
-            <div className="cei-kpi-value">
-              {new Date(peak.ts).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </div>
+            <div className="cei-kpi-value">{peakTimeLabel}</div>
             <div className="cei-kpi-subvalue">
               {peak.expected_kwh.toFixed(1)} kWh
             </div>
           </div>
         </div>
 
+        {/* Forecast trend chart – mirrors the 24h site energy chart style */}
         <div
-          className="cei-forecast-strip"
+          className="cei-trend-scroll"
           style={{
-            marginTop: "0.9rem",
-            display: "flex",
-            gap: "0.6rem",
+            marginTop: "0.8rem",
+            borderRadius: "0.75rem",
+            border: "1px solid rgba(148, 163, 184, 0.5)",
+            background:
+              "radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.95))",
+            padding: "0.75rem",
+            boxSizing: "border-box",
+            maxWidth: "100%",
             overflowX: "auto",
+            overflowY: "hidden",
           }}
         >
-          {firstSix.map((p) => {
-            const dt = new Date(p.ts);
-            const label = dt.toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-            return (
-              <div
-                key={p.ts}
-                className="cei-forecast-slot"
-                style={{
-                  flex: "0 0 auto",
-                  minWidth: "70px",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                }}
-              >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "flex-start",
+              gap: "0.5rem",
+              height: "200px",
+              width: `${forecastChartContentWidth}px`,
+              boxSizing: "border-box",
+            }}
+          >
+            {forecastTrendPoints.map((p, idx) => {
+              const val = p.value;
+
+              let heightPx = 0;
+              if (hasForecastTrend && forecastMax > 0) {
+                if (forecastMax > forecastMin) {
+                  const ratio =
+                    (val - forecastMin) / (forecastMax - forecastMin || 1);
+                  heightPx = baseBarHeightPx + ratio * maxBarHeightPx;
+                } else {
+                  // all equal > 0
+                  heightPx = baseBarHeightPx + maxBarHeightPx;
+                }
+              }
+
+              return (
                 <div
-                  className="cei-forecast-value"
+                  key={`${idx}-${p.label}`}
                   style={{
-                    fontSize: "0.8rem",
-                    fontWeight: 600,
+                    flex: "0 0 auto",
+                    width: "32px",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "flex-end",
+                    gap: "0.25rem",
                   }}
                 >
-                  {p.expected_kwh.toFixed(1)}
+                  <span
+                    style={{
+                      fontSize: "0.6rem",
+                      color: "var(--cei-text-muted)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {val.toFixed(0)}
+                  </span>
+                  <div
+                    style={{
+                      width: "100%",
+                      borderRadius: "4px",
+                      background:
+                        "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
+                      height: `${heightPx}px`,
+                      boxShadow: "0 6px 18px rgba(56, 189, 248, 0.45)",
+                      border: "1px solid rgba(226, 232, 240, 0.8)",
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: "0.65rem",
+                      color: "var(--cei-text-muted)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {p.label}
+                  </span>
                 </div>
-                <div
-                  className="cei-forecast-time"
-                  style={{
-                    marginTop: "0.15rem",
-                    fontSize: "0.7rem",
-                    color: "var(--cei-text-muted)",
-                  }}
-                >
-                  {label}
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
 
         <p
@@ -591,11 +654,13 @@ const SiteView: React.FC = () => {
           Based on a{" "}
           <strong>{forecast!.baseline_lookback_days}-day</strong> baseline and{" "}
           <strong>{forecast!.history_window_hours}-hour</strong> recent
-          performance window.
+          performance window. Use this strip as a forward-looking mirror of the
+          last 24h trend chart above.
         </p>
       </section>
     );
   };
+
 
   return (
     <div
