@@ -55,6 +55,14 @@ const TopNav: React.FC = () => {
     logout();
   };
 
+  const toggleMenu = () => {
+    setMenuOpen((prev) => !prev);
+  };
+
+  const closeMenu = () => {
+    setMenuOpen(false);
+  };
+
   return (
     <header className="cei-topnav">
       <div className="cei-topnav-inner">
@@ -98,78 +106,103 @@ const TopNav: React.FC = () => {
         <div className="cei-mobile-menu-toggle">
           <button
             type="button"
-            aria-label="Open navigation menu"
+            aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
             className="cei-btn cei-btn-ghost"
-            onClick={() => setMenuOpen((prev) => !prev)}
+            onClick={toggleMenu}
           >
             ⋮
           </button>
         </div>
       </div>
 
-      {/* Mobile dropdown menu */}
+      {/* Mobile overlay + dropdown menu */}
       {menuOpen && (
-        <div className="cei-mobile-menu">
-          <div className="cei-mobile-menu-list">
-            {navItems.map((item) => {
-              const active = location.pathname === item.path;
-              return (
-                <button
-                  key={item.path}
-                  type="button"
-                  className="cei-mobile-menu-link"
-                  onClick={() => handleNavClick(item.path)}
-                >
-                  <span>{item.label}</span>
-                  {active && (
-                    <span
-                      style={{
-                        fontSize: "0.7rem",
-                        opacity: 0.7,
-                        marginLeft: 8,
-                      }}
-                    >
-                      ●
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+        <div
+          className="cei-mobile-menu-overlay"
+          onClick={closeMenu}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 40,
+            background: "rgba(15, 23, 42, 0.65)",
+            backdropFilter: "blur(2px)",
+          }}
+        >
+          <div
+            className="cei-mobile-menu"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "absolute",
+              top: "3.25rem",
+              right: "0.75rem",
+              left: "0.75rem",
+              borderRadius: "0.9rem",
+              background: "rgba(15, 23, 42, 0.98)",
+              border: "1px solid rgba(31, 41, 55, 0.85)",
+              boxShadow: "0 18px 40px rgba(15, 23, 42, 0.9)",
+            }}
+          >
+            <div className="cei-mobile-menu-list">
+              {navItems.map((item) => {
+                const active = location.pathname === item.path;
+                return (
+                  <button
+                    key={item.path}
+                    type="button"
+                    className="cei-mobile-menu-link"
+                    onClick={() => handleNavClick(item.path)}
+                  >
+                    <span>{item.label}</span>
+                    {active && (
+                      <span
+                        style={{
+                          fontSize: "0.7rem",
+                          opacity: 0.7,
+                          marginLeft: 8,
+                        }}
+                      >
+                        ●
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
 
-          <div className="cei-mobile-menu-footer">
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "0.2rem",
-              }}
-            >
-              {/* Environment badge on mobile */}
-              <span
-                className={envClass}
-                title={envTitle}
+            <div className="cei-mobile-menu-footer">
+              <div
                 style={{
-                  alignSelf: "flex-start",
-                  fontSize: "0.7rem",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  padding: "0.15rem 0.45rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.2rem",
                 }}
               >
-                {envLabel}
-              </span>
+                {/* Environment badge on mobile */}
+                <span
+                  className={envClass}
+                  title={envTitle}
+                  style={{
+                    alignSelf: "flex-start",
+                    fontSize: "0.7rem",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    padding: "0.15rem 0.45rem",
+                  }}
+                >
+                  {envLabel}
+                </span>
 
-              <span>{user?.email ? user.email : "Signed in"}</span>
+                <span>{user?.email ? user.email : "Signed in"}</span>
+              </div>
+              <button
+                type="button"
+                className="cei-btn cei-btn-danger"
+                style={{ padding: "0.3rem 0.7rem", fontSize: "0.78rem" }}
+                onClick={handleLogoutClick}
+              >
+                Logout
+              </button>
             </div>
-            <button
-              type="button"
-              className="cei-btn cei-btn-danger"
-              style={{ padding: "0.3rem 0.7rem", fontSize: "0.78rem" }}
-              onClick={handleLogoutClick}
-            >
-              Logout
-            </button>
           </div>
         </div>
       )}
