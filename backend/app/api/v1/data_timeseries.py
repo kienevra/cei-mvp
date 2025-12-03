@@ -1,10 +1,11 @@
 # backend/app/api/v1/data_timeseries.py
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 import csv
 import io
+import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -14,8 +15,12 @@ from app.api.v1.auth import get_current_user
 from app.db.session import get_db
 from app.models import TimeseriesRecord
 from app.api import deps  # org-scoping helpers
+from app.services.ingest import ingest_timeseries_batch as ingest_batch_service
+from app.core.rate_limit import timeseries_batch_rate_limit
 
 router = APIRouter(prefix="/timeseries", tags=["timeseries"])
+
+logger = logging.getLogger("cei.timeseries")
 
 
 class TimeseriesSummary(BaseModel):
@@ -39,6 +44,41 @@ class TimeseriesSeries(BaseModel):
     window_hours: int
     resolution: str  # "hour" or "day"
     points: List[TimeseriesPoint]
+
+
+class TimeseriesBatchRecord(BaseModel):
+    """
+    Payload shape for a single record in /timeseries/batch.
+
+    Note:
+    - timestamp_utc is required and must be ISO8601, UTC.
+    - unit is locked to "kWh" for v1 (if provided).
+    - idempotency_key is optional but recommended for integrators.
+    """
+    site_id: str
+    meter_id: str
+    timestamp_utc: datetime
+    value: float
+    unit: Optional[str] = "kWh"
+    idempotency_key: Optional[str] = None
+
+
+class TimeseriesBatchRequest(BaseModel):
+    records: List[TimeseriesBatchRecord]
+    source: Optional[str] = None
+
+
+class TimeseriesBatchError(BaseModel):
+    index: int
+    code: str
+    detail: str
+
+
+class TimeseriesBatchResponse(BaseModel):
+    ingested: int
+    skipped_duplicate: int
+    failed: int
+    errors: List[TimeseriesBatchError]
 
 
 @router.get("/summary", response_model=TimeseriesSummary)
@@ -227,6 +267,76 @@ def export_timeseries_csv(
     }
 
     return StreamingResponse(iter_csv(), media_type="text/csv", headers=headers)
+
+
+@router.post(
+    "/batch",
+    response_model=TimeseriesBatchResponse,
+    dependencies=[Depends(timeseries_batch_rate_limit)],
+)
+def create_timeseries_batch(
+    payload: TimeseriesBatchRequest,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Direct ingestion endpoint for integrators and backends.
+
+    Phase #3:
+    - Accepts JSON records with {site_id, meter_id, timestamp_utc, value, unit, idempotency_key}.
+    - Uses the same org-scoping model as the rest of the app (currently via user.org).
+    - Internally delegates to app.services.ingest.ingest_timeseries_batch.
+
+    NOTE:
+    - At this stage, auth is user-based (JWT). Integration tokens will plug in
+      later via a dedicated dependency that resolves organization_id from a
+      long-lived token instead of a user session.
+    """
+    if not payload.records:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="records must be a non-empty list",
+        )
+
+    org_id = getattr(user, "organization_id", None)
+
+    # Convert Pydantic models to plain dicts before handing off to the service.
+    records = [r.dict() for r in payload.records]
+
+    result_dict = ingest_batch_service(
+        records=records,
+        organization_id=org_id,
+        source=payload.source,
+        db=db,
+    )
+
+    # Structured log for observability
+    logger.info(
+        "timeseries_batch_ingest org_id=%s source=%s records=%d ingested=%d skipped_duplicate=%d failed=%d",
+        org_id,
+        payload.source or "",
+        len(records),
+        result_dict.get("ingested", 0),
+        result_dict.get("skipped_duplicate", 0),
+        result_dict.get("failed", 0),
+    )
+
+    # Map raw dict errors into TimeseriesBatchError for the response model.
+    errors = [
+        TimeseriesBatchError(
+            index=err.get("index", -1),
+            code=err.get("code", "UNKNOWN"),
+            detail=err.get("detail", ""),
+        )
+        for err in result_dict.get("errors", [])
+    ]
+
+    return TimeseriesBatchResponse(
+        ingested=result_dict.get("ingested", 0),
+        skipped_duplicate=result_dict.get("skipped_duplicate", 0),
+        failed=result_dict.get("failed", 0),
+        errors=errors,
+    )
 
 
 def _bucket_timestamp(ts: datetime, resolution: str) -> datetime:

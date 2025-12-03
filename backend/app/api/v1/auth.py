@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta
 import logging
-from typing import Optional
+from typing import Optional, List
+from dataclasses import dataclass
+import hashlib
+import secrets
 
 from fastapi import (
     APIRouter,
@@ -18,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import User, Organization  # <- NOTE: import Organization
+from app.db.models import IntegrationToken  # <- integration tokens live here
 from app.core.rate_limit import login_rate_limit, refresh_rate_limit
 from app.core.config import settings
 
@@ -48,6 +52,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 REFRESH_COOKIE_NAME = "cei_refresh_token"
+INTEGRATION_TOKEN_PREFIX = "cei_int_"  # human-visible prefix for integration tokens
 
 
 # === Schemas ===
@@ -113,6 +118,48 @@ class AccountMeOut(BaseModel):
         orm_mode = True
 
 
+class IntegrationTokenCreate(BaseModel):
+    """
+    Payload to create a new integration token for the caller's org.
+    """
+    name: str
+
+
+class IntegrationTokenOut(BaseModel):
+    """
+    Metadata for listing integration tokens (no secret).
+    """
+    id: int
+    name: str
+    is_active: bool
+    created_at: datetime
+    last_used_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+
+class IntegrationTokenWithSecret(IntegrationTokenOut):
+    """
+    Response when creating a token: includes the one-time raw token.
+    """
+    token: str
+
+
+@dataclass
+class OrgContext:
+    """
+    Represents an org-scoped principal resolved from a Bearer token.
+
+    - auth_type = "user"        -> interactive user JWT
+    - auth_type = "integration" -> long-lived integration token
+    """
+    organization_id: Optional[int]
+    user: Optional[User] = None
+    integration_token_id: Optional[int] = None
+    auth_type: str = "user"
+
+
 # === Token helpers ===
 
 
@@ -153,6 +200,20 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
 
 def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(REFRESH_COOKIE_NAME, path="/")
+
+
+def _hash_integration_token(raw: str) -> str:
+    """
+    Deterministic hash for integration tokens. Only the hash is stored in DB.
+    """
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _generate_integration_token_string() -> str:
+    """
+    Generate a new raw integration token string with a recognizable prefix.
+    """
+    return INTEGRATION_TOKEN_PREFIX + secrets.token_urlsafe(32)
 
 
 # === Routes ===
@@ -393,6 +454,68 @@ def get_current_user(
     return user
 
 
+def get_org_context(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> OrgContext:
+    """
+    Resolve an org-scoped principal from a Bearer token.
+
+    - First try to treat it as a normal access JWT (user).
+    - If that fails, treat it as an integration token and resolve organization_id from IntegrationToken.
+    """
+    # 1) Try as access JWT (user)
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        token_type = payload.get("type", "access")
+        if token_type == "access":
+            email: Optional[str] = payload.get("sub")
+            if email:
+                user = db.query(User).filter(User.email == email).first()
+                if user:
+                    return OrgContext(
+                        organization_id=user.organization_id,
+                        user=user,
+                        integration_token_id=None,
+                        auth_type="user",
+                    )
+    except JWTError:
+        # fall through to integration token path
+        pass
+
+    # 2) Try as integration token (opaque string)
+    token_hash = _hash_integration_token(token)
+    integ = (
+        db.query(IntegrationToken)
+        .filter(
+            IntegrationToken.token_hash == token_hash,
+            IntegrationToken.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
+    if not integ:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Best-effort last_used_at update; don't let failures break the request
+    try:
+        integ.last_used_at = datetime.utcnow()
+        db.add(integ)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    return OrgContext(
+        organization_id=integ.organization_id,
+        user=None,
+        integration_token_id=integ.id,
+        auth_type="integration",
+    )
+
+
 @router.get("/me", response_model=AccountMeOut)
 def read_me(
     current_user: User = Depends(get_current_user),
@@ -476,3 +599,104 @@ def read_me(
         enable_reports=enable_reports,
         subscription_status=subscription_status,
     )
+
+
+# === Integration token management endpoints ===
+
+
+@router.post("/integration-tokens", response_model=IntegrationTokenWithSecret)
+def create_integration_token(
+    payload: IntegrationTokenCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Create a new long-lived integration token for the caller's organization.
+
+    - Returns the raw token string ONCE (caller must store it).
+    - Stores only a hash server-side.
+    """
+    if not current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not attached to an organization",
+        )
+
+    raw_token = _generate_integration_token_string()
+    token_hash = _hash_integration_token(raw_token)
+
+    db_token = IntegrationToken(
+        organization_id=current_user.organization_id,
+        name=payload.name.strip() if payload.name.strip() else "Integration token",
+        token_hash=token_hash,
+        is_active=True,
+    )
+
+    db.add(db_token)
+    db.commit()
+    db.refresh(db_token)
+
+    return IntegrationTokenWithSecret(
+        id=db_token.id,
+        name=db_token.name,
+        is_active=db_token.is_active,
+        created_at=db_token.created_at,
+        last_used_at=db_token.last_used_at,
+        token=raw_token,
+    )
+
+
+@router.get("/integration-tokens", response_model=List[IntegrationTokenOut])
+def list_integration_tokens(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    List integration tokens for the caller's organization (metadata only, no secrets).
+    """
+    if not current_user.organization_id:
+        return []
+
+    tokens = (
+        db.query(IntegrationToken)
+        .filter(IntegrationToken.organization_id == current_user.organization_id)
+        .order_by(IntegrationToken.created_at.desc())
+        .all()
+    )
+    return tokens
+
+
+@router.delete("/integration-tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_integration_token(
+    token_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Soft-revoke an integration token (is_active = False).
+    """
+    if not current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not attached to an organization",
+        )
+
+    token = (
+        db.query(IntegrationToken)
+        .filter(
+            IntegrationToken.id == token_id,
+            IntegrationToken.organization_id == current_user.organization_id,
+        )
+        .first()
+    )
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Integration token not found",
+        )
+
+    token.is_active = False
+    db.add(token)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

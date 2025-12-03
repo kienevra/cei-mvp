@@ -63,12 +63,19 @@ REFRESH_RATE_WINDOW = int(os.getenv("REFRESH_RATE_WINDOW", "60"))  # 60 per 60s
 CSV_UPLOAD_LIMIT = int(os.getenv("CSV_UPLOAD_LIMIT", "20"))
 CSV_UPLOAD_WINDOW = int(os.getenv("CSV_UPLOAD_WINDOW", str(60 * 60)))  # 20 per hour
 
+# Timeseries batch ingestion limiter
+TIMESERIES_BATCH_LIMIT = int(os.getenv("TIMESERIES_BATCH_LIMIT", "120"))
+TIMESERIES_BATCH_WINDOW = int(os.getenv("TIMESERIES_BATCH_WINDOW", "60"))  # 120 per 60s
 
-# These are used as FastAPI dependencies (Depends(login_rate_limit), etc.)
+
+# These are used as FastAPI dependencies (Depends(...), etc.)
 login_rate_limit = SimpleRateLimiter("login", LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW)
 refresh_rate_limit = SimpleRateLimiter(
     "refresh", REFRESH_RATE_LIMIT, REFRESH_RATE_WINDOW
 )
 csv_upload_rate_limit = SimpleRateLimiter(
     "csv_upload", CSV_UPLOAD_LIMIT, CSV_UPLOAD_WINDOW
+)
+timeseries_batch_rate_limit = SimpleRateLimiter(
+    "timeseries_batch", TIMESERIES_BATCH_LIMIT, TIMESERIES_BATCH_WINDOW
 )

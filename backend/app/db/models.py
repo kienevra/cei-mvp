@@ -1,6 +1,6 @@
 # backend/app/db/models.py
 
-from sqlalchemy import Column, Integer, String, DateTime, Text
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean
 from sqlalchemy.sql import func
 
 from app.db.base import Base
@@ -69,4 +69,40 @@ class SiteEvent(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+
+
+class IntegrationToken(Base):
+    """
+    Long-lived org-scoped integration token.
+
+    Only the hashed token is stored in DB. The raw token is returned once
+    at creation time via /auth/integration-tokens.
+    """
+
+    __tablename__ = "integration_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Underlying DB column is "org_id" (matches the SQL error you saw)
+    organization_id = Column("org_id", Integer, index=True, nullable=False)
+
+    name = Column(String(255), nullable=False)
+    token_hash = Column(String(255), nullable=False, unique=True, index=True)
+
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="1",
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    last_used_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
     )
