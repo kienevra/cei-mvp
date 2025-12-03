@@ -151,7 +151,13 @@ html,
 body,
 #root {
   height: 100%;
+  min-height: 100%;
 }
+
+#root {
+  min-height: 100vh;
+}
+
 
 /* NEW: lock viewport width and prevent horizontal overflow / iOS auto zoom */
 html {
@@ -159,16 +165,36 @@ html {
   max-width: 100%;
   overflow-x: hidden;
   -webkit-text-size-adjust: 100%;
+  /* Ensure overscroll / pull-to-refresh never exposes a white page */
+  background-color: #020617;
 }
+
 
 body {
   margin: 0;
   font-family: var(--cei-font-sans);
-  background: radial-gradient(circle at top left, #082f49 0, #020617 40%, #000 100%);
   color: var(--cei-text-main);
   -webkit-font-smoothing: antialiased;
   max-width: 100%;
+  position: relative;
+  background: transparent; /* gradient handled by fixed layer below */
 }
+
+/* Fixed dark-blue background that stays put while cards scroll */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at top left,
+    #082f49 0,
+    #020617 40%,
+    #000 100%
+  );
+}
+
 
 /* Scrollbar */
 ::-webkit-scrollbar {
