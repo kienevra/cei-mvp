@@ -118,24 +118,41 @@ const Login: React.FC = () => {
         >
           <div
             style={{
-              fontSize: "0.8rem",
-              textTransform: "uppercase",
-              letterSpacing: "0.18em",
-              color: "var(--cei-text-muted)",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.6rem",
             }}
           >
-            CEI · Carbon Efficiency Intelligence
+            <img
+              src="/cei-logo-full.png"
+              alt="CEI – Carbon Efficiency Intelligence"
+              style={{
+                height: "56px",
+                width: "auto",
+                display: "block",
+              }}
+            />
+            <div
+              style={{
+                fontSize: "0.8rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.18em",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              CEI · Carbon Efficiency Intelligence
+            </div>
           </div>
 
           <div className="auth-title">
-            Cut 5–15% of your plant’s energy spend without installing a single
-            new sensor.
+            We help factories quantify and cut wasted energy.
           </div>
 
           <div className="auth-subtitle">
-            CEI (Carbon Efficiency Intelligence) connects to the data you
-            already have, uncovers hidden operational waste, and turns it into
-            quantified savings in under 6 weeks.
+            CEI ingests your meter and SCADA data, builds statistical baselines
+            for each site, and turns night, weekend, and process inefficiencies
+            into actionable alerts and reports – without installing new
+            hardware.
           </div>
         </div>
 
@@ -164,9 +181,7 @@ const Login: React.FC = () => {
                   ? "linear-gradient(135deg, #22d3ee, #0ea5e9)"
                   : "transparent",
               color:
-                mode === "login"
-                  ? "#0f172a"
-                  : "var(--cei-text-muted)",
+                mode === "login" ? "#0f172a" : "var(--cei-text-muted)",
               fontWeight: mode === "login" ? 600 : 400,
               cursor: "pointer",
             }}
@@ -188,9 +203,7 @@ const Login: React.FC = () => {
                   ? "linear-gradient(135deg, #22d3ee, #0ea5e9)"
                   : "transparent",
               color:
-                mode === "signup"
-                  ? "#0f172a"
-                  : "var(--cei-text-muted)",
+                mode === "signup" ? "#0f172a" : "var(--cei-text-muted)",
               fontWeight: mode === "signup" ? 600 : 400,
               cursor: "pointer",
             }}

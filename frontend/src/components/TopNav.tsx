@@ -66,11 +66,29 @@ const TopNav: React.FC = () => {
   return (
     <header className="cei-topnav">
       <div className="cei-topnav-inner">
-        <div className="cei-topnav-brand">
-          <span className="cei-topnav-brand-main">CEI</span>
-          <span className="cei-topnav-brand-sub">
-            Carbon Efficiency Intelligence
-          </span>
+        <div
+          className="cei-topnav-brand"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.6rem",
+          }}
+        >
+          <img
+            src="/cei-logo-icon.png"
+            alt="CEI logo"
+            style={{
+              height: "40px",
+              width: "auto",
+              display: "block",
+            }}
+          />
+          <div>
+            <span className="cei-topnav-brand-main">CEI</span>
+            <span className="cei-topnav-brand-sub">
+              Carbon Efficiency Intelligence
+            </span>
+          </div>
         </div>
 
         {/* Desktop user info (hidden on mobile) */}
