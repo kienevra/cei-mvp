@@ -21,13 +21,23 @@ const api = axios.create({
   withCredentials: true,
 });
 
-// Attach access token on every request
+// Attach access token on every request except auth login/signup/refresh
 api.interceptors.request.use((cfg) => {
   const token = localStorage.getItem("cei_token");
-  if (token) {
-    cfg.headers = cfg.headers || {};
-    cfg.headers.Authorization = `Bearer ${token}`;
+  if (!token) {
+    return cfg;
   }
+
+  const url = cfg.url || "";
+
+  // Do NOT send stale tokens to login/signup/refresh.
+  // All other /auth/* endpoints (like /auth/integration-tokens) stay authenticated.
+  if (isAuthPath(url)) {
+    return cfg;
+  }
+
+  cfg.headers = cfg.headers || {};
+  cfg.headers.Authorization = `Bearer ${token}`;
   return cfg;
 });
 
