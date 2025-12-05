@@ -1,50 +1,69 @@
 # backend/app/api/v1/health.py
 
-import logging
-from typing import Any, Dict
+"""
+Health endpoints for CEI backend.
 
-from fastapi import APIRouter, Depends, HTTPException, status
+- /api/v1/health       -> lightweight liveness (no DB)
+- /api/v1/health/db    -> DB readiness probe (small SELECT 1)
+"""
+
+import logging
+import time
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.db.session import get_db
+from app.core.config import settings
 
-logger = logging.getLogger("cei")
+logger = logging.getLogger("cei.health")
 
-router = APIRouter(tags=["health"])
+router = APIRouter(prefix="/health", tags=["health"])
 
 
-@router.get("/health", include_in_schema=False)
-def health(db: Session = Depends(get_db)) -> Dict[str, Any]:
+@router.get("", summary="Liveness probe")
+def health():
     """
-    Lightweight health endpoint used by the frontend and platform.
+    Lightweight liveness check used by Render/infra.
 
-    - Verifies the app is up.
-    - Executes a trivial `SELECT 1` against the database.
-    - Returns 200 OK if both succeed, 503 if DB is not reachable.
-
-    Final path (via main.py include) -> /api/v1/health
+    - Does NOT touch the database.
+    - Returns 200 as long as the app process is up and routing works.
     """
-    # Base payload
-    payload: Dict[str, Any] = {
+    return {
         "status": "ok",
-        "environment": settings.environment,
+        "service": "cei-backend",
+        "version": getattr(settings, "version", "dev"),
+        "timestamp_utc": datetime.utcnow().isoformat() + "Z",
     }
 
+
+@router.get("/db", summary="Database readiness probe")
+def health_db(db: Session = Depends(get_db)):
+    """
+    Readiness / dependency check.
+
+    - Performs a tiny `SELECT 1` against the configured database.
+    - Returns 200 when DB is reachable, 503 when not.
+    - Never hangs indefinitely; surfaces failure in JSON.
+    """
+    start = time.perf_counter()
     try:
         db.execute(text("SELECT 1"))
-        payload["database"] = "ok"
-        return payload
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        return {
+            "status": "ok",
+            "db": "up",
+            "latency_ms": elapsed_ms,
+        }
     except Exception as exc:
-        logger.error("Health check DB failure: %s", exc)
-        # We still tell the caller what's wrong, but with a 503 so
-        # load balancers / orchestrators can see this as unhealthy.
+        logger.exception("DB health check failed")
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=503,
             detail={
-                "status": "degraded",
-                "environment": settings.environment,
-                "database": "unreachable",
+                "status": "error",
+                "db": "down",
+                "error": str(exc),
             },
         )
