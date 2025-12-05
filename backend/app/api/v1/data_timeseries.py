@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, get_org_context, OrgContext
 from app.db.session import get_db
 from app.models import TimeseriesRecord
 from app.api import deps  # org-scoping helpers
@@ -277,20 +277,39 @@ def export_timeseries_csv(
 def create_timeseries_batch(
     payload: TimeseriesBatchRequest,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    org_ctx: OrgContext = Depends(get_org_context),
 ):
     """
     Direct ingestion endpoint for integrators and backends.
 
-    Phase #3:
-    - Accepts JSON records with {site_id, meter_id, timestamp_utc, value, unit, idempotency_key}.
-    - Uses the same org-scoping model as the rest of the app (currently via user.org).
-    - Internally delegates to app.services.ingest.ingest_timeseries_batch.
+    Auth:
+    - Accepts either:
+      * A normal short-lived access JWT (interactive user), OR
+      * A long-lived integration token (cei_int_...) created via /auth/integration-tokens.
+    - In both cases we resolve a single organization_id via get_org_context and use that
+      to scope writes into TimeseriesRecord.
 
-    NOTE:
-    - At this stage, auth is user-based (JWT). Integration tokens will plug in
-      later via a dedicated dependency that resolves organization_id from a
-      long-lived token instead of a user session.
+    Payload:
+    - JSON body:
+      {
+        "records": [
+          {
+            "site_id": "site-1",
+            "meter_id": "main-incomer",
+            "timestamp_utc": "2025-12-05T07:00:00Z",
+            "value": 123.45,
+            "unit": "kWh",
+            "idempotency_key": "optional-stable-id"
+          },
+          ...
+        ],
+        "source": "your-system-name"
+      }
+
+    Behavior:
+    - Delegates to app.services.ingest.ingest_timeseries_batch for the heavy lifting.
+    - Enforces rate limiting via timeseries_batch_rate_limit.
+    - Returns a structured summary of ingested / skipped / failed records.
     """
     if not payload.records:
         raise HTTPException(
@@ -298,7 +317,14 @@ def create_timeseries_batch(
             detail="records must be a non-empty list",
         )
 
-    org_id = getattr(user, "organization_id", None)
+    org_id = org_ctx.organization_id
+    if org_id is None:
+        # In practice, integration tokens are always org-bound; a missing org_id
+        # here would indicate a misconfigured token or a legacy single-tenant path.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No organization associated with this credential",
+        )
 
     # Convert Pydantic models to plain dicts before handing off to the service.
     records = [r.dict() for r in payload.records]
@@ -337,6 +363,7 @@ def create_timeseries_batch(
         failed=result_dict.get("failed", 0),
         errors=errors,
     )
+
 
 
 def _bucket_timestamp(ts: datetime, resolution: str) -> datetime:
