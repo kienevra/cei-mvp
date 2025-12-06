@@ -303,6 +303,16 @@ export async function getSiteKpi(
   return resp.data;
 }
 
+export async function getIngestHealth(
+  windowHours: number = 24
+): Promise<IngestHealthResponse> {
+  const res = await api.get<IngestHealthResponse>("/timeseries/ingest_health", {
+    params: { window_hours: windowHours },
+  });
+  return res.data;
+}
+
+
 /**
  * Stub predictive forecast: hits /analytics/sites/{id}/forecast on the backend.
  * Uses the same axios client and baseURL (/api/v1) as the rest of the API.
@@ -368,6 +378,24 @@ export interface AlertEventUpdatePayload {
   status?: AlertStatus;
   note?: string;
 }
+
+// --- Ingest health types ---
+
+export interface IngestHealthMeter {
+  site_id: string;
+  meter_id: string;
+  window_hours: number;
+  expected_points: number;
+  actual_points: number;
+  completeness_pct: number;
+  last_seen: string; // ISO timestamp
+}
+
+export interface IngestHealthResponse {
+  window_hours: number;
+  meters: IngestHealthMeter[];
+}
+
 
 /**
  * Fetch historical alert stream from /alerts/history.

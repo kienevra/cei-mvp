@@ -3,6 +3,171 @@ CEI Pilot Runbook – Factory Integration & Operations
 Objective:
 Run a 4–8 week pilot with one factory to validate that CEI can reliably ingest meter data, compute baselines, surface anomalies, and quantify % energy savings potential.
 
+## 0. Backend readiness – automated test suite
+
+Before running any pilot activities, validate that the CEI backend is in a healthy, known-good state.
+
+### 0.1. Environment
+
+From your local dev environment:
+
+```bash
+cd backend
+Make sure you have:
+
+Python virtualenv activated (.venv)
+
+backend/.env pointing to the local SQLite dev DB, for example:
+
+DATABASE_URL=sqlite:///../dev.db
+
+DB file initialised via the existing helper(s) if not already done.
+
+0.2. Run the backend test suite
+
+Execute:
+
+pytest
+
+
+Expected outcome:
+
+All 12 tests pass.
+
+No unexpected errors or stack traces.
+
+What’s being exercised:
+
+test_db_connection.py
+
+Smoke-tests connectivity to the configured DATABASE_URL.
+
+tests/test_ingest.py
+
+Validates CSV ingestion and direct /timeseries/batch JSON ingestion, including:
+
+happy-path ingest
+
+idempotent/deduplicated writes
+
+validation errors and structured error payloads.
+
+tests/test_analytics.py
+
+Validates the analytics engine’s public surface:
+
+AnalyticsService.compute_kpis (lightweight KPI shim)
+
+benchmark_against_industry
+
+detect_anomalies
+
+These tests use an in-memory dummy session and do not hit the real DB.
+
+tests/test_auth.py
+
+Uses the test-only /auth-tests/signup and /auth-tests/login routes to:
+
+sign up a user
+
+log in and obtain a JWT access token
+
+Confirms the auth stack is wired correctly for pilot usage.
+
+tests/test_opportunities.py
+
+Runs the opportunity detection logic against a small fixture dataset.
+
+0.3. Health endpoints
+
+In addition to pytest, validate the runtime health endpoints from your machine or an HTTP client:
+
+Lightweight API liveness:
+
+GET /api/v1/health
+
+DB readiness:
+
+GET /api/v1/health/db
+
+Ingestion completeness (data pipeline view):
+
+GET /api/v1/timeseries/ingest_health?window_hours=24
+
+For ingest_health, you should see a payload similar to:
+
+{
+  "window_hours": 24,
+  "meters": [
+    {
+      "site_id": "site-1",
+      "meter_id": "main-incomer",
+      "window_hours": 24,
+      "expected_points": 24,
+      "actual_points": 23,
+      "completeness_pct": 95.8,
+      "last_seen": "2025-12-06T08:52:42"
+    }
+  ]
+}
+
+
+Interpretation:
+
+expected_points: how many hourly points we expect in the window.
+
+actual_points: how many we actually received.
+
+completeness_pct: ingestion completeness KPI; for pilot, aim for ≥ 90% during “normal” operation.
+
+last_seen: last successful ingest timestamp per meter.
+
+If pytest passes and these health endpoints return 200 OK with sensible payloads, the backend is considered pilot-ready.
+
+
+That’s step 1 done: the runbook now has a crisp, operational “green light” gate.
+
+---
+
+## Step 2 – Frontend data health widget (powered by `/ingest_health`)
+
+Next move: surface this ingestion completeness signal in the UI so a pilot operator can see, at a glance, if the pipe is healthy.
+
+### 2.1. API helper in `frontend/src/services/api.ts`
+
+Add a typed helper that calls the ingest health endpoint.
+
+```ts
+// Add to your existing type section or api types file
+export interface IngestHealthMeter {
+  site_id: string;
+  meter_id: string;
+  window_hours: number;
+  expected_points: number;
+  actual_points: number;
+  completeness_pct: number;
+  last_seen: string; // ISO timestamp
+}
+
+export interface IngestHealthResponse {
+  window_hours: number;
+  meters: IngestHealthMeter[];
+}
+
+// Add to your API helpers
+export async function getIngestHealth(
+  windowHours: number = 24
+): Promise<IngestHealthResponse> {
+  const res = await api.get<IngestHealthResponse>(
+    `/timeseries/ingest_health`,
+    {
+      params: { window_hours: windowHours },
+    }
+  );
+  return res.data;
+}
+This is read-only and piggybacks on your existing axios instance (with JWT + refresh).
+
 1. Pilot scope & success criteria
 1.1 Scope definition
 
@@ -339,3 +504,36 @@ Extend pilot to more sites/meters.
 Move to paid subscription / full rollout.
 
 Park or pivot.
+
+## 6. Verify data completeness with ingest health
+
+Once the factory client is pushing data into CEI, we want a fast, deterministic way to confirm that:
+
+- The right **sites/meters** are receiving data
+- The **last 24 hours** (or other window) are reasonably complete
+- We can spot gaps before analytics and alerts look “wrong”
+
+### 6.1. Backend API: `/api/v1/timeseries/ingest_health`
+
+**Endpoint**
+
+- Method: `GET`
+- Path: `/api/v1/timeseries/ingest_health`
+- Auth: same JWT or integration-token org scope as `/timeseries/batch`
+- Query params:
+  - `window_hours` (int, required) – typically `24` or `168`
+
+**Example (local dev, pilot JWT)**
+
+```powershell
+# Re-use pilot token
+$token = "<your_pilot_access_token>"
+$authHeader = "Bearer $token"
+
+$health = Invoke-RestMethod `
+  -Method GET `
+  -Uri "http://127.0.0.1:8000/api/v1/timeseries/ingest_health?window_hours=24" `
+  -Headers @{ Authorization = $authHeader }
+
+$health
+$health.meters | Format-Table site_id, meter_id, expected_points, actual_points, completeness_pct, last_seen
