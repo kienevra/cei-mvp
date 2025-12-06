@@ -110,42 +110,29 @@ const Login: React.FC = () => {
         {/* Brand / header */}
         <div
           style={{
-            marginBottom: "1rem",
+            marginBottom: "0.05rem", // ~10x smaller
             display: "flex",
             flexDirection: "column",
-            gap: "0.4rem",
+            gap: "0.05rem", // ~10x smaller
+            alignItems: "center",
+            textAlign: "center",
           }}
         >
-          <div
+          <img
+            src={encodeURI(
+              "/ChatGPT Image Dec 5, 2025, 10_47_03 PM.png"
+            )}
+            alt="CEI – Carbon Efficiency Intelligence"
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.6rem",
+              height: "320px",
+              width: "auto",
+              display: "block",
+              marginBottom: "0.05rem", // ~10x smaller
             }}
-          >
-            <img
-              src="/cei-logo-full.png"
-              alt="CEI – Carbon Efficiency Intelligence"
-              style={{
-                height: "56px",
-                width: "auto",
-                display: "block",
-              }}
-            />
-            <div
-              style={{
-                fontSize: "0.8rem",
-                textTransform: "uppercase",
-                letterSpacing: "0.18em",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              CEI · Carbon Efficiency Intelligence
-            </div>
-          </div>
+          />
 
           <div className="auth-title">
-            We help factories quantify and cut wasted energy.
+            We use A.I to cut manufacturing energy waste.
           </div>
 
           <div className="auth-subtitle">
@@ -313,31 +300,6 @@ const Login: React.FC = () => {
               : "Sign in"}
           </button>
         </form>
-
-        {/* Small value-proposition footer */}
-        <div
-          style={{
-            marginTop: "1.4rem",
-            fontSize: "0.8rem",
-            color: "var(--cei-text-muted)",
-            borderTop: "1px solid rgba(31, 41, 55, 0.7)",
-            paddingTop: "0.8rem",
-          }}
-        >
-          After {isSignup ? "creating your account" : "signing in"} you can:
-          <ul
-            style={{
-              margin: "0.4rem 0 0",
-              paddingLeft: "1.1rem",
-              lineHeight: 1.6,
-              color: "var(--cei-text-main)",
-            }}
-          >
-            <li>See 24-hour portfolio and per-site energy trends.</li>
-            <li>Review alerts for abnormal consumption and missing data.</li>
-            <li>Upload CSVs to backfill or test new sites quickly.</li>
-          </ul>
-        </div>
       </div>
     </div>
   );
