@@ -1,433 +1,341 @@
-# CEI Pilot Runbook – Direct Timeseries Ingestion (v0.1)
+CEI Pilot Runbook – Factory Integration & Operations
 
-This runbook describes how to set up and run a CEI pilot with a real factory.
+Objective:
+Run a 4–8 week pilot with one factory to validate that CEI can reliably ingest meter data, compute baselines, surface anomalies, and quantify % energy savings potential.
 
-It covers:
+1. Pilot scope & success criteria
+1.1 Scope definition
 
-1. What CEI needs from the factory.
-2. How to create an org + admin user in CEI.
-3. How to generate an integration token.
-4. How to configure and run the CEI factory client.
-5. How to validate data ingestion in CEI.
-6. How to monitor and operate the pilot.
+Sites: 1 factory, 1–3 logical site_ids (e.g. main plant + warehouse).
 
----
+Meters:
 
-## 1. Pilot Scope & Requirements
+At minimum: main-incomer per site.
 
-### 1.1 What CEI does in a pilot
+Ideally: 2–5 key sub-meters (chillers, compressors, HVAC, process line).
 
-- Ingests hourly (or sub-hourly) energy/meter data from the factory.
-- Stores the data per **organization → site → meter**.
-- Builds baselines and simple forecasts.
-- Surfaces:
-  - Portfolio dashboard.
-  - Per-site trends (last 24h / last 7d).
-  - Alerts (baseline deviation, spikes, weekend/weekday, etc.).
-  - Reports (7-day view, CSV exports).
+Data cadence: hourly kWh values.
 
-### 1.2 What we need from the factory
+History:
 
-Minimum requirements:
+Target: last 30–90 days (if available) via CSV/API.
 
-- **One site** with at least one **electricity meter** (kWh or kW).
-- Historical data (ideally 30–90 days) in one of these forms:
-  - CSV export with columns:
-    - `timestamp_utc`
-    - `site_id`
-    - `meter_id`
-    - `value`
-    - `unit` (e.g. `kWh`)
-    - `idempotency_key` (optional but recommended)
-  - OR the ability to push hourly data via a custom client using CEI’s JSON API.
+Ongoing: live hourly pushes.
 
-- A **Windows or Linux machine** that can:
-  - Reach `https://cei-mvp.onrender.com`.
-  - Run a scheduled job hourly (Task Scheduler / cron / systemd timer).
+1.2 Success metrics (hard)
 
----
+CEI ingests > 95% of expected hourly points over the pilot period.
 
-## 2. Create Organization & Admin User
+Data gap alarms < 2% of hours (per site/meter).
 
-> This is done by the CEI operator (you) on the hosted CEI instance.
+CEI identifies at least 3 actionable inefficiencies (night/weekend waste, abnormal spikes, poor baseload, etc.).
 
-1. Go to the CEI frontend (Heroku URL).
-2. Use the **sign-up** flow with the factory admin’s email (or your own, then change later).
-3. The backend will:
-   - Create a new `Organization`.
-   - Create a `User` as org admin.
-   - Assign default plan flags:
-     - `subscription_plan_key = "cei-starter"`
-     - `enable_alerts = true`
-     - `enable_reports = true`
-     - `subscription_status = "active"`
+Clear narrative: “CEI shows X–Y% avoidable kWh and €A–B per year savings potential.”
 
-4. Log in as this user and confirm:
-   - `/auth/me` (via Swagger or internal tools) shows:
-     - A valid `organization_id`.
-     - Plan fields as above.
+2. Setup on CEI side
+2.1 Create org + operator account
 
-This org will own all sites, meters, and timeseries for the pilot.
+Create the factory org in CEI (via signup or admin tooling).
 
----
+Define:
 
-## 3. Generate Integration Token
+organization_name (e.g. “Factory Org A – Pilot 2025”)
 
-> Integration tokens are long-lived, org-scoped secrets used for machine-to-machine ingestion.
+Primary operator user: factory-operator@clientdomain.com
 
-1. Log in as the org admin.
-2. Open the **Settings → Integration Tokens** page in the CEI frontend.
-3. Click **“Create integration token”**.
-4. CEI calls:
-   - `POST /api/v1/auth/integration-tokens`
-   - The backend creates an `IntegrationToken` row with:
-     - `organization_id`
-     - `token_hash` (SHA256)
-     - `is_active = true`
-     - `created_at`, `last_used_at = null`
+Operator user is used only for:
 
-5. The frontend displays the raw token once, in the form:
+Checking dashboards, alerts, reports.
 
-   ```text
-   cei_int_xxxxxxxxxxxxxxxxx
+Creating integration tokens.
 
-Copy this token and store it securely. It will not be retrievable again.
+2.2 Seed sites & meters
 
-3.1 How this token is used
+In CEI admin/backoffice (or via your existing seeding tools):
 
-All ingestion calls to:
+For each physical site:
 
-POST /api/v1/timeseries/batch
-Authorization: Bearer cei_int_xxxxxxxxxxxxx
+Create site_id like site-XX (document in a mapping table you’ll send to the client).
+
+Add human labels (e.g. “Bologna Plant – Main Production”).
+
+Define expected meters per site:
+
+main-incomer (required)
+
+Optional: compressor-bank, chiller-01, hvac-floor1, etc.
+
+Deliverable to client: “CEI Integration Mapping” table:
+
+Physical site name	CEI site_id	Physical meter description	CEI meter_id
+Bologna Plant – Main	site-22	Main incomer MCC	main-incomer
+Bologna Plant – Main	site-22	Compressor bank	compressor-bank
+Warehouse A	site-23	Warehouse incomer	main-incomer
+3. Integration token provisioning
+3.1 Create integration token
+
+Logged in as the operator user (e.g. factory-operator@cei.local or their real email):
+
+Go to Settings → Integration tokens (your existing UI).
+
+Create a new token:
+
+Name: factory-scada-line1 (or similar).
+
+Scope: bound to the factory org (implicit in your current model).
+
+Copy the plaintext (cei_int_…) and give it once to the client (encrypted channel ideally).
+
+Client must store:
+
+CEI_BASE_URL (e.g. https://cei-mvp.onrender.com)
+
+CEI_INT_TOKEN = cei_int_…
+
+4. Data model & API contract (quick recap)
+
+Use the doc you already wrote (directtimeseriesingestion.md) as the deep dive. For the runbook, keep the operator summary:
+
+Endpoint: POST /api/v1/timeseries/batch
+
+Auth: Authorization: Bearer cei_int_…
+
+Record schema:
+
+{
+  "site_id": "site-22",
+  "meter_id": "main-incomer",
+  "timestamp_utc": "2025-12-05T13:00:00Z",
+  "value": 152.3,
+  "unit": "kWh",
+  "idempotency_key": "site-22-main-incomer-2025-12-05T13:00:00Z"
+}
 
 
-The backend uses get_org_context to:
+Rules:
 
-Recognize this as an integration token.
+timestamp_utc: UTC, ISO8601, Z-suffixed.
 
-Attach organization_id to the request.
+value: numeric kWh, one value per hour per meter.
 
-Scope all TimeseriesRecord writes to that org.
+unit: must be "kWh" (or omitted).
 
-4. Configure the Factory Client
+idempotency_key: stable per site/meter/hour to make retries safe.
 
-CEI ships with a reference client at docs/factory_client.py.
+5. Integration modes
+5.1 Direct API mode (preferred)
 
-It supports two modes:
+Client’s SCADA/BMS/historian pushes hourly data directly to /timeseries/batch from their environment (Python, Node, etc.), using the schema above.
 
-Ramp mode – synthetic test data for smoke testing.
+Deliverables:
 
-CSV mode – ingest from a factory CSV export.
+A small Python (or Node) script in their environment, built from your docs/factory_client.py pattern.
 
-4.1 Environment variables on the factory machine
+A cron / Windows Task Scheduler job (every 5–15 min) that:
 
-Set the following env vars on the machine running the client:
+Pulls last hour’s data from SCADA.
+
+Transforms to CEI schema.
+
+POSTs it to /timeseries/batch.
+
+5.2 CSV bootstrap mode (initial backfill)
+
+For history, they can:
+
+Export CSV from SCADA/historian with columns:
+
+site_id, meter_id, timestamp_utc, value, unit
+
+Use your existing upload CSV flow (UI or API) to ingest historical data in bulk.
+
+This is already wired into CEI; this runbook just states: “For history, we may use CSV mode first, then switch to live API mode.”
+
+6. Pilot onboarding workflow (step-by-step)
+6.1 Preparation (CEI side)
+
+Create org + operator user.
+
+Configure site_ids and meter_ids.
+
+Generate integration token, store ID and expiry policy in your internal sheet.
+
+Prepare:
+
+directtimeseriesingestion.md
+
+This pilot_runbook.md
+
+A sample payload JSON and test commands.
+
+6.2 Kickoff with client
+
+In a 60–90 minute working session:
+
+Explain:
+
+What CEI needs: hourly kWh per site/meter.
+
+KPI: data completeness, stable ingestion.
+
+Review mapping table and confirm all meters.
+
+Hand over credentials:
 
 CEI_BASE_URL
-e.g.
-
-https://cei-mvp.onrender.com
-
 
 CEI_INT_TOKEN
-The integration token generated in section 3, e.g.
 
-cei_int_xxxxxxxxxxxxxxxxx
+site_id / meter_id table
 
+Decide integration mode:
 
-Optional for CSV mode:
+Direct API from SCADA?
 
-CEI_FACTORY_CSV_PATH
-Absolute or relative path to the CSV file, e.g.
+Or export to CSV + a small relay script?
 
-C:\cei\factory-data\site22_meter_main.csv
+6.3 Technical integration (client’s action items)
 
-4.2 Ramp Mode (test ingestion)
+Client engineers:
 
-Command (Windows, from repo root):
+Implement the small script:
 
-python .\docs\factory_client.py <site_id> <meter_id> <hours_back>
+Use your docs/factory_client.py as a template.
 
+Replace fake ramp logic with their real data source.
 
-Example:
+Configure environment:
 
-python .\docs\factory_client.py site-22 main-meter 24
+Set CEI_BASE_URL, CEI_INT_TOKEN, and any SCADA connection params.
 
+Run a one-off test:
 
-Behavior:
+Ingest a single hour for a single meter.
 
-Builds hourly records for the last N hours:
+Verify response: {"ingested":1,"skipped_duplicate":0,"failed":0,"errors":[]}.
 
-timestamp_utc: current_utc - i hours.
+Turn on scheduled job at desired cadence (e.g. every 15 min).
 
-site_id: as provided.
+7. Validation: does the pipeline actually work?
+7.1 Ingestion checks
 
-meter_id: as provided.
+On your side:
 
-value: ramping test values (e.g. base + i).
+Hit /api/v1/timeseries/summary and /series for the relevant site_id/meter_id:
 
-unit: "kWh" (default).
+Check that the last 24h show non-zero points.
 
-Sends a TimeseriesBatchRequest to:
+Use the existing /timeseries/export to pull CSV and spot-check:
 
-POST /api/v1/timeseries/batch
+Timestamps align with their expected hours.
 
+Values match one-to-one with SCADA exports.
 
-Retries on transient errors.
+7.2 Frontend checks
 
-Prints summary:
+In CEI UI:
 
-Ingested: X, Skipped duplicates: Y, Failed: Z
+Dashboard:
 
+Last 24 h card shows reasonable totals for the pilot site(s).
 
-Use this mode to smoke-test connectivity and auth before using real data.
+SiteView:
 
-4.3 CSV Mode (real data ingestion)
+Trend chart populated with recent hours.
 
-Preconditions:
+Baseline/forecast cards not obviously broken by new data.
 
-CEI_FACTORY_CSV_PATH is set.
+Alerts:
 
-CSV has headers:
+Night/weekend/spike alerts begin to populate after some data accumulates.
 
-timestamp_utc
+Reports:
 
-site_id
+7-day tables make sense once a week of data is in.
 
-meter_id
+8. Operations during the pilot
+8.1 Monitoring ingestion health (manual v1)
 
-value
+Until you build a dedicated ingestion-health page, do this:
 
-unit
+Daily checks:
 
-idempotency_key (optional but recommended)
+/timeseries/summary?site_id=...&window_hours=24 – confirm points match 24 (main incomer).
 
-Run:
+If points << 24, coordinate with client to check SCADA job logs.
 
-python .\docs\factory_client.py
+Weekly:
 
+/timeseries/export over last 7 * 24 hours and compare with a SCADA export.
 
-Behavior:
+You can later formalize this as:
 
-Reads all rows from the CSV.
+A dedicated endpoint like /analytics/ingest-metrics summarizing:
 
-Builds one TimeseriesBatchRecord per row.
+Last_seen_timestamp per meter.
 
-Sends them to /timeseries/batch with a source derived from the CSV filename.
+% completeness in last 24h / 7d.
 
-Returns non-zero exit code on permanent failure (for schedulers).
+Error counts per code (INVALID_UNIT, ORG_MISMATCH, etc.).
 
-5. Scheduling Hourly Runs (Windows Task Scheduler)
+8.2 Alert and anomaly tracking
 
-This section describes a typical Windows setup using scripts/run_factory_client.ps1.
+During the pilot:
 
-5.1 Prepare the script
+Tag each alert or anomaly with:
 
-Ensure the repo (or a copy with the client + script) is on the factory machine.
+site_id, meter_id
 
-Confirm that scripts/run_factory_client.ps1:
+Rule type (night-load, weekend-load, spike, baseline deviation)
 
-Reads env vars: CEI_BASE_URL, CEI_INT_TOKEN, CEI_FACTORY_CSV_PATH.
+Estimated wasted kWh / € impact
 
-Calls:
+Root cause once known (e.g. compressor left on idle, HVAC scheduling, process drift)
 
-python .\docs\factory_client.py <site_id> <meter_id> <hours_back>
+Maintain this in a simple spreadsheet for now.
 
+9. Weekly review cadence
 
-Exits with the same code as factory_client.py.
+Every week with the client:
 
-5.2 Create the scheduled task
+Ingestion report
 
-Open Task Scheduler.
+Data completeness (% of expected points).
 
-Create a Basic Task:
+Any ingestion errors (by TimeseriesIngestErrorCode).
 
-Name: CEI – Timeseries Ingestion.
+Insights & actions
 
-Trigger:
+New alerts triggered.
 
-Daily, repeat every 1 hour (or as required).
+Confirmed issues and remedial actions.
 
-Action:
+Impact tracking
 
-Program/script: powershell.exe
+Rough estimate of avoided energy (kWh & €) from changes already made.
 
-Arguments:
+Next week’s focus
 
--ExecutionPolicy Bypass -File "C:\path\to\scripts\run_factory_client.ps1"
+Which meters or lines to drill into next.
 
+10. Pilot close-out
 
-Start in: C:\path\to\repo-root
+At the end of 4–8 weeks:
 
-Set the task to:
+Deliver a short written Pilot Report:
 
-Run whether user is logged on or not.
+Data coverage achieved.
 
-Use an account with rights to the folder and internet.
+Key anomalies found.
 
-Test:
+Operational changes recommended / implemented.
 
-Right-click → Run.
+Estimated savings potential and payback.
 
-Check logs/output to confirm success.
+Decision gates:
 
-(For Linux servers, use cron or systemd timers with equivalent commands.)
+Extend pilot to more sites/meters.
 
-6. Validating Data in CEI
+Move to paid subscription / full rollout.
 
-Once data is flowing, validate end-to-end.
-
-6.1 Backend checks (Swagger / API)
-
-Use Swagger UI on the backend (/docs if enabled, or via internal tools).
-
-For the pilot org/token:
-
-Summary:
-
-GET /api/v1/timeseries/summary?site_id=<site_id>&meter_id=<meter_id>&window_hours=24
-
-
-Expect:
-
-Non-zero total_value.
-
-from_timestamp, to_timestamp roughly matching last 24h.
-
-Series:
-
-GET /api/v1/timeseries/series?site_id=<site_id>&meter_id=<meter_id>&window_hours=24&resolution=hour
-
-
-Expect:
-
-24 hourly points with timestamps and values.
-
-Export:
-
-GET /api/v1/timeseries/export?site_id=<site_id>&meter_id=<meter_id>&window_hours=24
-
-
-Expect:
-
-CSV with timestamp_utc,site_id,meter_id,value.
-
-6.2 Frontend checks (Dashboard + SiteView)
-
-In the CEI UI:
-
-Log in as the org admin.
-
-Confirm the pilot site appears in Sites / SitesList.
-
-Open the Site View:
-
-The 24h / 7d charts should show recent data.
-
-The KPI card should display last_24h_kwh and baseline_24h_kwh.
-
-The baseline/forecast card should render with non-empty data.
-
-Check Alerts and Reports:
-
-Alerts: see if any baseline deviations are triggered.
-
-Reports: ensure the 7-day table is populated and export works.
-
-7. Monitoring & Troubleshooting
-7.1 Factory side (client)
-
-Check logs/output of factory_client.py:
-
-Look at counts:
-
-ingested
-
-skipped_duplicate
-
-failed
-
-Inspect detailed errors (index, code, detail) when failed > 0.
-
-Typical error patterns:
-
-Auth issues:
-
-401 / 403 – invalid or revoked CEI_INT_TOKEN.
-
-Connectivity:
-
-Timeouts, DNS issues – check network/firewall.
-
-7.2 CEI backend logs
-
-For each /timeseries/batch:
-
-Log at least:
-
-org_id
-
-source
-
-total_records
-
-ingested
-
-skipped_duplicate
-
-failed
-
-duration_ms
-
-This allows quick back-of-envelope analysis of ingestion health.
-
-8. Pilot Success Criteria
-
-A pilot is considered successful when:
-
-Data:
-
-CEI has at least 2–4 weeks of timeseries coverage for the pilot site.
-
-No major ingestion gaps (missed hours) without explanation.
-
-Analytics:
-
-Baseline vs actual charts are stable and interpretable.
-
-Alerts and reports reflect real operational patterns (e.g. night/weekend waste, spikes).
-
-Stakeholder value:
-
-Plant/energy manager can identify at least 1–3 concrete actions to reduce energy waste.
-
-CEI can estimate approximate savings in kWh and € for a realistic scenario.
-
-At that point, you can move to:
-
-Enabling more sites/meters.
-
-Discussing production rollout and billing (Stripe integration, plan upgrades).
-
-9. Related Documents
-
-docs/directtimeseriesingestion.md
-Detailed API contract for /api/v1/timeseries/batch (JSON schema, auth, examples).
-
-docs/factory_client.py
-Reference Python client with ramp + CSV modes.
-
-scripts/run_factory_client.ps1
-Windows Task Scheduler wrapper for hourly ingestion.
-
-
----
-
-### Next move after you add this file
-
-1. Create the file:
-
-```powershell
-# In repo root
-notepad .\docs\pilot_runbook.md
-# paste the content and save
+Park or pivot.

@@ -13,9 +13,14 @@ from app.db.session import SessionLocal
 from app.db import models as db_models  # still used for other models later
 from app.models import TimeseriesRecord  # TimeseriesRecord lives here
 from app.api.deps import get_org_allowed_site_ids  # reuse org scoping logic
+from app.core.errors import TimeseriesIngestErrorCode
 
 STAGING_DIR = os.getenv("INGEST_STAGING_DIR", "/tmp/cei_staging")
 os.makedirs(STAGING_DIR, exist_ok=True)
+
+# Legacy single-file staging path used by old tests and flows.
+# tests/test_ingest.py monkeypatches this to a temp file.
+STAGING_FILE: Optional[str] = None
 
 logger = logging.getLogger("app.services.ingest")
 
@@ -23,54 +28,85 @@ logger = logging.getLogger("app.services.ingest")
 # --- Legacy staging-based ingestion (used by older CSV/raw flows) ---
 
 
-def save_raw_timeseries(payload: List[Dict[str, Any]]) -> str:
+def save_raw_timeseries(job_id: str, payload: List[Dict[str, Any]]) -> str:
     """
     Save raw timeseries payload into a staging file and return a job_id.
 
-    This is the legacy staging-based flow. It is kept for backward
-    compatibility with any existing CSV/raw ingestion that relies on it.
+    Legacy behavior, aligned with tests/test_ingest.py:
+
+    - Signature: save_raw_timeseries(job_id, payload)
+    - If STAGING_FILE is set (e.g. in tests), always write a single
+      newline-delimited JSON object to that path:
+
+        {"job_id": "<job_id>", "records": [...]}
+
+    - Otherwise, write the raw payload array to STAGING_DIR/<job_id>.json
+      so that process_job(job_id) can json.load() and iterate records.
     """
-    job_id = uuid.uuid4().hex
-    path = os.path.join(STAGING_DIR, f"{job_id}.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f)
-    logger.info("saved staging payload %s", path)
+    if STAGING_FILE:
+        path = STAGING_FILE
+        entry = {"job_id": job_id, "records": payload}
+        # Use append mode so multiple calls can coexist if needed; tests see a fresh file.
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+        logger.info("saved staging payload %s job_id=%s (STAGING_FILE mode)", path, job_id)
+    else:
+        path = os.path.join(STAGING_DIR, f"{job_id}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        logger.info("saved staging payload %s job_id=%s (STAGING_DIR mode)", path, job_id)
+
     return job_id
 
 
 def validate_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
     """
-    Legacy validator used by process_job.
+    Legacy validator used by process_job and older tests.
 
-    NOTE:
-    - Accepts either "timestamp" (old) or "timestamp_utc" (newer naming).
-    - Does NOT enforce units or idempotency; that’s handled in the
-      dedicated batch validator for the /timeseries/batch API.
+    Behavior is aligned with tests/test_ingest.py expectations:
+
+    - site_id missing -> "Missing field: site_id"
+    - timestamp (or timestamp_utc) missing -> "Missing field: timestamp"
+    - value missing -> "Missing field: value"
+    - value non-numeric -> "Value must be numeric"
+    - value negative -> treated as invalid (error message not asserted in tests)
+    - unit != "kWh" (when provided) -> "Unit must be 'kWh'"
     """
     errs: List[str] = []
 
+    # site_id / meter_id
     if not r.get("site_id"):
-        errs.append("site_id missing")
+        errs.append("Missing field: site_id")
     if not r.get("meter_id"):
-        errs.append("meter_id missing")
+        errs.append("Missing field: meter_id")
 
+    # value
     if "value" not in r:
-        errs.append("value missing")
+        errs.append("Missing field: value")
     else:
         try:
-            Decimal(str(r["value"]))
+            v = Decimal(str(r["value"]))
+            # tests expect negative values to be treated as invalid (expected_valid=False)
+            if v < 0:
+                errs.append("Value must be non-negative")
         except Exception:
-            errs.append("value not numeric")
+            errs.append("Value must be numeric")
 
-    ts_raw = r.get("timestamp_utc") or r.get("timestamp")
+    # timestamp (accept both 'timestamp' and 'timestamp_utc', but tests refer to 'timestamp')
+    ts_raw = r.get("timestamp") or r.get("timestamp_utc")
     if ts_raw is None:
-        errs.append("timestamp_utc missing")
+        errs.append("Missing field: timestamp")
     else:
         try:
             # Support "Z" suffix for UTC
             datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
         except Exception:
-            errs.append("timestamp_utc not ISO8601")
+            errs.append("Invalid timestamp format")
+
+    # Unit (legacy tests expect this check)
+    unit = r.get("unit")
+    if unit is not None and unit != "kWh":
+        errs.append("Unit must be 'kWh'")
 
     return (len(errs) == 0, errs)
 
@@ -116,7 +152,7 @@ def validate_batch_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
         "meter_id": "main-incomer",
         "timestamp_utc": "2025-12-03T10:00:00Z",
         "value": 123.4,
-        "unit": "kWh",                 # optional but if present must be "kWh"
+        "unit": "kWh",                 # optional but if provided must be "kWh"
         "idempotency_key": "..."       # optional but recommended
       }
     """
@@ -157,6 +193,35 @@ def validate_batch_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
     return (len(errs) == 0, errs)
 
 
+def _guess_code_from_validation_errors(errs: List[str]) -> TimeseriesIngestErrorCode:
+    """
+    Map raw validation error messages from validate_batch_record into a canonical
+    TimeseriesIngestErrorCode. This keeps the external API lean while preserving
+    detailed messages in `detail`.
+    """
+    # Timestamp-related issues
+    for e in errs:
+        if (
+            "timestamp_utc missing" in e
+            or "timestamp_utc not ISO8601" in e
+            or "timestamp_utc must be timezone-aware" in e
+        ):
+            return TimeseriesIngestErrorCode.INVALID_TIMESTAMP
+
+    # Value-related issues
+    for e in errs:
+        if "value missing" in e or "value not numeric" in e:
+            return TimeseriesIngestErrorCode.INVALID_VALUE
+
+    # Unit-related issues
+    for e in errs:
+        if "unit must be 'kWh'" in e:
+            return TimeseriesIngestErrorCode.INVALID_UNIT
+
+    # Fallback: generic internal error (unexpected validation shape)
+    return TimeseriesIngestErrorCode.INTERNAL_ERROR
+
+
 def ingest_timeseries_batch(
     records: List[Dict[str, Any]],
     organization_id: Optional[int],
@@ -182,7 +247,7 @@ def ingest_timeseries_batch(
         "errors": [
           {
             "index": int,
-            "code": str,
+            "code": str,   # one of TimeseriesIngestErrorCode.*
             "detail": str
           }
         ]
@@ -222,10 +287,11 @@ def ingest_timeseries_batch(
             ok, errs = validate_batch_record(r)
             if not ok:
                 failed += 1
+                code_enum = _guess_code_from_validation_errors(errs)
                 errors.append(
                     {
                         "index": idx,
-                        "code": "VALIDATION_ERROR",
+                        "code": code_enum.value,
                         "detail": "; ".join(errs),
                     }
                 )
@@ -239,8 +305,10 @@ def ingest_timeseries_batch(
                     errors.append(
                         {
                             "index": idx,
-                            "code": "INVALID_SITE",
-                            "detail": f"site_id '{site_id_str}' is not allowed for this organization",
+                            "code": TimeseriesIngestErrorCode.ORG_MISMATCH.value,
+                            "detail": (
+                                f"site_id '{site_id_str}' is not allowed for this organization"
+                            ),
                         }
                     )
                     continue
@@ -284,12 +352,12 @@ def ingest_timeseries_batch(
                 db.add(record)
                 db.commit()
             except IntegrityError as exc:
-                db.rollback();
+                db.rollback()
                 skipped_duplicate += 1
                 errors.append(
                     {
                         "index": idx,
-                        "code": "DUPLICATE",
+                        "code": TimeseriesIngestErrorCode.DUPLICATE_IDEMPOTENCY_KEY.value,
                         "detail": str(getattr(exc, "orig", exc)),
                     }
                 )
@@ -299,7 +367,7 @@ def ingest_timeseries_batch(
                 errors.append(
                     {
                         "index": idx,
-                        "code": "DB_ERROR",
+                        "code": TimeseriesIngestErrorCode.INTERNAL_ERROR.value,
                         "detail": str(exc),
                     }
                 )

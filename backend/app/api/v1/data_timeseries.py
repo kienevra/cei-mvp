@@ -55,6 +55,7 @@ class TimeseriesBatchRecord(BaseModel):
     - unit is locked to "kWh" for v1 (if provided).
     - idempotency_key is optional but recommended for integrators.
     """
+
     site_id: str
     meter_id: str
     timestamp_utc: datetime
@@ -79,6 +80,28 @@ class TimeseriesBatchResponse(BaseModel):
     skipped_duplicate: int
     failed: int
     errors: List[TimeseriesBatchError]
+
+
+class IngestMeterHealth(BaseModel):
+    """
+    Per (site_id, meter_id) ingestion health over a lookback window.
+
+    This is intentionally simple and DB-agnostic: we compute everything in Python
+    from TimeseriesRecord rows that already passed validation and org scoping.
+    """
+
+    site_id: str
+    meter_id: str
+    window_hours: int
+    expected_points: int  # assuming 1 value/hour
+    actual_points: int
+    completeness_pct: float
+    last_seen: Optional[datetime]
+
+
+class IngestHealthResponse(BaseModel):
+    window_hours: int
+    meters: List[IngestMeterHealth]
 
 
 @router.get("/summary", response_model=TimeseriesSummary)
@@ -364,6 +387,95 @@ def create_timeseries_batch(
         errors=errors,
     )
 
+
+@router.get("/ingest_health", response_model=IngestHealthResponse)
+def get_ingest_health(
+    site_id: Optional[str] = Query(None),
+    meter_id: Optional[str] = Query(None),
+    window_hours: int = Query(24, ge=1, le=24 * 90),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Ingestion health over the last N hours, grouped by (site_id, meter_id).
+
+    For each meter we return:
+    - expected_points: window_hours (assuming 1 point/hour)
+    - actual_points: count of rows in TimeseriesRecord
+    - completeness_pct: actual_points / expected_points * 100
+    - last_seen: latest timestamp for that meter in the window
+
+    Multi-tenant behavior:
+    - If user.organization_id is set -> only consider data belonging to that org.
+    - If user.organization_id is None -> behave as single-tenant/dev.
+    """
+    now = datetime.utcnow()
+    start = now - timedelta(hours=window_hours)
+
+    # Base query
+    q = db.query(TimeseriesRecord).filter(TimeseriesRecord.timestamp >= start)
+
+    # Optional filters
+    if site_id:
+        q = q.filter(TimeseriesRecord.site_id == site_id)
+    if meter_id:
+        q = q.filter(TimeseriesRecord.meter_id == meter_id)
+
+    # Org scoping
+    q = deps.apply_org_scope_to_timeseries_query(q, db, user)
+
+    # Pull rows and aggregate in Python to stay DB-agnostic
+    rows = (
+        q.order_by(
+            TimeseriesRecord.site_id,
+            TimeseriesRecord.meter_id,
+            TimeseriesRecord.timestamp,
+        )
+        .all()
+    )
+
+    meter_map: Dict[tuple[str, str], Dict[str, Any]] = {}
+
+    for row in rows:
+        key = (row.site_id, row.meter_id)
+        data = meter_map.get(key)
+        if data is None:
+            data = {
+                "site_id": row.site_id,
+                "meter_id": row.meter_id,
+                "actual_points": 0,
+                "last_seen": row.timestamp,
+            }
+            meter_map[key] = data
+
+        data["actual_points"] += 1
+
+        if row.timestamp and (
+            data["last_seen"] is None or row.timestamp > data["last_seen"]
+        ):
+            data["last_seen"] = row.timestamp
+
+    expected_points = window_hours if window_hours > 0 else 0
+
+    meters: List[IngestMeterHealth] = []
+    for (s_id, m_id), agg in meter_map.items():
+        actual = agg["actual_points"]
+        completeness = (
+            (actual / expected_points) * 100.0 if expected_points > 0 else 0.0
+        )
+        meters.append(
+            IngestMeterHealth(
+                site_id=s_id,
+                meter_id=m_id,
+                window_hours=window_hours,
+                expected_points=expected_points,
+                actual_points=actual,
+                completeness_pct=round(completeness, 1),
+                last_seen=agg["last_seen"],
+            )
+        )
+
+    return IngestHealthResponse(window_hours=window_hours, meters=meters)
 
 
 def _bucket_timestamp(ts: datetime, resolution: str) -> datetime:

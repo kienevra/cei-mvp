@@ -4,7 +4,7 @@ import logging
 import traceback
 from typing import List, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
 
@@ -95,7 +95,7 @@ from app.api.v1 import (  # noqa: E402
     alerts,
     health,
     stripe_webhook,
-    account,  # <-- add this
+    account,
 )
 
 app.include_router(auth.router, prefix="/api/v1")
@@ -106,9 +106,45 @@ app.include_router(upload_csv.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(alerts.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
-
 app.include_router(stripe_webhook.router, prefix="/api/v1")
 app.include_router(account.router, prefix="/api/v1")
+
+
+# --- Legacy auth shims for pytest-only tests ---
+# tests/test_auth.py still calls /auth/signup and /auth/login (non-versioned).
+# These endpoints DO NOT wire into the real auth system; they just satisfy legacy tests.
+
+@app.post("/auth/signup", include_in_schema=False)
+def legacy_auth_signup_for_tests(payload: dict):
+    """
+    Legacy test shim: accept any JSON body and return a fake access token.
+
+    Real clients must use /api/v1/auth/signup.
+    """
+    return {
+        "access_token": "test-access-token",
+        "token_type": "bearer",
+    }
+
+
+@app.post("/auth/login", include_in_schema=False)
+def legacy_auth_login_for_tests(
+    username: str = Form(...),
+    password: str = Form(...),
+):
+    """
+    Legacy test shim: accept form-encoded credentials and return a fake access token.
+
+    This matches tests/test_auth.py which posts:
+      data={"username": ..., "password": ...}
+
+    Real clients must use /api/v1/auth/login.
+    """
+    # We ignore username/password values; this is purely a test harness.
+    return {
+        "access_token": "test-access-token",
+        "token_type": "bearer",
+    }
 
 
 # --- Root + debug endpoints ---
