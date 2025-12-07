@@ -312,7 +312,6 @@ export async function getIngestHealth(
   return res.data;
 }
 
-
 /**
  * Stub predictive forecast: hits /analytics/sites/{id}/forecast on the backend.
  * Uses the same axios client and baseURL (/api/v1) as the rest of the API.
@@ -395,7 +394,6 @@ export interface IngestHealthResponse {
   window_hours: number;
   meters: IngestHealthMeter[];
 }
-
 
 /**
  * Fetch historical alert stream from /alerts/history.
@@ -492,6 +490,55 @@ export async function openBillingPortal() {
 
   const url = data.portal_url || data.url;
   return { url };
+}
+
+/* ===== Site events (timeline + operator notes) ===== */
+
+export interface SiteEvent {
+  id: number;
+  site_id: string | null;
+  site_name: string | null;
+
+  type: string;
+  title: string | null;
+  body: string | null;
+
+  created_at: string;
+  created_by_user_id: number | null;
+}
+
+/**
+ * Read-only site events for a given site_id.
+ * Backed by GET /site-events?site_id=...&window_hours=...&limit=...
+ */
+export async function getSiteEvents(
+  siteId: string,
+  windowHours: number = 168,
+  limit: number = 100
+): Promise<SiteEvent[]> {
+  const params: Record<string, string | number> = {
+    site_id: siteId,
+    window_hours: windowHours,
+    limit,
+  };
+
+  const resp = await api.get<SiteEvent[]>("/site-events", { params });
+  return resp.data;
+}
+
+/**
+ * Create an operator-driven site event/note.
+ * Backed by POST /site-events/sites/{site_id}/events
+ */
+export async function createSiteEvent(
+  siteId: string,
+  payload: { type?: string; title?: string; body?: string }
+): Promise<SiteEvent> {
+  const resp = await api.post<SiteEvent>(
+    `/site-events/sites/${encodeURIComponent(siteId)}/events`,
+    payload
+  );
+  return resp.data;
 }
 
 export default api;

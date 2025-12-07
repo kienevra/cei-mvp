@@ -1,101 +1,115 @@
-CEI Pilot Runbook – Factory Integration & Operations
+# CEI Pilot Runbook – Factory Integration, Analytics & Operations
 
-Objective:
-Run a 4–8 week pilot with one factory to validate that CEI can reliably ingest meter data, compute baselines, surface anomalies, and quantify % energy savings potential.
+## Objective
 
-## 0. Backend readiness – automated test suite
+Run a **4–8 week pilot with one factory** to validate that CEI can:
 
-Before running any pilot activities, validate that the CEI backend is in a healthy, known-good state.
+- Reliably ingest meter data (via **/timeseries/batch** and CSV)
+- Compute statistical **baselines** and deviation KPIs
+- Surface **anomalies and alerts** that match reality
+- Quantify **% energy savings potential** and € impact
+- Provide a clear, repeatable **operations workflow** for you and the plant
 
-### 0.1. Environment
+---
 
-From your local dev environment:
+## 0. Backend readiness – automated test suite & health checks
+
+Before doing anything with a real factory, confirm the backend is **green**.
+
+### 0.1. Local environment
+
+From your dev machine:
 
 ```bash
 cd backend
-Make sure you have:
+Pre-conditions:
 
-Python virtualenv activated (.venv)
+Python virtualenv active: .venv
 
-backend/.env pointing to the local SQLite dev DB, for example:
+backend/.env configured for local SQLite dev DB, for example:
 
+env
+Copy code
 DATABASE_URL=sqlite:///../dev.db
+SQLite file initialised via your helper (if not already):
 
-DB file initialised via the existing helper(s) if not already done.
-
+bash
+Copy code
+python -m app.db.init_sqlite_db
 0.2. Run the backend test suite
-
-Execute:
-
+bash
+Copy code
 pytest
-
-
 Expected outcome:
 
-All 12 tests pass.
+All 12 tests pass
 
-No unexpected errors or stack traces.
+No unexpected stack traces in output
 
 What’s being exercised:
 
 test_db_connection.py
 
-Smoke-tests connectivity to the configured DATABASE_URL.
+Smoke-tests connectivity to DATABASE_URL.
 
 tests/test_ingest.py
 
-Validates CSV ingestion and direct /timeseries/batch JSON ingestion, including:
+Validates CSV ingestion and direct /timeseries/batch JSON ingestion:
 
-happy-path ingest
+Happy-path ingest
 
-idempotent/deduplicated writes
+Idempotent / deduplicated writes
 
-validation errors and structured error payloads.
+Validation errors and structured error payloads
 
 tests/test_analytics.py
 
-Validates the analytics engine’s public surface:
+Validates the analytics engine public surface:
 
 AnalyticsService.compute_kpis (lightweight KPI shim)
 
-benchmark_against_industry
+Baseline / deviation logic
 
-detect_anomalies
-
-These tests use an in-memory dummy session and do not hit the real DB.
+Anomaly detection hooks
 
 tests/test_auth.py
 
-Uses the test-only /auth-tests/signup and /auth-tests/login routes to:
+Uses the test-only legacy shims in main.py:
 
-sign up a user
+/auth/signup
 
-log in and obtain a JWT access token
+/auth/login
 
-Confirms the auth stack is wired correctly for pilot usage.
+Confirms the auth stack is wired end-to-end for pilot usage (the real clients use /api/v1/auth/*).
 
 tests/test_opportunities.py
 
-Runs the opportunity detection logic against a small fixture dataset.
+Runs opportunity detection logic on a small fixture dataset.
+
+If this is green, the core pipeline is trustworthy enough for a pilot.
 
 0.3. Health endpoints
+On a running backend instance (local or Render), validate:
 
-In addition to pytest, validate the runtime health endpoints from your machine or an HTTP client:
+API liveness
 
-Lightweight API liveness:
-
+http
+Copy code
 GET /api/v1/health
+DB readiness
 
-DB readiness:
-
+http
+Copy code
 GET /api/v1/health/db
+Ingestion completeness (data pipeline view)
 
-Ingestion completeness (data pipeline view):
-
+http
+Copy code
 GET /api/v1/timeseries/ingest_health?window_hours=24
+Example payload:
 
-For ingest_health, you should see a payload similar to:
-
+json
+Copy code
 {
   "window_hours": 24,
   "meters": [
@@ -106,39 +120,272 @@ For ingest_health, you should see a payload similar to:
       "expected_points": 24,
       "actual_points": 23,
       "completeness_pct": 95.8,
-      "last_seen": "2025-12-06T08:52:42"
+      "last_seen": "2025-12-06T08:52:42Z"
     }
   ]
 }
-
-
 Interpretation:
 
 expected_points: how many hourly points we expect in the window.
 
 actual_points: how many we actually received.
 
-completeness_pct: ingestion completeness KPI; for pilot, aim for ≥ 90% during “normal” operation.
+completeness_pct: ingestion completeness KPI; for pilots, target ≥ 90–95% during normal operation.
 
 last_seen: last successful ingest timestamp per meter.
 
-If pytest passes and these health endpoints return 200 OK with sensible payloads, the backend is considered pilot-ready.
+If pytest passes and these endpoints return 200 OK with sensible payloads, the backend is pilot-ready.
 
+1. Pilot scope & success criteria
+1.1. Scope definition
+Sites
 
-That’s step 1 done: the runbook now has a crisp, operational “green light” gate.
+1 factory, typically 1–3 logical site_ids
+e.g. main plant, warehouse, utility yard.
 
----
+Meters
 
-## Step 2 – Frontend data health widget (powered by `/ingest_health`)
+Minimum: main incomer per site
 
-Next move: surface this ingestion completeness signal in the UI so a pilot operator can see, at a glance, if the pipe is healthy.
+Ideally: 2–5 key sub-meters:
 
-### 2.1. API helper in `frontend/src/services/api.ts`
+Chillers
 
-Add a typed helper that calls the ingest health endpoint.
+Compressors
 
-```ts
-// Add to your existing type section or api types file
+HVAC
+
+A critical process line
+
+Data cadence
+
+Hourly kWh values (one value per hour per meter)
+
+History
+
+Target: 30–90 days backfill via CSV or API (if available)
+
+Ongoing: live hourly pushes going forward
+
+1.2. Success metrics (hard)
+The pilot is successful if:
+
+CEI ingests >95% of expected hourly points over the pilot period
+
+Data gap alarms / completeness issues affect < 2% of hours per site/meter
+
+CEI identifies at least 3 actionable inefficiencies:
+
+Night / weekend waste
+
+Abnormal spikes
+
+Elevated baseload vs baseline
+
+You can articulate a clear narrative:
+
+“CEI shows X–Y% avoidable kWh and €A–B/year savings potential”
+
+2. Setup on CEI side
+2.1. Create org + operator account
+Create a dedicated org for the factory via signup or admin tooling.
+
+Org name: e.g. Factory Org A – Pilot 2025
+
+Primary operator user: e.g. energy.manager@clientdomain.com
+
+This user is used for:
+
+Checking dashboards (Dashboard, Sites, SiteView)
+
+Reviewing Alerts and Reports
+
+Managing Integration Tokens
+
+2.2. Seed sites & meters
+In CEI (seeding tools or admin):
+
+For each physical site:
+
+Create a site_id: e.g. site-22, site-101, etc.
+
+Assign human label: e.g. Bologna Plant – Main Production.
+
+Define expected meters per site:
+
+Required: main-incomer
+
+Optional (good for analytics): compressor-bank, chiller-01, hvac-floor1, etc.
+
+Produce and share a mapping table with the client:
+
+Physical site name	CEI site_id	Physical meter description	CEI meter_id
+Bologna Plant – Main	site-22	Main incomer MCC	main-incomer
+Bologna Plant – Main	site-22	Compressor bank	compressor-bank
+Warehouse A	site-23	Warehouse incomer	main-incomer
+
+This table is the single source of truth during integration.
+
+3. Integration token provisioning
+3.1. Create integration token (per factory org)
+Logged in as the operator user in the factory org:
+
+Go to Settings → Integration Tokens.
+
+Click Create integration token.
+
+Name it clearly: e.g. factory-scada-main-plant.
+
+Copy the plaintext token once (it will not be shown again).
+
+Share it with the client over a secure channel.
+
+The client must configure:
+
+CEI_BASE_URL
+e.g. https://cei-backend.onrender.com (or your actual Render URL)
+
+CEI_INT_TOKEN
+the cei_int_... token you just generated
+
+Tokens are org-scoped: any data ingested with this token is restricted to that org.
+
+4. Data model & API contract (summary)
+For details, use docs/directtimeseriesingestion.md. For the runbook, operators only need the high-level view.
+
+4.1. Endpoint
+http
+Copy code
+POST /api/v1/timeseries/batch
+Authorization: Bearer <CEI_INT_TOKEN>
+Content-Type: application/json
+4.2. Record schema (per point)
+json
+Copy code
+{
+  "site_id": "site-22",
+  "meter_id": "main-incomer",
+  "timestamp_utc": "2025-12-05T13:00:00Z",
+  "value": 152.3,
+  "unit": "kWh",
+  "idempotency_key": "site-22|main-incomer|2025-12-05T13:00:00Z"
+}
+Rules:
+
+site_id
+
+Must match a CEI site (site-22, site-101, etc.)
+
+meter_id
+
+Short stable ID (e.g. main-incomer, compressor-bank)
+
+timestamp_utc
+
+ISO8601, UTC, Z-suffixed
+
+Represents the end of the interval for hourly data
+
+value
+
+Numeric kWh for that hour
+
+unit
+
+"kWh" (or omitted if defaulted)
+
+idempotency_key
+
+Stable per site/meter/hour to make retries safe
+Recommended pattern: "{site_id}|{meter_id}|{timestamp_utc}"
+
+4.3. Response (example)
+json
+Copy code
+{
+  "total_records": 120,
+  "ingested": 118,
+  "skipped_duplicate": 2,
+  "failed": 0,
+  "errors": []
+}
+skipped_duplicate confirms idempotency is working.
+
+If failed > 0, errors contains structured reasons per record.
+
+5. Integration modes
+5.1. Direct API mode (preferred)
+The client’s SCADA/BMS/historian or data warehouse pushes hourly data directly to /timeseries/batch from their environment (Python, Node, etc.).
+
+Deliverables:
+
+A small script running close to the data (on-prem or near the historian), built using your docs/factory_client.py pattern.
+
+A cron job / Windows Task Scheduler entry (every 5–15 minutes) that:
+
+Pulls the last hour’s data from SCADA/historian.
+
+Transforms into CEI’s JSON schema.
+
+POSTs to /timeseries/batch.
+
+5.2. CSV bootstrap mode (initial backfill)
+For historical data:
+
+The client exports CSV from SCADA/historian with columns:
+
+text
+Copy code
+site_id, meter_id, timestamp_utc, value, unit
+You use CEI’s existing CSV upload flow:
+
+Via UI (CSVUpload page), or
+
+via backend /upload-csv endpoint.
+
+This is ideal to backfill 30–90 days; once backfill is done, you rely on direct API mode for ongoing data.
+
+6. Verify data completeness with ingest health
+Once the factory client is pushing data, use ingest health to quickly validate that the pipeline is sane.
+
+6.1. Backend API – /api/v1/timeseries/ingest_health
+Method: GET
+
+Path: /api/v1/timeseries/ingest_health
+
+Auth: same org-scope model as /timeseries/batch
+
+Query params:
+
+window_hours (int, required) – typically 24 or 168
+
+Example (PowerShell, local dev):
+
+powershell
+Copy code
+$token = "<your_pilot_access_token>"
+$authHeader = "Bearer $token"
+
+$health = Invoke-RestMethod `
+  -Method GET `
+  -Uri "http://127.0.0.1:8000/api/v1/timeseries/ingest_health?window_hours=24" `
+  -Headers @{ Authorization = $authHeader }
+
+$health
+$health.meters | Format-Table site_id, meter_id, expected_points, actual_points, completeness_pct, last_seen
+Key checks per meter:
+
+completeness_pct for last 24h
+
+last_seen within the last 1–2 hours
+
+expected_points vs actual_points matches your configured cadence
+
+6.2. Frontend ingestion health widget
+In the frontend you have:
+
+ts
+Copy code
 export interface IngestHealthMeter {
   site_id: string;
   meter_id: string;
@@ -154,386 +401,334 @@ export interface IngestHealthResponse {
   meters: IngestHealthMeter[];
 }
 
-// Add to your API helpers
 export async function getIngestHealth(
   windowHours: number = 24
 ): Promise<IngestHealthResponse> {
   const res = await api.get<IngestHealthResponse>(
-    `/timeseries/ingest_health`,
+    "/timeseries/ingest_health",
     {
       params: { window_hours: windowHours },
     }
   );
   return res.data;
 }
-This is read-only and piggybacks on your existing axios instance (with JWT + refresh).
+You can surface this in:
 
-1. Pilot scope & success criteria
-1.1 Scope definition
+A small data-health chip on Dashboard or SiteView, or
 
-Sites: 1 factory, 1–3 logical site_ids (e.g. main plant + warehouse).
+A dedicated Ingestion Health section/page for operators.
 
-Meters:
+For the pilot, it’s enough that you can call getIngestHealth and visually see:
 
-At minimum: main-incomer per site.
+Which meters are healthy
 
-Ideally: 2–5 key sub-meters (chillers, compressors, HVAC, process line).
+Which meters have gaps
 
-Data cadence: hourly kWh values.
+Whether completeness is good enough for analytics to be trusted
 
-History:
+7. Pilot onboarding workflow (step-by-step)
+7.1. Preparation (CEI side)
+ Create org + operator user dedicated to the pilot.
 
-Target: last 30–90 days (if available) via CSV/API.
+ Configure site_ids and meter_ids and share the mapping table.
 
-Ongoing: live hourly pushes.
+ Generate an integration token for that org.
 
-1.2 Success metrics (hard)
+ Prepare:
 
-CEI ingests > 95% of expected hourly points over the pilot period.
+docs/directtimeseriesingestion.md
 
-Data gap alarms < 2% of hours (per site/meter).
+This docs/pilot_runbook.md
 
-CEI identifies at least 3 actionable inefficiencies (night/weekend waste, abnormal spikes, poor baseload, etc.).
+One or two sample JSON payloads and test commands (curl / PowerShell).
 
-Clear narrative: “CEI shows X–Y% avoidable kWh and €A–B per year savings potential.”
+7.2. Kickoff with client (60–90 min)
+Agenda:
 
-2. Setup on CEI side
-2.1 Create org + operator account
+Explain what CEI needs
 
-Create the factory org in CEI (via signup or admin tooling).
+Hourly kWh per site_id / meter_id
 
-Define:
+UTC timestamps
 
-organization_name (e.g. “Factory Org A – Pilot 2025”)
+Stable IDs
 
-Primary operator user: factory-operator@clientdomain.com
+Review mapping table
 
-Operator user is used only for:
+Confirm the sites and meters match how they think about the plant.
 
-Checking dashboards, alerts, reports.
-
-Creating integration tokens.
-
-2.2 Seed sites & meters
-
-In CEI admin/backoffice (or via your existing seeding tools):
-
-For each physical site:
-
-Create site_id like site-XX (document in a mapping table you’ll send to the client).
-
-Add human labels (e.g. “Bologna Plant – Main Production”).
-
-Define expected meters per site:
-
-main-incomer (required)
-
-Optional: compressor-bank, chiller-01, hvac-floor1, etc.
-
-Deliverable to client: “CEI Integration Mapping” table:
-
-Physical site name	CEI site_id	Physical meter description	CEI meter_id
-Bologna Plant – Main	site-22	Main incomer MCC	main-incomer
-Bologna Plant – Main	site-22	Compressor bank	compressor-bank
-Warehouse A	site-23	Warehouse incomer	main-incomer
-3. Integration token provisioning
-3.1 Create integration token
-
-Logged in as the operator user (e.g. factory-operator@cei.local or their real email):
-
-Go to Settings → Integration tokens (your existing UI).
-
-Create a new token:
-
-Name: factory-scada-line1 (or similar).
-
-Scope: bound to the factory org (implicit in your current model).
-
-Copy the plaintext (cei_int_…) and give it once to the client (encrypted channel ideally).
-
-Client must store:
-
-CEI_BASE_URL (e.g. https://cei-mvp.onrender.com)
-
-CEI_INT_TOKEN = cei_int_…
-
-4. Data model & API contract (quick recap)
-
-Use the doc you already wrote (directtimeseriesingestion.md) as the deep dive. For the runbook, keep the operator summary:
-
-Endpoint: POST /api/v1/timeseries/batch
-
-Auth: Authorization: Bearer cei_int_…
-
-Record schema:
-
-{
-  "site_id": "site-22",
-  "meter_id": "main-incomer",
-  "timestamp_utc": "2025-12-05T13:00:00Z",
-  "value": 152.3,
-  "unit": "kWh",
-  "idempotency_key": "site-22-main-incomer-2025-12-05T13:00:00Z"
-}
-
-
-Rules:
-
-timestamp_utc: UTC, ISO8601, Z-suffixed.
-
-value: numeric kWh, one value per hour per meter.
-
-unit: must be "kWh" (or omitted).
-
-idempotency_key: stable per site/meter/hour to make retries safe.
-
-5. Integration modes
-5.1 Direct API mode (preferred)
-
-Client’s SCADA/BMS/historian pushes hourly data directly to /timeseries/batch from their environment (Python, Node, etc.), using the schema above.
-
-Deliverables:
-
-A small Python (or Node) script in their environment, built from your docs/factory_client.py pattern.
-
-A cron / Windows Task Scheduler job (every 5–15 min) that:
-
-Pulls last hour’s data from SCADA.
-
-Transforms to CEI schema.
-
-POSTs it to /timeseries/batch.
-
-5.2 CSV bootstrap mode (initial backfill)
-
-For history, they can:
-
-Export CSV from SCADA/historian with columns:
-
-site_id, meter_id, timestamp_utc, value, unit
-
-Use your existing upload CSV flow (UI or API) to ingest historical data in bulk.
-
-This is already wired into CEI; this runbook just states: “For history, we may use CSV mode first, then switch to live API mode.”
-
-6. Pilot onboarding workflow (step-by-step)
-6.1 Preparation (CEI side)
-
-Create org + operator user.
-
-Configure site_ids and meter_ids.
-
-Generate integration token, store ID and expiry policy in your internal sheet.
-
-Prepare:
-
-directtimeseriesingestion.md
-
-This pilot_runbook.md
-
-A sample payload JSON and test commands.
-
-6.2 Kickoff with client
-
-In a 60–90 minute working session:
-
-Explain:
-
-What CEI needs: hourly kWh per site/meter.
-
-KPI: data completeness, stable ingestion.
-
-Review mapping table and confirm all meters.
-
-Hand over credentials:
+Hand over integration details
 
 CEI_BASE_URL
 
 CEI_INT_TOKEN
 
-site_id / meter_id table
+site_id / meter_id mapping
 
-Decide integration mode:
+Decide integration mode
 
-Direct API from SCADA?
+Direct API from SCADA/historian?
 
-Or export to CSV + a small relay script?
+Or CSV export + small relay script using /timeseries/batch?
 
-6.3 Technical integration (client’s action items)
-
+7.3. Technical integration (client’s action items)
 Client engineers:
 
-Implement the small script:
+Implement a small client:
 
-Use your docs/factory_client.py as a template.
+Start from your docs/factory_client.py template.
 
-Replace fake ramp logic with their real data source.
+Replace the “ramp” or CSV stub with real data pulls from SCADA/historian.
 
 Configure environment:
 
-Set CEI_BASE_URL, CEI_INT_TOKEN, and any SCADA connection params.
+CEI_BASE_URL
+
+CEI_INT_TOKEN
+
+Any SCADA connection parameters.
 
 Run a one-off test:
 
-Ingest a single hour for a single meter.
+Ingest 1–2 hours for one meter.
 
-Verify response: {"ingested":1,"skipped_duplicate":0,"failed":0,"errors":[]}.
+Confirm CEI response contains:
 
-Turn on scheduled job at desired cadence (e.g. every 15 min).
+json
+Copy code
+{ "ingested": 1, "skipped_duplicate": 0, "failed": 0, "errors": [] }
+Turn on a scheduled job:
 
-7. Validation: does the pipeline actually work?
-7.1 Ingestion checks
+Every 5–15 minutes:
 
-On your side:
+Look back one or two hours.
 
-Hit /api/v1/timeseries/summary and /series for the relevant site_id/meter_id:
+Pull any new readings.
 
-Check that the last 24h show non-zero points.
+Send them to /timeseries/batch.
 
-Use the existing /timeseries/export to pull CSV and spot-check:
+8. Validation: end-to-end pipeline sanity
+Once data is flowing, you verify from both the API and the UI.
 
-Timestamps align with their expected hours.
+8.1. Ingestion checks (API level)
+Hit /api/v1/timeseries/summary and /api/v1/timeseries/series with site_id / meter_id:
 
-Values match one-to-one with SCADA exports.
+Confirm last 24h show non-zero points and sensible totals.
 
-7.2 Frontend checks
+Use /api/v1/timeseries/export:
 
+Pull CSV for the pilot site/meter for last few days.
+
+Ask the client for a SCADA export for the same window.
+
+Spot-check:
+
+Timestamps align hour-for-hour.
+
+Values match (allowing for rounding or aggregation differences).
+
+8.2. Frontend checks (operator level)
 In CEI UI:
 
-Dashboard:
+Dashboard
 
-Last 24 h card shows reasonable totals for the pilot site(s).
+Last 24h card shows reasonable totals for the pilot site(s).
 
-SiteView:
+No obviously insane values.
 
-Trend chart populated with recent hours.
+SitesList
 
-Baseline/forecast cards not obviously broken by new data.
+Pilot site appears.
 
-Alerts:
+Baseline deviation pill shows neutral/positive/negative in a way that makes sense once enough history exists.
 
-Night/weekend/spike alerts begin to populate after some data accumulates.
+SiteView
 
-Reports:
+24h trend chart is populated and smooth.
 
-7-day tables make sense once a week of data is in.
+KPI snapshot (24h vs baseline, 7d vs previous 7d) shows plausible numbers.
 
-8. Operations during the pilot
-8.1 Monitoring ingestion health (manual v1)
+Baseline profile text describes realistic mean / p50 / p90.
 
-Until you build a dedicated ingestion-health page, do this:
+Forecast strip (stub) matches the rough shape of recent 24h.
 
-Daily checks:
+Hybrid narrative card gives a coherent story (not nonsense).
 
-/timeseries/summary?site_id=...&window_hours=24 – confirm points match 24 (main incomer).
+Site alerts strip shows local alerts when rules trigger.
 
-If points << 24, coordinate with client to check SCADA job logs.
+Site timeline (if wired to /site-events) shows:
 
-Weekly:
+Ingestion windows
 
-/timeseries/export over last 7 * 24 hours and compare with a SCADA export.
+Alert windows
 
-You can later formalize this as:
+Alerts page
 
-A dedicated endpoint like /analytics/ingest-metrics summarizing:
+Night vs day, weekend vs weekday, and spike alerts start appearing for the pilot site.
 
-Last_seen_timestamp per meter.
+Severity (warning / critical) aligns with reality.
 
-% completeness in last 24h / 7d.
+Reports page
 
-Error counts per code (INVALID_UNIT, ORG_MISMATCH, etc.).
+7-day tables make sense once a week of data is present.
 
-8.2 Alert and anomaly tracking
+CSV exports open cleanly and match what you see in the charts.
 
+If any of these look off, check:
+
+Ingested timestamps (local vs UTC confusion)
+
+Whether they’re sending cumulative energy instead of interval (or vice versa)
+
+Unit mistakes (kW vs kWh)
+
+9. Operations during the pilot
+9.1. Monitoring ingestion health
+Initial manual practice:
+
+Daily
+
+Check /timeseries/ingest_health?window_hours=24:
+
+completeness_pct ≥ 90–95% for key meters
+
+last_seen < 2 hours old
+
+If completeness is low:
+
+Check factory client logs
+
+Confirm SCADA export job is running
+
+Check network / firewall issues toward CEI
+
+Weekly
+
+Use /timeseries/export for last 7 days for key meters.
+
+Compare with SCADA export to ensure no silent drift.
+
+The frontend ingestion-health widget (powered by getIngestHealth) should be used by you to quickly see red vs green meters during the pilot.
+
+9.2. Alerts and anomaly tracking
 During the pilot:
 
-Tag each alert or anomaly with:
+Use the Alerts page + SiteView to triage:
+
+Night-load alerts
+
+Weekend-load alerts
+
+Spike alerts
+
+Baseline deviation alerts
+
+Track each meaningful alert in a simple spreadsheet or notes doc:
 
 site_id, meter_id
 
-Rule type (night-load, weekend-load, spike, baseline deviation)
+Rule type (night, weekend, spike, baseline)
 
 Estimated wasted kWh / € impact
 
-Root cause once known (e.g. compressor left on idle, HVAC scheduling, process drift)
+Root cause (once confirmed):
+e.g. “compressor left on idle“, “HVAC schedule bug”, “extra shift run late”
 
-Maintain this in a simple spreadsheet for now.
+9.3. Site events & timeline
+The Site Timeline (driven by /site-events) aggregates:
 
-9. Weekly review cadence
+Ingestion events for a site (windows where data arrived)
 
+Alert events fired for that site
+
+Use this in weekly reviews to anchor the conversation:
+
+“Here’s when ingestion started / resumed.”
+
+“Here are the alert windows where CEI flagged waste.”
+
+“Here’s how those align with your reported maintenance / operational changes.”
+
+(Manual “note” events are a natural next iteration – for now, you can track narrative notes separately in your report or spreadsheet.)
+
+10. Weekly review cadence
 Every week with the client:
 
 Ingestion report
 
-Data completeness (% of expected points).
+Data completeness for each key meter (completeness_pct from ingest_health)
 
-Any ingestion errors (by TimeseriesIngestErrorCode).
+Any ingestion errors or gaps with root cause status
 
 Insights & actions
 
-New alerts triggered.
+New alerts triggered, especially repeated ones
 
-Confirmed issues and remedial actions.
+Specific anomalies and hypotheses from SiteView (baseline vs actual, spikes, hybrid narrative)
+
+Actions taken
+
+Document operational changes: schedule tweaks, shutdown procedures, parameter changes
+
+Link back to the SiteView/Timeline time windows
 
 Impact tracking
 
-Rough estimate of avoided energy (kWh & €) from changes already made.
+Rough estimate of avoided energy (kWh & €) using:
+
+Baseline vs actual from KPIs / insights
+
+Client’s tariff assumptions
 
 Next week’s focus
 
-Which meters or lines to drill into next.
+Which meters or lines to drill into next
 
-10. Pilot close-out
+Any additional data sources (more meters, temperatures, production counts)
 
-At the end of 4–8 weeks:
+11. Pilot close-out
+At the end of 4–8 weeks, deliver a concise Pilot Report:
 
-Deliver a short written Pilot Report:
+Data coverage
 
-Data coverage achieved.
+Completeness achieved for each key meter
 
-Key anomalies found.
+Duration of stable data (e.g. 6 weeks of clean hourly data)
 
-Operational changes recommended / implemented.
+Key findings
 
-Estimated savings potential and payback.
+Night/weekend baseload issues
 
-Decision gates:
+Spikes around start-up/shutdown
 
-Extend pilot to more sites/meters.
+Sites/machines with persistent over-baseline usage
 
-Move to paid subscription / full rollout.
+Actions and outcomes
 
-Park or pivot.
+Operational changes recommended
 
-## 6. Verify data completeness with ingest health
+Changes implemented during pilot
 
-Once the factory client is pushing data into CEI, we want a fast, deterministic way to confirm that:
+Early impact indicators (kWh and €)
 
-- The right **sites/meters** are receiving data
-- The **last 24 hours** (or other window) are reasonably complete
-- We can spot gaps before analytics and alerts look “wrong”
+Savings narrative
 
-### 6.1. Backend API: `/api/v1/timeseries/ingest_health`
+Estimated % of avoidable kWh
 
-**Endpoint**
+Estimated € savings per year
 
-- Method: `GET`
-- Path: `/api/v1/timeseries/ingest_health`
-- Auth: same JWT or integration-token org scope as `/timeseries/batch`
-- Query params:
-  - `window_hours` (int, required) – typically `24` or `168`
+Payback potential vs CEI cost
 
-**Example (local dev, pilot JWT)**
+Decision gates
 
-```powershell
-# Re-use pilot token
-$token = "<your_pilot_access_token>"
-$authHeader = "Bearer $token"
+Extend pilot to more sites/meters
 
-$health = Invoke-RestMethod `
-  -Method GET `
-  -Uri "http://127.0.0.1:8000/api/v1/timeseries/ingest_health?window_hours=24" `
-  -Headers @{ Authorization = $authHeader }
+Move to paid subscription / full rollout
 
-$health
-$health.meters | Format-Table site_id, meter_id, expected_points, actual_points, completeness_pct, last_seen
+Park or pivot if data or organizational readiness isn’t there yet
+
+This runbook, your direct ingestion docs, and the CEI UI (Dashboard, Sites, SiteView, Alerts, Reports, Timeline) together form the standard operating playbook for running and scaling early pilots.
+
+makefile
+Copy code
+::contentReference[oaicite:0]{index=0}

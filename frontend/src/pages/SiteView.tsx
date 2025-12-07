@@ -7,6 +7,8 @@ import {
   getSiteInsights, // now actively used
   getSiteForecast, // NEW: typed forecast helper
   getSiteKpi, // NEW: KPI helper
+  createSiteEvent, // NEW: operator note endpoint
+  deleteSite,
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
@@ -15,6 +17,7 @@ import type { SiteKpi } from "../services/api";
 import { buildHybridNarrative } from "../utils/hybridNarrative";
 import SiteAlertsStrip from "../components/SiteAlertsStrip";
 import { downloadCsv } from "../utils/csv";
+import SiteTimelineCard from "../components/SiteTimelineCard";
 
 type SiteRecord = {
   id: number | string;
@@ -143,6 +146,15 @@ const SiteView: React.FC = () => {
   const [kpi, setKpi] = useState<SiteKpi | null>(null);
   const [kpiLoading, setKpiLoading] = useState(false);
   const [kpiError, setKpiError] = useState<string | null>(null);
+
+  // NEW: operator note form state
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteBody, setNoteBody] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
+
+  // NEW: key to trigger SiteTimeline reload after saving a note
+  const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
 
   // Map numeric route ID -> timeseries site key (e.g. "site-1")
   const siteKey = id ? `site-${id}` : undefined;
@@ -422,6 +434,27 @@ const SiteView: React.FC = () => {
     navigate(`/upload?site_id=${encodeURIComponent(siteKey)}`);
   };
 
+  const handleDeleteSite = async () => {
+   if (!id) return;
+
+   const confirmed = window.confirm(
+     "This will permanently delete this site and its associated data in CEI. Are you sure?"
+   );
+   if (!confirmed) return;
+
+   try {
+     await deleteSite(id);
+     alert("Site deleted.");
+     navigate("/sites");
+   } catch (e: any) {
+     console.error("Failed to delete site", e);
+     alert(
+       e?.response?.data?.detail ||
+         "Failed to delete site. Please try again or check logs."
+     );
+   }
+ };
+
   // NEW: small helpers for KPI block
   const formatPct = (value: number | null | undefined): string => {
     if (value === null || value === undefined) return "—";
@@ -438,7 +471,7 @@ const SiteView: React.FC = () => {
     return "cei-pill-neutral";
   };
 
-    const renderForecastCard = () => {
+  const renderForecastCard = () => {
     if (forecastLoading) {
       return (
         <section className="cei-card">
@@ -661,6 +694,45 @@ const SiteView: React.FC = () => {
     );
   };
 
+  const handleAddSiteNote = async (
+    e: React.FormEvent<HTMLFormElement>
+  ) => {
+    e.preventDefault();
+    if (!siteKey) return;
+
+    const trimmedTitle = noteTitle.trim();
+    const trimmedBody = noteBody.trim();
+
+    if (!trimmedTitle && !trimmedBody) {
+      setNoteError(
+        "Please add a title or some text before saving."
+      );
+      return;
+    }
+
+    setNoteSaving(true);
+    setNoteError(null);
+
+    try {
+      await createSiteEvent(siteKey, {
+        type: "operator_note",
+        title: trimmedTitle || undefined,
+        body: trimmedBody || undefined,
+      });
+
+      setNoteTitle("");
+      setNoteBody("");
+      setTimelineRefreshKey((k) => k + 1);
+    } catch (err: any) {
+      const detail =
+        err?.response?.data?.detail ||
+        err?.message ||
+        "Failed to save note. Please try again.";
+      setNoteError(detail);
+    } finally {
+      setNoteSaving(false);
+    }
+  };
 
   return (
     <div
@@ -756,6 +828,27 @@ const SiteView: React.FC = () => {
           >
             Upload CSV for this site
           </button>
+                    {/* NEW: per-site scoped CSV upload entrypoint */}
+
+         {/* NEW: hard delete site (red pill) */}
+         <button
+           type="button"
+           className="cei-btn"
+           onClick={handleDeleteSite}
+           style={{
+             marginTop: "0.3rem",
+             fontSize: "0.75rem",
+             padding: "0.25rem 0.7rem",
+             borderRadius: "999px",
+             border: "1px solid rgba(248, 113, 113, 0.8)", // red-400-ish
+             color: "rgb(248, 113, 113)",
+             background:
+               "radial-gradient(circle at top left, rgba(239, 68, 68, 0.14), rgba(15, 23, 42, 0.95))",
+           }}
+         >
+           Delete site
+         </button>
+
         </div>
       </section>
 
@@ -1343,6 +1436,125 @@ const SiteView: React.FC = () => {
       {siteKey && (
         <section style={{ marginTop: "0.75rem" }}>
           <SiteAlertsStrip siteKey={siteKey} limit={3} />
+        </section>
+      )}
+
+      {/* NEW: operator notes + timeline */}
+      {siteKey && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <div className="dashboard-main-grid">
+            <div className="cei-card">
+              <div className="cei-card-header">
+                <div>
+                  <div
+                    style={{
+                      fontSize: "0.9rem",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Add site note
+                  </div>
+                  <div
+                    style={{
+                      marginTop: "0.2rem",
+                      fontSize: "0.8rem",
+                      color: "var(--cei-text-muted)",
+                    }}
+                  >
+                    Log operational changes, decisions, or observations. These
+                    events populate the activity timeline for this site.
+                  </div>
+                </div>
+                {noteSaving && (
+                  <span className="cei-pill cei-pill-neutral">
+                    Saving…
+                  </span>
+                )}
+              </div>
+
+              {noteError && (
+                <div
+                  style={{
+                    marginTop: "0.5rem",
+                    fontSize: "0.78rem",
+                    color: "#f97373",
+                  }}
+                >
+                  {noteError}
+                </div>
+              )}
+
+              <form
+                onSubmit={handleAddSiteNote}
+                style={{ marginTop: "0.6rem" }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.4rem",
+                  }}
+                >
+                  <input
+                    type="text"
+                    placeholder="Short title (optional)"
+                    value={noteTitle}
+                    onChange={(e) => setNoteTitle(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "0.45rem 0.6rem",
+                      borderRadius: "0.5rem",
+                      border: "1px solid rgba(148, 163, 184, 0.5)",
+                      backgroundColor: "rgba(15,23,42,0.9)",
+                      color: "var(--cei-text-main)",
+                      fontSize: "0.85rem",
+                    }}
+                  />
+                  <textarea
+                    placeholder="What changed at this site? E.g. 'HVAC schedule updated', 'Line 2 on reduced shift', 'Night audit performed'."
+                    value={noteBody}
+                    onChange={(e) => setNoteBody(e.target.value)}
+                    rows={3}
+                    style={{
+                      width: "100%",
+                      padding: "0.5rem 0.6rem",
+                      borderRadius: "0.5rem",
+                      border: "1px solid rgba(148, 163, 184, 0.5)",
+                      backgroundColor: "rgba(15,23,42,0.9)",
+                      color: "var(--cei-text-main)",
+                      fontSize: "0.85rem",
+                      resize: "vertical",
+                    }}
+                  />
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      marginTop: "0.2rem",
+                    }}
+                  >
+                    <button
+                      type="submit"
+                      className="cei-btn"
+                      disabled={noteSaving || (!noteTitle && !noteBody)}
+                      style={{
+                        fontSize: "0.8rem",
+                        padding: "0.35rem 0.9rem",
+                      }}
+                    >
+                      {noteSaving ? "Saving…" : "Save note"}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <SiteTimelineCard
+              siteId={siteKey}
+              windowHours={168}
+              refreshKey={timelineRefreshKey}
+            />
+          </div>
         </section>
       )}
 

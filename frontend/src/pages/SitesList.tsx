@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 import {
   getSites,
   createSite,
-  getSiteKpi, // NEW: use KPI endpoint instead of summary + insights combo
+  getSiteKpi,
+  deleteSite,
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
@@ -21,7 +22,6 @@ type SiteTrendMetrics = {
   deviationPct24h: number | null;
   expectedKwh24h: number | null;
 
-  // NEW: baseline warm-up metadata (optional; best-effort from KPI)
   isBaselineWarmingUp?: boolean;
   totalHistoryDays?: number | null;
 };
@@ -36,7 +36,6 @@ const SitesList: React.FC = () => {
   const [newLocation, setNewLocation] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
 
-  // Per-site 24h metrics for trend badge
   const [siteMetrics, setSiteMetrics] = useState<
     Record<string, SiteTrendMetrics>
   >({});
@@ -54,10 +53,9 @@ const SitesList: React.FC = () => {
         const normalized = Array.isArray(data) ? (data as SiteRecord[]) : [];
         setSites(normalized);
 
-        // --- load per-site 24h metrics for trend badges via KPI endpoint ---
         if (normalized.length > 0) {
           const entries = await Promise.all(
-            normalized.map(async (site) => {
+            normalized.map(async (site: SiteRecord) => {
               const idStr = String(site.id);
               const siteKey = `site-${idStr}`;
 
@@ -68,7 +66,6 @@ const SitesList: React.FC = () => {
               };
 
               try {
-                // keep this as any so we can read future fields without breaking TS
                 const kpi: any = await getSiteKpi(siteKey);
 
                 const total24 =
@@ -88,7 +85,6 @@ const SitesList: React.FC = () => {
                     ? kpi.baseline_24h_kwh
                     : null;
 
-                // NEW: baseline warm-up flags (best-effort)
                 const isBaselineWarmingUpFromApi =
                   typeof kpi?.is_baseline_warming_up === "boolean"
                     ? Boolean(kpi.is_baseline_warming_up)
@@ -99,8 +95,6 @@ const SitesList: React.FC = () => {
                     ? kpi.total_history_days
                     : undefined;
 
-                // Heuristic fallback:
-                // if we have energy but no deviation yet, baseline is effectively still "learning"
                 const heuristicWarmingUp =
                   isBaselineWarmingUpFromApi === undefined &&
                   total24 > 0 &&
@@ -118,7 +112,6 @@ const SitesList: React.FC = () => {
                       : null,
                 };
               } catch (_e) {
-                // If KPI fails (no data, 404, etc.), keep neutral defaults
                 metrics = {
                   totalKwh24h: 0,
                   deviationPct24h: null,
@@ -174,9 +167,9 @@ const SitesList: React.FC = () => {
         name: newName.trim(),
         location: newLocation.trim() || undefined,
       };
-      const created = await createSite(payload);
+      const created = (await createSite(payload)) as SiteRecord;
 
-      setSites((prev) => [...prev, created as SiteRecord]);
+      setSites((prev: SiteRecord[]) => [...prev, created]);
 
       setNewName("");
       setNewLocation("");
@@ -188,6 +181,35 @@ const SitesList: React.FC = () => {
       );
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDeleteSite = async (id: number | string, name?: string) => {
+    const label = name || `site ${id}`;
+    const confirmed = window.confirm(
+      `Delete ${label}? This will permanently remove this site and its associated data in CEI.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteSite(id);
+      const idStr = String(id);
+
+      setSites((prev: SiteRecord[]) =>
+        prev.filter((s) => String(s.id) !== idStr)
+      );
+
+      setSiteMetrics((prev: Record<string, SiteTrendMetrics>) => {
+        const next = { ...prev };
+        delete next[idStr];
+        return next;
+      });
+    } catch (e: any) {
+      console.error("Failed to delete site", e);
+      alert(
+        e?.response?.data?.detail ||
+          "Failed to delete site. Please try again or check logs."
+      );
     }
   };
 
@@ -435,7 +457,7 @@ const SitesList: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {sites.map((site) => {
+                  {sites.map((site: SiteRecord) => {
                     const idStr = String(site.id);
                     const name = site.name || `Site ${idStr}`;
                     const location = site.location || "—";
@@ -463,7 +485,6 @@ const SitesList: React.FC = () => {
                       } else if (typeof dev === "number") {
                         const absPct = `${Math.abs(dev).toFixed(1)}%`;
 
-                        // Positive deviation = above baseline (worse)
                         if (dev >= 10) {
                           pillClassName = "cei-pill cei-pill-negative";
                           trendLabel = `▲ ${absPct} above baseline (24h)`;
@@ -471,7 +492,6 @@ const SitesList: React.FC = () => {
                           pillClassName = "cei-pill cei-pill-warning";
                           trendLabel = `▲ ${absPct} above baseline (24h)`;
                         } else if (dev <= -5) {
-                          // Clearly below baseline – good
                           pillClassName = "cei-pill cei-pill-positive";
                           trendLabel = `▼ ${absPct} below baseline (24h)`;
                         } else if (dev < -1) {
@@ -482,7 +502,6 @@ const SitesList: React.FC = () => {
                           trendLabel = "● Near baseline (24h)";
                         }
                       } else {
-                        // energy is present but we couldn't classify
                         pillClassName = "cei-pill cei-pill-neutral";
                         trendLabel = "Learning baseline (24h)";
                       }
@@ -527,16 +546,46 @@ const SitesList: React.FC = () => {
                           </span>
                         </td>
                         <td>
-                          <Link
-                            to={`/sites/${idStr}`}
+                          <div
                             style={{
-                              fontSize: "0.8rem",
-                              color: "var(--cei-text-accent)",
-                              textDecoration: "none",
+                              display: "flex",
+                              gap: "0.4rem",
+                              justifyContent: "flex-end",
+                              flexWrap: "wrap",
                             }}
                           >
-                            View site →
-                          </Link>
+                            <Link
+                              to={`/sites/${idStr}`}
+                              className="cei-btn cei-btn-ghost"
+                              style={{
+                                fontSize: "0.8rem",
+                                padding: "0.25rem 0.6rem",
+                                textDecoration: "none",
+                              }}
+                            >
+                              View
+                            </Link>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDeleteSite(site.id, site.name)
+                              }
+                              className="cei-btn"
+                              style={{
+                                fontSize: "0.8rem",
+                                padding: "0.25rem 0.6rem",
+                                borderRadius: "999px",
+                                border:
+                                  "1px solid rgba(248, 113, 113, 0.8)",
+                                color: "rgb(248, 113, 113)",
+                                background:
+                                  "radial-gradient(circle at top left, rgba(239, 68, 68, 0.12), rgba(15, 23, 42, 0.95))",
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
