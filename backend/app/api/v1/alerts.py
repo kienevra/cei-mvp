@@ -636,6 +636,11 @@ def _generate_alerts_for_window(
     organization_id: Optional[int] = None,
     user_id: Optional[int] = None,
 ) -> List[AlertOut]:
+    # Multi-tenant guard: an explicit empty set means "this org has no sites yet".
+    # In that case, the correct behavior is a clean slate: no alerts.
+    if allowed_site_ids is not None and len(allowed_site_ids) == 0:
+        return []
+
     now = datetime.utcnow()
     window_start = now - timedelta(hours=window_hours)
 
