@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.api.v1.auth import get_current_user
-from app.models import Site, User, TimeseriesRecord  # ← Site/User/TimeseriesRecord live here
-from app.db.models import SiteEvent  # ← SiteEvent lives here
+from app.models import Site, User, TimeseriesRecord
+from app.db.models import SiteEvent, AlertEvent
 
 router = APIRouter(prefix="/sites", tags=["sites"])
 
@@ -121,93 +121,72 @@ def delete_site(
     user: User = Depends(get_current_user),
 ):
     """
-    Hard-delete a site AND all org-scoped data that uses its site_id key.
-
-    This ensures that if a new site is later created with the same numeric ID
-    (and therefore the same timeseries site_id like "site-1"), it starts with
-    a clean slate.
+    Hard-delete a site and all of its org-scoped footprint.
 
     Multi-tenant behavior:
-    - Requires user.organization_id; sites are always attached to an org.
+    - If user.organization_id is set -> only allow deleting sites in that org.
+    - If user.organization_id is None -> fall back to legacy behavior (by id only).
+
+    Red-pill behavior:
+    - Deletes the Site row.
+    - Deletes all TimeseriesRecord rows whose site_id matches this site
+      (both "site-<id>" and "<id>").
+    - Deletes SiteEvent timeline entries for this site.
+    - Deletes AlertEvent history/workflow entries for this site.
     """
     org_id = getattr(user, "organization_id", None)
-    if org_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Sites are scoped to an organization.",
-        )
 
-    site: Site | None = (
-        db.query(Site)
-        .filter(Site.id == site_id, Site.org_id == org_id)
-        .first()
-    )
-    if site is None:
+    # 1) Resolve site row with org scoping
+    site_query = db.query(Site).filter(Site.id == site_id)
+    if org_id is not None:
+        site_query = site_query.filter(Site.org_id == org_id)
+
+    site = site_query.first()
+    if not site:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Site not found",
         )
 
-    # Timeseries uses string keys like "site-1"; some legacy data might just use "1".
-    site_key = f"site-{site.id}"
-    legacy_key = str(site.id)
+    # We track timeseries using "site-<id>" keys; sometimes plain "<id>" leaks in.
+    timeseries_keys = {f"site-{site.id}", str(site.id)}
 
     logger.info(
-        "Deleting site %s (org_id=%s, keys=[%s, %s]) with cascade",
+        "Deleting site %s (org_id=%s, keys=%s) with cascade",
         site.id,
         org_id,
-        site_key,
-        legacy_key,
+        sorted(timeseries_keys),
     )
 
-    # 1) Delete timeseries rows for this site key
-    ts_deleted = (
+    # 2) Nuke timeseries data for this site_id key space
+    deleted_ts = (
         db.query(TimeseriesRecord)
-        .filter(
-            TimeseriesRecord.organization_id == org_id,
-            TimeseriesRecord.site_id.in_([site_key, legacy_key]),
-        )
+        .filter(TimeseriesRecord.site_id.in_(timeseries_keys))
         .delete(synchronize_session=False)
     )
 
-    # 2) Delete site-level events/timeline rows
-    se_deleted = (
-        db.query(SiteEvent)
-        .filter(
-            SiteEvent.organization_id == org_id,
-            SiteEvent.site_id.in_([site_key, legacy_key]),
-        )
-        .delete(synchronize_session=False)
-    )
+    # 3) Nuke alert history/workflow rows tied to this site
+    alert_q = db.query(AlertEvent).filter(AlertEvent.site_id.in_(timeseries_keys))
+    if org_id is not None and hasattr(AlertEvent, "organization_id"):
+        alert_q = alert_q.filter(AlertEvent.organization_id == org_id)
+    deleted_alerts = alert_q.delete(synchronize_session=False)
 
-    # 3) (OPTIONAL, best-effort) Delete alert events if model exists
-    ae_deleted = 0
-    try:
-        from app.db.models import AlertEvent  # type: ignore
+    # 4) Nuke site timeline events tied to this site
+    se_q = db.query(SiteEvent).filter(SiteEvent.site_id.in_(timeseries_keys))
+    if org_id is not None and hasattr(SiteEvent, "organization_id"):
+        se_q = se_q.filter(SiteEvent.organization_id == org_id)
+    deleted_site_events = se_q.delete(synchronize_session=False)
 
-        ae_deleted = (
-            db.query(AlertEvent)
-            .filter(
-                AlertEvent.organization_id == org_id,
-                AlertEvent.site_id.in_([site_key, legacy_key]),
-            )
-            .delete(synchronize_session=False)
-        )
-    except Exception:
-        logger.exception(
-            "Failed to cascade-delete AlertEvent rows for site=%s", site.id
-        )
-
-    logger.info(
-        "Cascade delete for site %s (org_id=%s): timeseries=%s, site_events=%s, alert_events=%s",
-        site.id,
-        org_id,
-        ts_deleted,
-        se_deleted,
-        ae_deleted,
-    )
-
-    # Finally, remove the Site itself
+    # 5) Finally delete the site row itself
     db.delete(site)
     db.commit()
+
+    logger.info(
+        "Deleted site %s cascade complete: timeseries=%s, alert_events=%s, site_events=%s",
+        site_id,
+        deleted_ts,
+        deleted_alerts,
+        deleted_site_events,
+    )
+
     return

@@ -185,6 +185,11 @@ def list_site_events(
         le=500,
         description="Maximum number of site events to return.",
     ),
+    page: int = Query(
+        1,
+        ge=1,
+        description="Page number for offset-based pagination (used together with limit).",
+    ),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ) -> List[SiteEventOut]:
@@ -196,6 +201,7 @@ def list_site_events(
     - window_hours (look-back from now)
     - type (event_type)
     - limit (max rows)
+    - page (for offset-based pagination)
     """
 
     organization_id, _allowed_site_ids = _resolve_org_context(user)
@@ -221,7 +227,11 @@ def list_site_events(
     if event_type:
         q = q.filter(SiteEvent.type == event_type)
 
-    q = q.order_by(SiteEvent.created_at.desc()).limit(limit)
+    # Apply ordering, then offset + limit for pagination
+    q = q.order_by(SiteEvent.created_at.desc())
+
+    offset = (page - 1) * limit
+    q = q.offset(offset).limit(limit)
 
     rows: List[SiteEvent] = q.all()
 

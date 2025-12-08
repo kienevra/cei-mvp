@@ -509,17 +509,19 @@ export interface SiteEvent {
 
 /**
  * Read-only site events for a given site_id.
- * Backed by GET /site-events?site_id=...&window_hours=...&limit=...
+ * Backed by GET /site-events?site_id=...&window_hours=...&limit=...&page=...
  */
 export async function getSiteEvents(
   siteId: string,
   windowHours: number = 168,
-  limit: number = 100
+  limit: number = 100,
+  page: number = 1
 ): Promise<SiteEvent[]> {
   const params: Record<string, string | number> = {
     site_id: siteId,
     window_hours: windowHours,
     limit,
+    page,
   };
 
   const resp = await api.get<SiteEvent[]>("/site-events", { params });
