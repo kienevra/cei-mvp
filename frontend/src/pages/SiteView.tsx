@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import api, {
+import {
   getSite,
   getTimeseriesSummary,
   getTimeseriesSeries,
@@ -9,6 +9,7 @@ import api, {
   getSiteKpi, // NEW: KPI helper
   createSiteEvent, // NEW: operator note endpoint
   deleteSite,
+  getSiteOpportunities, // backend-driven opportunity measures
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
@@ -294,16 +295,25 @@ const SiteView: React.FC = () => {
     setOppsLoading(true);
     setOppsError(null);
     setOpportunities([]);
-    api
-      .get(`/sites/${id}/opportunities`)
-      .then((resp) => {
+
+    getSiteOpportunities(siteKey)
+      .then((data: any) => {
         if (!isMounted) return;
-        const data = resp.data as any;
-        const list: BackendOpportunity[] = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.opportunities)
-          ? data.opportunities
+
+        // Avoid the Array.isArray + data.opportunities type confusion
+        let raw: unknown;
+        if (Array.isArray(data)) {
+          // Endpoint returned a bare list
+          raw = data;
+        } else {
+          // Endpoint returned { opportunities: [...] }
+          raw = (data as any)?.opportunities;
+        }
+
+        const list: BackendOpportunity[] = Array.isArray(raw)
+          ? (raw as BackendOpportunity[])
           : [];
+
         setOpportunities(list);
       })
       .catch((e: any) => {
@@ -1805,7 +1815,9 @@ const SiteView: React.FC = () => {
                       <li key={o.id} style={{ marginBottom: "0.25rem" }}>
                         <strong>{o.name}</strong>
                         {o.description ? ` – ${o.description}` : ""}
-                        <span style={{ display: "block", fontSize: "0.78rem" }}>
+                        <span
+                          style={{ display: "block", fontSize: "0.78rem" }}
+                        >
                           {savings != null && (
                             <>
                               ≈{" "}
