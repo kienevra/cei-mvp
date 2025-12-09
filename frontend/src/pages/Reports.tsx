@@ -4,7 +4,8 @@ import {
   getSites,
   getTimeseriesSummary,
   getAccountMe,
-  getSiteInsights, // <-- typed to accept 1–2 args
+  getSiteInsights,
+  getSiteOpportunities,
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
@@ -44,6 +45,19 @@ type SiteReportRow = {
   statsSource: string | null;
 };
 
+type SiteOpportunityRow = {
+  siteId: string;
+  siteName: string;
+  location?: string | null;
+  id: number;
+  name: string;
+  description: string;
+  est_annual_kwh_saved: number;
+  est_capex_eur: number;
+  simple_roi_years: number;
+  est_co2_tons_saved_per_year: number;
+};
+
 const Reports: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,12 +71,20 @@ const Reports: React.FC = () => {
   const [planKey, setPlanKey] = useState<string>("cei-starter");
   const [enableReports, setEnableReports] = useState<boolean>(true);
 
+  // Portfolio opportunities state (derived from /sites/{id}/opportunities)
+  const [topOpportunities, setTopOpportunities] = useState<SiteOpportunityRow[]>([]);
+  const [opportunitiesError, setOpportunitiesError] = useState<string | null>(
+    null
+  );
+
   useEffect(() => {
     let isMounted = true;
 
     async function loadReport() {
       setLoading(true);
       setError(null);
+      setTopOpportunities([]);
+      setOpportunitiesError(null);
 
       try {
         // 0) Pull account + plan flags
@@ -215,6 +237,75 @@ const Reports: React.FC = () => {
         );
 
         setSiteRows(rows);
+
+        // 4) Per-site opportunities (simple portfolio “top measures” view)
+        try {
+          if (normalizedSites.length === 0) {
+            setTopOpportunities([]);
+          } else {
+            const oppResults = await Promise.all(
+              normalizedSites.map(async (site) => {
+                const idStr = String(site.id);
+                try {
+                  const oppList = await getSiteOpportunities(idStr);
+                  const normalizedOpps = Array.isArray(oppList)
+                    ? oppList
+                    : [];
+                  return { site, opportunities: normalizedOpps };
+                } catch (_e) {
+                  return { site, opportunities: [] };
+                }
+              })
+            );
+
+            if (!isMounted) return;
+
+            const oppRows: SiteOpportunityRow[] = oppResults.flatMap(
+              ({ site, opportunities }) => {
+                const idStr = String(site.id);
+
+                // Take best 1–3 per site by ROI (lower is better)
+                const topForSite = [...opportunities]
+                  .sort((a: any, b: any) => {
+                    const aRoi =
+                      typeof a.simple_roi_years === "number"
+                        ? a.simple_roi_years
+                        : Number.POSITIVE_INFINITY;
+                    const bRoi =
+                      typeof b.simple_roi_years === "number"
+                        ? b.simple_roi_years
+                        : Number.POSITIVE_INFINITY;
+                    return aRoi - bRoi;
+                  })
+                  .slice(0, 3);
+
+                return topForSite.map((opp: any) => ({
+                  siteId: idStr,
+                  siteName: site.name || `Site ${idStr}`,
+                  location: site.location,
+                  id: opp.id,
+                  name: opp.name,
+                  description: opp.description,
+                  est_annual_kwh_saved: opp.est_annual_kwh_saved,
+                  est_capex_eur: opp.est_capex_eur,
+                  simple_roi_years: opp.simple_roi_years,
+                  est_co2_tons_saved_per_year:
+                    opp.est_co2_tons_saved_per_year,
+                }));
+              }
+            );
+
+            setTopOpportunities(oppRows);
+            setOpportunitiesError(null);
+          }
+        } catch (e: any) {
+          if (!isMounted) return;
+          setTopOpportunities([]);
+          setOpportunitiesError(
+            e?.message ||
+              "Failed to load opportunity measures."
+          );
+        }
       } catch (e: any) {
         if (!isMounted) return;
         setError(e?.message || "Failed to load reports.");
@@ -257,7 +348,7 @@ const Reports: React.FC = () => {
     0
   );
 
-  // --- CSV export via shared helper ---
+  // --- CSV export via shared helper (7-day site reports) ---
   const handleDownloadCsv = () => {
     if (!enableReports) {
       alert("Reports are not enabled for this plan.");
@@ -306,6 +397,33 @@ const Reports: React.FC = () => {
     }));
 
     downloadCsv("cei_7day_site_reports.csv", rows);
+  };
+
+  // --- CSV export for portfolio opportunities ---
+  const handleDownloadOpportunitiesCsv = () => {
+    if (!enableReports) {
+      alert("Reports are not enabled for this plan.");
+      return;
+    }
+    if (!topOpportunities.length) {
+      alert("No opportunity data available to export yet.");
+      return;
+    }
+
+    const rows = topOpportunities.map((row) => ({
+      site_id: row.siteId,
+      site_name: row.siteName,
+      location: row.location ?? "",
+      opportunity_id: row.id,
+      opportunity_name: row.name,
+      description: row.description,
+      est_annual_kwh_saved: row.est_annual_kwh_saved,
+      est_capex_eur: row.est_capex_eur,
+      simple_roi_years: row.simple_roi_years,
+      est_co2_tons_saved_per_year: row.est_co2_tons_saved_per_year,
+    }));
+
+    downloadCsv("cei_portfolio_opportunities.csv", rows);
   };
 
   return (
@@ -814,6 +932,164 @@ const Reports: React.FC = () => {
                 </table>
               </div>
             )}
+          </div>
+        </section>
+      )}
+
+      {/* Portfolio-level opportunities view */}
+      {enableReports && (
+        <section style={{ marginTop: "0.9rem" }}>
+          <div className="cei-card">
+            <div
+              style={{
+                marginBottom: "0.7rem",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "0.75rem",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: "0.9rem",
+                    fontWeight: 600,
+                  }}
+                >
+                  Top efficiency opportunities (portfolio)
+                </div>
+                <div
+                  style={{
+                    marginTop: "0.2rem",
+                    fontSize: "0.8rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  Best-ROI measures per site, derived from CEI’s opportunity
+                  engine. Use this as a punch-list with local teams: tackle
+                  the fastest payback items first.
+                </div>
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  className="cei-btn cei-btn-ghost"
+                  onClick={handleDownloadOpportunitiesCsv}
+                  disabled={loading || !topOpportunities.length}
+                >
+                  {loading ? "Preparing…" : "Download opportunities CSV"}
+                </button>
+              </div>
+            </div>
+
+            {loading && (
+              <div
+                style={{
+                  padding: "1.2rem 0.5rem",
+                  display: "flex",
+                  justifyContent: "center",
+                }}
+              >
+                <LoadingSpinner />
+              </div>
+            )}
+
+            {!loading && opportunitiesError && (
+              <div
+                style={{
+                  fontSize: "0.85rem",
+                  color: "var(--cei-text-muted)",
+                }}
+              >
+                {opportunitiesError}
+              </div>
+            )}
+
+            {!loading &&
+              !opportunitiesError &&
+              topOpportunities.length === 0 && (
+                <div
+                  style={{
+                    fontSize: "0.85rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  No opportunities surfaced yet. Once CEI has enough KPI
+                  context per site, the opportunity engine will start
+                  proposing high-leverage measures here.
+                </div>
+              )}
+
+            {!loading &&
+              !opportunitiesError &&
+              topOpportunities.length > 0 && (
+                <div style={{ overflowX: "auto" }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Site</th>
+                        <th>Location</th>
+                        <th>Measure</th>
+                        <th>Est. kWh saved / year</th>
+                        <th>Capex (EUR)</th>
+                        <th>Simple ROI (years)</th>
+                        <th>CO₂ saved (t / year)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...topOpportunities]
+                        .sort(
+                          (a, b) =>
+                            a.simple_roi_years - b.simple_roi_years
+                        )
+                        .map((row) => (
+                          <tr key={`${row.siteId}-${row.id}`}>
+                            <td>{row.siteName}</td>
+                            <td>{row.location || "—"}</td>
+                            <td>{row.name}</td>
+                            <td>
+                              {row.est_annual_kwh_saved > 0
+                                ? row.est_annual_kwh_saved.toLocaleString(
+                                    undefined,
+                                    {
+                                      maximumFractionDigits: 0,
+                                    }
+                                  )
+                                : "—"}
+                            </td>
+                            <td>
+                              {row.est_capex_eur > 0
+                                ? row.est_capex_eur.toLocaleString(
+                                    undefined,
+                                    {
+                                      style: "currency",
+                                      currency: "EUR",
+                                      maximumFractionDigits: 0,
+                                    }
+                                  )
+                                : "—"}
+                            </td>
+                            <td>
+                              {Number.isFinite(row.simple_roi_years)
+                                ? row.simple_roi_years.toFixed(2)
+                                : "—"}
+                            </td>
+                            <td>
+                              {Number.isFinite(
+                                row.est_co2_tons_saved_per_year
+                              )
+                                ? row.est_co2_tons_saved_per_year.toFixed(
+                                    2
+                                  )
+                                : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
           </div>
         </section>
       )}

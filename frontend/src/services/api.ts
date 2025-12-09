@@ -303,6 +303,37 @@ export async function getSiteKpi(
   return resp.data;
 }
 
+// ===== Site opportunities (per-site measures) =====
+
+export interface OpportunityMeasure {
+  id: number;
+  name: string;
+  description: string;
+  est_annual_kwh_saved: number;
+  est_capex_eur: number;
+  simple_roi_years: number;
+  est_co2_tons_saved_per_year: number;
+}
+
+/**
+ * Fetch opportunity measures for a single site.
+ * Backed by GET /sites/{site_id}/opportunities returning:
+ *   { opportunities: OpportunityMeasure[] }
+ */
+export async function getSiteOpportunities(
+  siteId: string | number
+): Promise<OpportunityMeasure[]> {
+  const idStr = String(siteId);
+
+  const resp = await api.get<{ opportunities: OpportunityMeasure[] }>(
+    `/sites/${idStr}/opportunities`
+  );
+
+  const list = (resp.data as any)?.opportunities;
+  return Array.isArray(list) ? list : [];
+}
+
+
 export async function getIngestHealth(
   windowHours: number = 24
 ): Promise<IngestHealthResponse> {
@@ -538,6 +569,45 @@ export async function createSiteEvent(
 ): Promise<SiteEvent> {
   const resp = await api.post<SiteEvent>(
     `/site-events/sites/${encodeURIComponent(siteId)}/events`,
+    payload
+  );
+  return resp.data;
+}
+
+/* ===== Manual opportunities (DB-backed, per site) ===== */
+
+export interface ManualOpportunity {
+  id: number;
+  site_id: number;
+  name: string;
+  description: string | null;
+}
+
+/**
+ * List manual opportunities for a given numeric site id.
+ * Backed by GET /sites/{site_id}/opportunities/manual
+ */
+export async function getManualOpportunities(
+  siteId: number | string
+): Promise<ManualOpportunity[]> {
+  const idStr = String(siteId);
+  const resp = await api.get<ManualOpportunity[]>(
+    `/sites/${idStr}/opportunities/manual`
+  );
+  return resp.data;
+}
+
+/**
+ * Create a manual opportunity for a given numeric site id.
+ * Backed by POST /sites/{site_id}/opportunities/manual
+ */
+export async function createManualOpportunity(
+  siteId: number | string,
+  payload: { name: string; description?: string }
+): Promise<ManualOpportunity> {
+  const idStr = String(siteId);
+  const resp = await api.post<ManualOpportunity>(
+    `/sites/${idStr}/opportunities/manual`,
     payload
   );
   return resp.data;

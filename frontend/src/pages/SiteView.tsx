@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import {
+import api, {
   getSite,
   getTimeseriesSummary,
   getTimeseriesSeries,
@@ -52,6 +52,16 @@ type SeriesResponse = {
 type TrendPoint = {
   label: string;
   value: number;
+};
+
+type BackendOpportunity = {
+  id: number;
+  name: string;
+  description?: string | null;
+  est_annual_kwh_saved?: number | null;
+  est_capex_eur?: number | null;
+  simple_roi_years?: number | null;
+  est_co2_tons_saved_per_year?: number | null;
 };
 
 function formatDateTimeLabel(raw?: string | null): string | null {
@@ -155,6 +165,11 @@ const SiteView: React.FC = () => {
 
   // NEW: key to trigger SiteTimeline reload after saving a note
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
+
+  // NEW: backend-driven opportunities for this site
+  const [opportunities, setOpportunities] = useState<BackendOpportunity[]>([]);
+  const [oppsLoading, setOppsLoading] = useState(false);
+  const [oppsError, setOppsError] = useState<string | null>(null);
 
   // Map numeric route ID -> timeseries site key (e.g. "site-1")
   const siteKey = id ? `site-${id}` : undefined;
@@ -273,6 +288,36 @@ const SiteView: React.FC = () => {
       .finally(() => {
         if (!isMounted) return;
         setForecastLoading(false);
+      });
+
+    // NEW: backend-driven opportunity suggestions for this site
+    setOppsLoading(true);
+    setOppsError(null);
+    setOpportunities([]);
+    api
+      .get(`/sites/${id}/opportunities`)
+      .then((resp) => {
+        if (!isMounted) return;
+        const data = resp.data as any;
+        const list: BackendOpportunity[] = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.opportunities)
+          ? data.opportunities
+          : [];
+        setOpportunities(list);
+      })
+      .catch((e: any) => {
+        if (!isMounted) return;
+        // Soft-fail: card still works with heuristic suggestions only
+        setOppsError(
+          e?.response?.data?.detail ||
+            e?.message ||
+            "Failed to load opportunity suggestions."
+        );
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setOppsLoading(false);
       });
 
     return () => {
@@ -435,25 +480,25 @@ const SiteView: React.FC = () => {
   };
 
   const handleDeleteSite = async () => {
-   if (!id) return;
+    if (!id) return;
 
-   const confirmed = window.confirm(
-     "This will permanently delete this site and its associated data in CEI. Are you sure?"
-   );
-   if (!confirmed) return;
+    const confirmed = window.confirm(
+      "This will permanently delete this site and its associated data in CEI. Are you sure?"
+    );
+    if (!confirmed) return;
 
-   try {
-     await deleteSite(id);
-     alert("Site deleted.");
-     navigate("/sites");
-   } catch (e: any) {
-     console.error("Failed to delete site", e);
-     alert(
-       e?.response?.data?.detail ||
-         "Failed to delete site. Please try again or check logs."
-     );
-   }
- };
+    try {
+      await deleteSite(id);
+      alert("Site deleted.");
+      navigate("/sites");
+    } catch (e: any) {
+      console.error("Failed to delete site", e);
+      alert(
+        e?.response?.data?.detail ||
+          "Failed to delete site. Please try again or check logs."
+      );
+    }
+  };
 
   // NEW: small helpers for KPI block
   const formatPct = (value: number | null | undefined): string => {
@@ -828,27 +873,26 @@ const SiteView: React.FC = () => {
           >
             Upload CSV for this site
           </button>
-                    {/* NEW: per-site scoped CSV upload entrypoint */}
+          {/* NEW: per-site scoped CSV upload entrypoint */}
 
-         {/* NEW: hard delete site (red pill) */}
-         <button
-           type="button"
-           className="cei-btn"
-           onClick={handleDeleteSite}
-           style={{
-             marginTop: "0.3rem",
-             fontSize: "0.75rem",
-             padding: "0.25rem 0.7rem",
-             borderRadius: "999px",
-             border: "1px solid rgba(248, 113, 113, 0.8)", // red-400-ish
-             color: "rgb(248, 113, 113)",
-             background:
-               "radial-gradient(circle at top left, rgba(239, 68, 68, 0.14), rgba(15, 23, 42, 0.95))",
-           }}
-         >
-           Delete site
-         </button>
-
+          {/* NEW: hard delete site (red pill) */}
+          <button
+            type="button"
+            className="cei-btn"
+            onClick={handleDeleteSite}
+            style={{
+              marginTop: "0.3rem",
+              fontSize: "0.75rem",
+              padding: "0.25rem 0.7rem",
+              borderRadius: "999px",
+              border: "1px solid rgba(248, 113, 113, 0.8)", // red-400-ish
+              color: "rgb(248, 113, 113)",
+              background:
+                "radial-gradient(circle at top left, rgba(239, 68, 68, 0.14), rgba(15, 23, 42, 0.95))",
+            }}
+          >
+            Delete site
+          </button>
         </div>
       </section>
 
@@ -1691,6 +1735,112 @@ const SiteView: React.FC = () => {
               same logic powering the Alerts page. Use both views together to
               separate day-to-day noise from structural waste.
             </div>
+
+            {/* NEW: backend-driven opportunity measures */}
+            {oppsLoading && (
+              <div
+                style={{
+                  marginTop: "0.4rem",
+                  fontSize: "0.78rem",
+                  color: "var(--cei-text-muted)",
+                }}
+              >
+                Scanning this site&apos;s KPIs for concrete opportunity
+                measures…
+              </div>
+            )}
+
+            {!oppsLoading && oppsError && (
+              <div
+                style={{
+                  marginTop: "0.4rem",
+                  fontSize: "0.78rem",
+                  color: "var(--cei-text-muted)",
+                }}
+              >
+                {oppsError} Falling back to generic guidance below.
+              </div>
+            )}
+
+            {!oppsLoading && opportunities.length > 0 && (
+              <div
+                style={{
+                  marginTop: "0.5rem",
+                  fontSize: "0.8rem",
+                  color: "var(--cei-text-main)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "0.8rem",
+                    fontWeight: 500,
+                    marginBottom: "0.25rem",
+                  }}
+                >
+                  Modelled measures for this site
+                </div>
+                <ul
+                  style={{
+                    margin: 0,
+                    paddingLeft: "1.1rem",
+                    fontSize: "0.8rem",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {opportunities.map((o) => {
+                    const roiYears =
+                      typeof o.simple_roi_years === "number"
+                        ? o.simple_roi_years
+                        : null;
+                    const savings =
+                      typeof o.est_annual_kwh_saved === "number"
+                        ? o.est_annual_kwh_saved
+                        : null;
+                    const co2 =
+                      typeof o.est_co2_tons_saved_per_year === "number"
+                        ? o.est_co2_tons_saved_per_year
+                        : null;
+
+                    return (
+                      <li key={o.id} style={{ marginBottom: "0.25rem" }}>
+                        <strong>{o.name}</strong>
+                        {o.description ? ` – ${o.description}` : ""}
+                        <span style={{ display: "block", fontSize: "0.78rem" }}>
+                          {savings != null && (
+                            <>
+                              ≈{" "}
+                              <strong>
+                                {savings.toLocaleString(undefined, {
+                                  maximumFractionDigits: 0,
+                                })}{" "}
+                                kWh/yr
+                              </strong>{" "}
+                              saved
+                            </>
+                          )}
+                          {roiYears != null && (
+                            <>
+                              {" "}
+                              · simple ROI ~{" "}
+                              <strong>{roiYears.toFixed(1)} yrs</strong>
+                            </>
+                          )}
+                          {co2 != null && (
+                            <>
+                              {" "}
+                              · CO₂ cut ~{" "}
+                              <strong>
+                                {co2.toFixed(2)} tCO₂/yr
+                              </strong>
+                            </>
+                          )}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
           </div>
 
           {suggestions.length === 0 ? (
