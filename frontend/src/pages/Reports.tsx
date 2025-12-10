@@ -1043,8 +1043,10 @@ const Reports: React.FC = () => {
                           (a, b) =>
                             a.simple_roi_years - b.simple_roi_years
                         )
-                        .map((row) => (
-                          <tr key={`${row.siteId}-${row.id}`}>
+                        .map((row, idx) => (
+                          <tr
+                            key={`opp-${row.siteId}-${row.id}-${idx}`}
+                          >
                             <td>{row.siteName}</td>
                             <td>{row.location || "—"}</td>
                             <td>{row.name}</td>

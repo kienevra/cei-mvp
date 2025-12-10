@@ -96,7 +96,8 @@ from app.api.v1 import (  # noqa: E402
     health,
     stripe_webhook,
     account,
-    site_events,  # <-- NEW
+    site_events,   # site events / timeline
+    opportunities, # opportunities (auto + manual)
 )
 
 app.include_router(auth.router, prefix="/api/v1")
@@ -109,7 +110,8 @@ app.include_router(alerts.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(stripe_webhook.router, prefix="/api/v1")
 app.include_router(account.router, prefix="/api/v1")
-app.include_router(site_events.router, prefix="/api/v1")  # <-- NEW
+app.include_router(site_events.router, prefix="/api/v1")
+app.include_router(opportunities.router, prefix="/api/v1")
 
 
 # --- Legacy auth shims for pytest-only tests ---

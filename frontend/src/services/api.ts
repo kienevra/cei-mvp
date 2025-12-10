@@ -271,35 +271,32 @@ export async function deleteAccount() {
 /**
  * Analytics insights for a site.
  *
+ * siteKey must be the logical site identifier (e.g. "site-1").
  * Second argument is interpreted as window_hours, matching
  * /analytics/sites/{site_id}/insights?window_hours=...
  */
 export async function getSiteInsights(
-  siteId: number | string,
+  siteKey: string,
   windowHours?: number
 ) {
-  const idStr = String(siteId);
   const params: Record<string, number> = {};
 
   if (typeof windowHours === "number") {
     params.window_hours = windowHours;
   }
 
-  const resp = await api.get(`/analytics/sites/${idStr}/insights`, {
+  const resp = await api.get(`/analytics/sites/${siteKey}/insights`, {
     params,
   });
   return resp.data;
 }
 
 /**
- * Site KPI snapshot: hits /analytics/sites/{id}/kpi on the backend.
- * Used by SiteView for 24h vs baseline and 7d vs previous 7d.
+ * Site KPI snapshot: hits /analytics/sites/{siteKey}/kpi on the backend.
+ * siteKey must be of the form "site-<id>".
  */
-export async function getSiteKpi(
-  siteId: number | string
-): Promise<SiteKpi> {
-  const idStr = String(siteId);
-  const resp = await api.get<SiteKpi>(`/analytics/sites/${idStr}/kpi`);
+export async function getSiteKpi(siteKey: string): Promise<SiteKpi> {
+  const resp = await api.get<SiteKpi>(`/analytics/sites/${siteKey}/kpi`);
   return resp.data;
 }
 
@@ -333,22 +330,43 @@ export async function getSiteOpportunities(
   return Array.isArray(list) ? list : [];
 }
 
+/* ===== Ingest health types ===== */
+
+export interface IngestHealthMeter {
+  site_id: string;
+  meter_id: string;
+  window_hours: number;
+  expected_points: number;
+  actual_points: number;
+  completeness_pct: number;
+  last_seen: string; // ISO timestamp
+}
+
+export interface IngestHealthResponse {
+  window_hours: number;
+  meters: IngestHealthMeter[];
+}
 
 export async function getIngestHealth(
   windowHours: number = 24
 ): Promise<IngestHealthResponse> {
-  const res = await api.get<IngestHealthResponse>("/timeseries/ingest_health", {
-    params: { window_hours: windowHours },
-  });
+  const res = await api.get<IngestHealthResponse>(
+    "/timeseries/ingest_health",
+    {
+      params: { window_hours: windowHours },
+    }
+  );
   return res.data;
 }
 
 /**
- * Stub predictive forecast: hits /analytics/sites/{id}/forecast on the backend.
+ * Stub predictive forecast: hits /analytics/sites/{siteKey}/forecast on the backend.
  * Uses the same axios client and baseURL (/api/v1) as the rest of the API.
+ *
+ * siteKey must be the logical ID (e.g. "site-1").
  */
 export async function getSiteForecast(
-  siteId: number | string,
+  siteKey: string,
   params: {
     horizon_hours?: number;
     lookback_days?: number;
@@ -356,7 +374,6 @@ export async function getSiteForecast(
     history_window_hours?: number;
   } = {}
 ): Promise<SiteForecast> {
-  const idStr = String(siteId);
   const {
     horizon_hours = 24,
     lookback_days = 30,
@@ -364,7 +381,7 @@ export async function getSiteForecast(
     history_window_hours = 24,
   } = params;
 
-  const resp = await api.get(`/analytics/sites/${idStr}/forecast`, {
+  const resp = await api.get(`/analytics/sites/${siteKey}/forecast`, {
     params: {
       horizon_hours,
       lookback_days,
@@ -407,23 +424,6 @@ export interface AlertEvent {
 export interface AlertEventUpdatePayload {
   status?: AlertStatus;
   note?: string;
-}
-
-// --- Ingest health types ---
-
-export interface IngestHealthMeter {
-  site_id: string;
-  meter_id: string;
-  window_hours: number;
-  expected_points: number;
-  actual_points: number;
-  completeness_pct: number;
-  last_seen: string; // ISO timestamp
-}
-
-export interface IngestHealthResponse {
-  window_hours: number;
-  meters: IngestHealthMeter[];
 }
 
 /**

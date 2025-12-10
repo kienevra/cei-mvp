@@ -1,15 +1,19 @@
+// frontend/src/pages/SiteView.tsx
+
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   getSite,
   getTimeseriesSummary,
   getTimeseriesSeries,
-  getSiteInsights, // now actively used
-  getSiteForecast, // NEW: typed forecast helper
-  getSiteKpi, // NEW: KPI helper
-  createSiteEvent, // NEW: operator note endpoint
+  getSiteInsights,
+  getSiteForecast,
+  getSiteKpi,
+  createSiteEvent,
   deleteSite,
-  getSiteOpportunities, // backend-driven opportunity measures
+  getSiteOpportunities,
+  createManualOpportunity,
+  getManualOpportunities,
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
@@ -63,6 +67,12 @@ type BackendOpportunity = {
   est_capex_eur?: number | null;
   simple_roi_years?: number | null;
   est_co2_tons_saved_per_year?: number | null;
+  source?: "auto" | "manual" | string;
+};
+
+type ManualOpportunityFormState = {
+  name: string;
+  description: string;
 };
 
 function formatDateTimeLabel(raw?: string | null): string | null {
@@ -78,10 +88,7 @@ function formatDateTimeLabel(raw?: string | null): string | null {
   });
 }
 
-function formatTimeRange(
-  from?: string | null,
-  to?: string | null
-): string | null {
+function formatTimeRange(from?: string | null, to?: string | null): string | null {
   if (!from || !to) return null;
   const fromD = new Date(from);
   const toD = new Date(to);
@@ -127,6 +134,34 @@ function formatTimeRange(
   return `${fromLabel} → ${toLabel}`;
 }
 
+// Normalise FastAPI/Pydantic error payloads into a human-readable string
+const normalizeApiError = (e: any, fallback: string): string => {
+  const detail = e?.response?.data?.detail;
+
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d: any) => d?.msg || JSON.stringify(d))
+      .join(" | ");
+  }
+
+  if (detail && typeof detail === "object") {
+    if (typeof (detail as any).msg === "string") {
+      return (detail as any).msg;
+    }
+    return JSON.stringify(detail);
+  }
+
+  if (typeof detail === "string") {
+    return detail;
+  }
+
+  if (e?.message && typeof e.message === "string") {
+    return e.message;
+  }
+
+  return fallback;
+};
+
 const SiteView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -143,43 +178,43 @@ const SiteView: React.FC = () => {
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [seriesError, setSeriesError] = useState<string | null>(null);
 
-  // NEW: analytics / insights state
   const [insights, setInsights] = useState<SiteInsights | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [insightsError, setInsightsError] = useState<string | null>(null);
 
-  // NEW: forecast state (predictive stub)
   const [forecast, setForecast] = useState<SiteForecast | null>(null);
   const [forecastLoading, setForecastLoading] = useState(false);
   const [forecastError, setForecastError] = useState<string | null>(null);
 
-  // NEW: KPI state (24h vs baseline, 7d vs previous 7d)
   const [kpi, setKpi] = useState<SiteKpi | null>(null);
   const [kpiLoading, setKpiLoading] = useState(false);
   const [kpiError, setKpiError] = useState<string | null>(null);
 
-  // NEW: operator note form state
   const [noteTitle, setNoteTitle] = useState("");
   const [noteBody, setNoteBody] = useState("");
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
 
-  // NEW: key to trigger SiteTimeline reload after saving a note
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
 
-  // NEW: backend-driven opportunities for this site
   const [opportunities, setOpportunities] = useState<BackendOpportunity[]>([]);
   const [oppsLoading, setOppsLoading] = useState(false);
   const [oppsError, setOppsError] = useState<string | null>(null);
 
-  // Map numeric route ID -> timeseries site key (e.g. "site-1")
+  const [manualOppForm, setManualOppForm] = useState<ManualOpportunityFormState>({
+    name: "",
+    description: "",
+  });
+  const [manualOppSaving, setManualOppSaving] = useState(false);
+  const [manualOppError, setManualOppError] = useState<string | null>(null);
+
   const siteKey = id ? `site-${id}` : undefined;
 
   useEffect(() => {
     if (!id) return;
     let isMounted = true;
 
-    // Site metadata
+    // Site metadata (numeric id)
     setSiteLoading(true);
     setSiteError(null);
     getSite(id)
@@ -202,7 +237,7 @@ const SiteView: React.FC = () => {
       };
     }
 
-    // Per-site summary
+    // Summary (siteKey = "site-1")
     setSummaryLoading(true);
     setSummaryError(null);
     getTimeseriesSummary({ site_id: siteKey, window_hours: 24 })
@@ -219,7 +254,7 @@ const SiteView: React.FC = () => {
         setSummaryLoading(false);
       });
 
-    // Per-site series
+    // Series (siteKey)
     setSeriesLoading(true);
     setSeriesError(null);
     getTimeseriesSeries({
@@ -240,7 +275,7 @@ const SiteView: React.FC = () => {
         setSeriesLoading(false);
       });
 
-    // NEW: per-site analytics / insights
+    // Insights (analytics expects siteKey, not numeric id)
     setInsightsLoading(true);
     setInsightsError(null);
     getSiteInsights(siteKey, 24)
@@ -250,10 +285,10 @@ const SiteView: React.FC = () => {
       })
       .catch((e: any) => {
         if (!isMounted) return;
+        // If backend ever 404s for "no baseline yet", we could special-case:
+        // if (e?.response?.status === 404) { setInsights(null); return; }
         setInsightsError(
-          e?.response?.data?.detail ||
-            e?.message ||
-            "Failed to load analytics insights."
+          normalizeApiError(e, "Failed to load analytics insights.")
         );
       })
       .finally(() => {
@@ -261,7 +296,7 @@ const SiteView: React.FC = () => {
         setInsightsLoading(false);
       });
 
-    // NEW: per-site forecast (baseline-driven stub) via shared API helper
+    // Forecast (still uses siteKey)
     setForecastLoading(true);
     setForecastError(null);
     setForecast(null);
@@ -273,17 +308,19 @@ const SiteView: React.FC = () => {
     })
       .then((data) => {
         if (!isMounted) return;
-        setForecast(data);
+        if (data && Array.isArray((data as any).points)) {
+          setForecast(data);
+        } else {
+          setForecast(null);
+        }
       })
       .catch((e: any) => {
         if (!isMounted) return;
         const status = e?.response?.status;
         if (status === 404) {
-          // Not enough data: quietly hide forecast card
           setForecast(null);
           return;
         }
-        // Non-fatal: SiteView should still work if forecast is down
         setForecastError(e?.message || "Unable to load forecast right now.");
       })
       .finally(() => {
@@ -291,22 +328,19 @@ const SiteView: React.FC = () => {
         setForecastLoading(false);
       });
 
-    // NEW: backend-driven opportunity suggestions for this site
+    // Opportunities (numeric id for /sites/{site_id}/opportunities)
     setOppsLoading(true);
     setOppsError(null);
     setOpportunities([]);
 
-    getSiteOpportunities(siteKey)
+    getSiteOpportunities(id)
       .then((data: any) => {
         if (!isMounted) return;
 
-        // Avoid the Array.isArray + data.opportunities type confusion
         let raw: unknown;
         if (Array.isArray(data)) {
-          // Endpoint returned a bare list
           raw = data;
         } else {
-          // Endpoint returned { opportunities: [...] }
           raw = (data as any)?.opportunities;
         }
 
@@ -318,11 +352,8 @@ const SiteView: React.FC = () => {
       })
       .catch((e: any) => {
         if (!isMounted) return;
-        // Soft-fail: card still works with heuristic suggestions only
         setOppsError(
-          e?.response?.data?.detail ||
-            e?.message ||
-            "Failed to load opportunity suggestions."
+          normalizeApiError(e, "Failed to load opportunity suggestions.")
         );
       })
       .finally(() => {
@@ -330,12 +361,30 @@ const SiteView: React.FC = () => {
         setOppsLoading(false);
       });
 
+    // Manual opportunities list (numeric id)
+    getManualOpportunities(id)
+      .then((rows) => {
+        if (!isMounted) return;
+        if (Array.isArray(rows)) {
+          const mapped: BackendOpportunity[] = rows.map((r) => ({
+            id: r.id,
+            name: r.name,
+            description: r.description,
+            source: "manual",
+          }));
+          setOpportunities((prev) => [...mapped, ...prev]);
+        }
+      })
+      .catch(() => {
+        // non-fatal; we already surface error from unified endpoint
+      });
+
     return () => {
       isMounted = false;
     };
   }, [id, siteKey]);
 
-  // NEW: KPI fetch (separate effect to avoid touching existing logic)
+  // KPI – analytics expects siteKey ("site-1")
   useEffect(() => {
     if (!siteKey) return;
     let cancelled = false;
@@ -350,11 +399,8 @@ const SiteView: React.FC = () => {
       })
       .catch((e: any) => {
         if (cancelled) return;
-        // Non-fatal: SiteView continues, just no KPI snapshot
         setKpiError(
-          e?.response?.data?.detail ||
-            e?.message ||
-            "Unable to load KPI comparison."
+          normalizeApiError(e, "Unable to load KPI comparison.")
         );
       })
       .finally(() => {
@@ -383,9 +429,8 @@ const SiteView: React.FC = () => {
     ? formatTimeRange(summary!.from_timestamp, summary!.to_timestamp)
     : null;
 
-  // Build trend points from API data (force numeric, 24h labels)
   let trendPoints: TrendPoint[] = [];
-  if (series && series.points && series.points.length > 0) {
+  if (series && Array.isArray(series.points) && series.points.length > 0) {
     trendPoints = series.points.map((p) => {
       const d = new Date(p.ts);
       const label = d.toLocaleTimeString(undefined, {
@@ -406,18 +451,15 @@ const SiteView: React.FC = () => {
   const maxVal = hasTrend ? Math.max(...trendValues) : 0;
   const minVal = hasTrend ? Math.min(...trendValues) : 0;
 
-  // Chart inner width
   const barPixelWidth = 40;
   const minContentWidth = 600;
   const chartContentWidth = hasTrend
     ? Math.max(trendPoints.length * barPixelWidth, minContentWidth)
     : minContentWidth;
 
-  // Pixel-based bar height mapping
-  const maxBarHeightPx = 160; // tallest bar
-  const baseBarHeightPx = 20; // minimum visible height when value > 0
+  const maxBarHeightPx = 160;
+  const baseBarHeightPx = 20;
 
-  // Concise trend summary for this site
   let trendSummary: string | null = null;
   if (hasTrend && hasSummaryData) {
     const sumVal = trendValues.reduce((acc, v) => acc + v, 0);
@@ -437,14 +479,12 @@ const SiteView: React.FC = () => {
 
   const anyError = siteError || summaryError || seriesError || insightsError;
 
-  // Site-level efficiency suggestions card (frontend-only heuristics)
   const suggestions = buildSiteEfficiencySuggestions(
     hasSummaryData ? totalKwh : null,
     hasSummaryData ? summary!.points : null,
     site?.name || null
   );
 
-  // NEW: convenience references for baseline view
   const baselineProfile = insights?.baseline_profile || null;
   const deviationPct =
     typeof insights?.deviation_pct === "number" ? insights.deviation_pct : null;
@@ -455,15 +495,15 @@ const SiteView: React.FC = () => {
       ? insights.baseline_lookback_days
       : baselineProfile?.lookback_days ?? 30;
 
-  // NEW: derived forecast metrics
-  const hasForecast = !!forecast && forecast.points.length > 0;
+  const hasForecast =
+    forecast != null &&
+    Array.isArray((forecast as any).points) &&
+    (forecast as any).points.length > 0;
 
-  // NEW: hybrid deterministic–statistical–predictive narrative
-  const hybrid = buildHybridNarrative(insights, forecast);
+  const hybrid = buildHybridNarrative(insights, hasForecast ? forecast : null);
 
-  // --- CSV export for this site's timeseries ---
   const handleExportTimeseriesCsv = () => {
-    if (!series || !series.points || series.points.length === 0) {
+    if (!series || !Array.isArray(series.points) || series.points.length === 0) {
       alert("No timeseries data available to export yet.");
       return;
     }
@@ -483,7 +523,6 @@ const SiteView: React.FC = () => {
     downloadCsv(`cei_${safeSiteId}_timeseries.csv`, rows);
   };
 
-  // NEW: per-site upload entrypoint
   const handleGoToUploadForSite = () => {
     if (!siteKey) return;
     navigate(`/upload?site_id=${encodeURIComponent(siteKey)}`);
@@ -510,7 +549,6 @@ const SiteView: React.FC = () => {
     }
   };
 
-  // NEW: small helpers for KPI block
   const formatPct = (value: number | null | undefined): string => {
     if (value === null || value === undefined) return "—";
     const rounded = Math.round(value);
@@ -550,20 +588,26 @@ const SiteView: React.FC = () => {
     }
 
     if (!hasForecast || forecastError) {
-      // Forecast is optional; if it's not available, we hide the card.
       return null;
     }
 
-    const points = forecast!.points;
+    const localForecast = forecast as SiteForecast;
+    const points = Array.isArray(localForecast.points)
+      ? localForecast.points
+      : [];
+
+    if (points.length === 0) {
+      return null;
+    }
+
     const totalExpected = points.reduce(
-      (sum, p) => sum + p.expected_kwh,
+      (sum, p) => sum + (p.expected_kwh ?? 0),
       0
     );
     const peak = points.reduce((max, p) =>
-      p.expected_kwh > max.expected_kwh ? p : max
+      (p.expected_kwh ?? 0) > (max.expected_kwh ?? 0) ? p : max
     );
 
-    // Build forecast trend points for a bar chart (like the 24h site trend)
     const forecastTrendPoints = points.map((p) => {
       const dt = new Date(p.ts);
       const label = dt.toLocaleTimeString([], {
@@ -573,7 +617,7 @@ const SiteView: React.FC = () => {
       });
       return {
         label,
-        value: p.expected_kwh,
+        value: p.expected_kwh ?? 0,
       };
     });
 
@@ -586,7 +630,6 @@ const SiteView: React.FC = () => {
       ? Math.max(forecastTrendPoints.length * barPixelWidth, minContentWidth)
       : minContentWidth;
 
-    // Short textual summary
     const peakTimeLabel = new Date(peak.ts).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
@@ -613,11 +656,10 @@ const SiteView: React.FC = () => {
             </p>
           </div>
           <span className="cei-pill cei-pill-neutral">
-            Stub: {forecast!.method}
+            Stub: {localForecast.method}
           </span>
         </div>
 
-        {/* KPI strip at the top, same as before */}
         <div
           className="cei-card-kpis"
           style={{
@@ -637,12 +679,11 @@ const SiteView: React.FC = () => {
             <div className="cei-kpi-label">Peak hour (forecast)</div>
             <div className="cei-kpi-value">{peakTimeLabel}</div>
             <div className="cei-kpi-subvalue">
-              {peak.expected_kwh.toFixed(1)} kWh
+              {(peak.expected_kwh ?? 0).toFixed(1)} kWh
             </div>
           </div>
         </div>
 
-        {/* Forecast trend chart – mirrors the 24h site energy chart style */}
         <div
           className="cei-trend-scroll"
           style={{
@@ -679,7 +720,6 @@ const SiteView: React.FC = () => {
                     (val - forecastMin) / (forecastMax - forecastMin || 1);
                   heightPx = baseBarHeightPx + ratio * maxBarHeightPx;
                 } else {
-                  // all equal > 0
                   heightPx = baseBarHeightPx + maxBarHeightPx;
                 }
               }
@@ -740,18 +780,16 @@ const SiteView: React.FC = () => {
           }}
         >
           Based on a{" "}
-          <strong>{forecast!.baseline_lookback_days}-day</strong> baseline and{" "}
-          <strong>{forecast!.history_window_hours}-hour</strong> recent
-          performance window. Use this strip as a forward-looking mirror of the
-          last 24h trend chart above.
+          <strong>{localForecast.baseline_lookback_days}-day</strong> baseline
+          and a <strong>{localForecast.history_window_hours}-hour</strong>{" "}
+          recent performance window. Use this strip as a forward-looking mirror
+          of the last 24h trend chart above.
         </p>
       </section>
     );
   };
 
-  const handleAddSiteNote = async (
-    e: React.FormEvent<HTMLFormElement>
-  ) => {
+  const handleAddSiteNote = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!siteKey) return;
 
@@ -759,9 +797,7 @@ const SiteView: React.FC = () => {
     const trimmedBody = noteBody.trim();
 
     if (!trimmedTitle && !trimmedBody) {
-      setNoteError(
-        "Please add a title or some text before saving."
-      );
+      setNoteError("Please add a title or some text before saving.");
       return;
     }
 
@@ -779,13 +815,55 @@ const SiteView: React.FC = () => {
       setNoteBody("");
       setTimelineRefreshKey((k) => k + 1);
     } catch (err: any) {
-      const detail =
-        err?.response?.data?.detail ||
-        err?.message ||
-        "Failed to save note. Please try again.";
-      setNoteError(detail);
+      setNoteError(
+        normalizeApiError(err, "Failed to save note. Please try again.")
+      );
     } finally {
       setNoteSaving(false);
+    }
+  };
+
+  const handleManualOppSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setManualOppError(null);
+
+    const name = manualOppForm.name.trim();
+    const description = manualOppForm.description.trim();
+
+    if (!name && !description) {
+      setManualOppError("Please add a name or description.");
+      return;
+    }
+
+    if (!id) {
+      setManualOppError("Missing numeric site id.");
+      return;
+    }
+
+    try {
+      setManualOppSaving(true);
+      const created = await createManualOpportunity(id, {
+        name: name || "Opportunity",
+        description: description || undefined,
+      });
+
+      setOpportunities((prev) => [
+        {
+          id: created.id,
+          name: created.name,
+          description: created.description,
+          source: "manual",
+        },
+        ...prev,
+      ]);
+
+      setManualOppForm({ name: "", description: "" });
+    } catch (err: any) {
+      setManualOppError(
+        normalizeApiError(err, "Failed to create opportunity.")
+      );
+    } finally {
+      setManualOppSaving(false);
     }
   };
 
@@ -869,7 +947,6 @@ const SiteView: React.FC = () => {
               Data window: {dataWindowLabel}
             </div>
           )}
-          {/* NEW: per-site scoped CSV upload entrypoint */}
           <button
             type="button"
             className="cei-btn cei-btn-ghost"
@@ -883,9 +960,6 @@ const SiteView: React.FC = () => {
           >
             Upload CSV for this site
           </button>
-          {/* NEW: per-site scoped CSV upload entrypoint */}
-
-          {/* NEW: hard delete site (red pill) */}
           <button
             type="button"
             className="cei-btn"
@@ -895,7 +969,7 @@ const SiteView: React.FC = () => {
               fontSize: "0.75rem",
               padding: "0.25rem 0.7rem",
               borderRadius: "999px",
-              border: "1px solid rgba(248, 113, 113, 0.8)", // red-400-ish
+              border: "1px solid rgba(248, 113, 113, 0.8)",
               color: "rgb(248, 113, 113)",
               background:
                 "radial-gradient(circle at top left, rgba(239, 68, 68, 0.14), rgba(15, 23, 42, 0.95))",
@@ -1034,7 +1108,7 @@ const SiteView: React.FC = () => {
         </div>
       </section>
 
-      {/* NEW: KPI snapshot row – 24h vs baseline, 7d vs previous 7d */}
+      {/* KPI snapshot row */}
       <section className="dashboard-row">
         <div className="cei-card">
           <div className="cei-card-header">
@@ -1085,7 +1159,6 @@ const SiteView: React.FC = () => {
                 fontSize: "0.8rem",
               }}
             >
-              {/* 24h vs baseline */}
               <div>
                 <div
                   style={{
@@ -1130,7 +1203,6 @@ const SiteView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Last 7d vs previous 7d */}
               <div>
                 <div
                   style={{
@@ -1175,7 +1247,6 @@ const SiteView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Narrative hook */}
               <div>
                 <div
                   style={{
@@ -1208,7 +1279,7 @@ const SiteView: React.FC = () => {
         </div>
       </section>
 
-      {/* Main grid: trend + metadata */}
+      {/* Trend + metadata */}
       <section className="dashboard-main-grid">
         <div
           className="cei-card"
@@ -1261,7 +1332,7 @@ const SiteView: React.FC = () => {
                 disabled={
                   seriesLoading ||
                   !series ||
-                  !series.points ||
+                  !Array.isArray(series.points) ||
                   series.points.length === 0
                 }
                 style={{
@@ -1299,111 +1370,110 @@ const SiteView: React.FC = () => {
               column, this chart will light up.
             </div>
           ) : (
-            <>
-              {/* Local scroll container for this site chart */}
-              <div
-                className="cei-trend-scroll"
-                style={{
-                  marginTop: "0.75rem",
-                  borderRadius: "0.75rem",
-                  border: "1px solid rgba(148, 163, 184, 0.5)",
-                  background:
-                    "radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.95))",
-                  padding: "0.75rem",
-                  boxSizing: "border-box",
-                  maxWidth: "100%",
-                  overflowX: "auto",
-                  overflowY: "hidden",
-                }}
-              >
+            hasTrend && (
+              <>
                 <div
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-end",
-                    justifyContent: "flex-start",
-                    gap: "0.5rem",
-                    height: "200px",
-                    width: `${chartContentWidth}px`,
-                    boxSizing: "border-box",
-                  }}
-                >
-                  {trendPoints.map((p, idx) => {
-                    const val = p.value;
-
-                    let heightPx = 0;
-                    if (hasTrend && maxVal > 0) {
-                      if (maxVal > minVal) {
-                        const ratio = (val - minVal) / (maxVal - minVal || 1);
-                        heightPx = baseBarHeightPx + ratio * maxBarHeightPx;
-                      } else {
-                        // all equal > 0
-                        heightPx = baseBarHeightPx + maxBarHeightPx;
-                      }
-                    }
-
-                    return (
-                      <div
-                        key={`${idx}-${p.label}`}
-                        style={{
-                          flex: "0 0 auto",
-                          width: "32px",
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          justifyContent: "flex-end",
-                          gap: "0.25rem",
-                        }}
-                      >
-                        {/* numeric value so you can verify */}
-                        <span
-                          style={{
-                            fontSize: "0.6rem",
-                            color: "var(--cei-text-muted)",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {val.toFixed(0)}
-                        </span>
-                        <div
-                          style={{
-                            width: "100%",
-                            borderRadius: "4px",
-                            background:
-                              "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
-                            height: `${heightPx}px`,
-                            boxShadow:
-                              "0 6px 18px rgba(56, 189, 248, 0.45)",
-                            border: "1px solid rgba(226, 232, 240, 0.8)",
-                          }}
-                        />
-                        <span
-                          style={{
-                            fontSize: "0.65rem",
-                            color: "var(--cei-text-muted)",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {p.label}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Short summary instead of raw debug list */}
-              {trendSummary && (
-                <div
+                  className="cei-trend-scroll"
                   style={{
                     marginTop: "0.75rem",
-                    fontSize: "0.8rem",
-                    color: "var(--cei-text-muted)",
+                    borderRadius: "0.75rem",
+                    border: "1px solid rgba(148, 163, 184, 0.5)",
+                    background:
+                      "radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.95))",
+                    padding: "0.75rem",
+                    boxSizing: "border-box",
+                    maxWidth: "100%",
+                    overflowX: "auto",
+                    overflowY: "hidden",
                   }}
                 >
-                  {trendSummary}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-end",
+                      justifyContent: "flex-start",
+                      gap: "0.5rem",
+                      height: "200px",
+                      width: `${chartContentWidth}px`,
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    {trendPoints.map((p, idx) => {
+                      const val = p.value;
+
+                      let heightPx = 0;
+                      if (hasTrend && maxVal > 0) {
+                        if (maxVal > minVal) {
+                          const ratio =
+                            (val - minVal) / (maxVal - minVal || 1);
+                          heightPx = baseBarHeightPx + ratio * maxBarHeightPx;
+                        } else {
+                          heightPx = baseBarHeightPx + maxBarHeightPx;
+                        }
+                      }
+
+                      return (
+                        <div
+                          key={`${idx}-${p.label}`}
+                          style={{
+                            flex: "0 0 auto",
+                            width: "32px",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            gap: "0.25rem",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "0.6rem",
+                              color: "var(--cei-text-muted)",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {val.toFixed(0)}
+                          </span>
+                          <div
+                            style={{
+                              width: "100%",
+                              borderRadius: "4px",
+                              background:
+                                "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
+                              height: `${heightPx}px`,
+                              boxShadow:
+                                "0 6px 18px rgba(56, 189, 248, 0.45)",
+                              border: "1px solid rgba(226, 232, 240, 0.8)",
+                            }}
+                          />
+                          <span
+                            style={{
+                              fontSize: "0.65rem",
+                              color: "var(--cei-text-muted)",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {p.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              )}
-            </>
+
+                {trendSummary && (
+                  <div
+                    style={{
+                      marginTop: "0.75rem",
+                      fontSize: "0.8rem",
+                      color: "var(--cei-text-muted)",
+                    }}
+                  >
+                    {trendSummary}
+                  </div>
+                )}
+              </>
+            )
           )}
         </div>
 
@@ -1486,14 +1556,12 @@ const SiteView: React.FC = () => {
         </div>
       </section>
 
-      {/* NEW: site-level alerts strip */}
       {siteKey && (
         <section style={{ marginTop: "0.75rem" }}>
           <SiteAlertsStrip siteKey={siteKey} limit={3} />
         </section>
       )}
 
-      {/* NEW: operator notes + timeline */}
       {siteKey && (
         <section style={{ marginTop: "0.75rem" }}>
           <div className="dashboard-main-grid">
@@ -1520,9 +1588,7 @@ const SiteView: React.FC = () => {
                   </div>
                 </div>
                 {noteSaving && (
-                  <span className="cei-pill cei-pill-neutral">
-                    Saving…
-                  </span>
+                  <span className="cei-pill cei-pill-neutral">Saving…</span>
                 )}
               </div>
 
@@ -1538,10 +1604,7 @@ const SiteView: React.FC = () => {
                 </div>
               )}
 
-              <form
-                onSubmit={handleAddSiteNote}
-                style={{ marginTop: "0.6rem" }}
-              >
+              <form onSubmit={handleAddSiteNote} style={{ marginTop: "0.6rem" }}>
                 <div
                   style={{
                     display: "flex",
@@ -1612,10 +1675,10 @@ const SiteView: React.FC = () => {
         </section>
       )}
 
-      {/* NEW: forecast card (predictive stub) */}
+      {/* Forecast card */}
       <section style={{ marginTop: "0.75rem" }}>{renderForecastCard()}</section>
 
-      {/* CEI hybrid view card */}
+      {/* CEI hybrid view */}
       {hybrid && (
         <section style={{ marginTop: "0.75rem" }}>
           <div className="cei-card">
@@ -1655,7 +1718,7 @@ const SiteView: React.FC = () => {
         </section>
       )}
 
-      {/* Site-level efficiency opportunities / INSIGHTS card */}
+      {/* Opportunities + baseline insights */}
       <section>
         <div className="cei-card">
           <div
@@ -1682,7 +1745,6 @@ const SiteView: React.FC = () => {
               Use this to brief local operations on where to focus next.
             </div>
 
-            {/* NEW: statistical baseline summary from analytics engine */}
             {insightsLoading && (
               <div
                 style={{
@@ -1746,7 +1808,6 @@ const SiteView: React.FC = () => {
               separate day-to-day noise from structural waste.
             </div>
 
-            {/* NEW: backend-driven opportunity measures */}
             {oppsLoading && (
               <div
                 style={{
@@ -1797,7 +1858,7 @@ const SiteView: React.FC = () => {
                     lineHeight: 1.5,
                   }}
                 >
-                  {opportunities.map((o) => {
+                  {opportunities.map((o, idx) => {
                     const roiYears =
                       typeof o.simple_roi_years === "number"
                         ? o.simple_roi_years
@@ -1812,8 +1873,14 @@ const SiteView: React.FC = () => {
                         : null;
 
                     return (
-                      <li key={o.id} style={{ marginBottom: "0.25rem" }}>
-                        <strong>{o.name}</strong>
+                      <li
+                        key={`${o.source || "auto"}-${o.id}-${idx}`}
+                        style={{ marginBottom: "0.25rem" }}
+                      >
+                        <strong>
+                          {o.source === "manual" ? "[Manual] " : ""}
+                          {o.name}
+                        </strong>
                         {o.description ? ` – ${o.description}` : ""}
                         <span
                           style={{ display: "block", fontSize: "0.78rem" }}
@@ -1841,9 +1908,7 @@ const SiteView: React.FC = () => {
                             <>
                               {" "}
                               · CO₂ cut ~{" "}
-                              <strong>
-                                {co2.toFixed(2)} tCO₂/yr
-                              </strong>
+                              <strong>{co2.toFixed(2)} tCO₂/yr</strong>
                             </>
                           )}
                         </span>
@@ -1855,9 +1920,115 @@ const SiteView: React.FC = () => {
             )}
           </div>
 
+          {/* Manual opportunity quick-add form */}
+          <div
+            style={{
+              marginTop: "0.75rem",
+              paddingTop: "0.75rem",
+              borderTop: "1px solid rgba(148, 163, 184, 0.4)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "0.8rem",
+                fontWeight: 500,
+                marginBottom: "0.35rem",
+              }}
+            >
+              Add manual opportunity
+            </div>
+
+            {manualOppError && (
+              <div
+                style={{
+                  marginBottom: "0.4rem",
+                  fontSize: "0.78rem",
+                  color: "#f97373",
+                }}
+              >
+                {manualOppError}
+              </div>
+            )}
+
+            <form onSubmit={handleManualOppSubmit}>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.4rem",
+                }}
+              >
+                <input
+                  type="text"
+                  placeholder="Short opportunity name (e.g. 'LED retrofit in warehouse')"
+                  value={manualOppForm.name}
+                  onChange={(e) =>
+                    setManualOppForm((prev) => ({
+                      ...prev,
+                      name: e.target.value,
+                    }))
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "0.45rem 0.6rem",
+                    borderRadius: "0.5rem",
+                    border: "1px solid rgba(148, 163, 184, 0.5)",
+                    backgroundColor: "rgba(15,23,42,0.9)",
+                    color: "var(--cei-text-main)",
+                    fontSize: "0.85rem",
+                  }}
+                />
+                <textarea
+                  placeholder="Optional details (e.g. capex, expected savings, owner, target date)…"
+                  value={manualOppForm.description}
+                  onChange={(e) =>
+                    setManualOppForm((prev) => ({
+                      ...prev,
+                      description: e.target.value,
+                    }))
+                  }
+                  rows={2}
+                  style={{
+                    width: "100%",
+                    padding: "0.5rem 0.6rem",
+                    borderRadius: "0.5rem",
+                    border: "1px solid rgba(148, 163, 184, 0.5)",
+                    backgroundColor: "rgba(15,23,42,0.9)",
+                    color: "var(--cei-text-main)",
+                    fontSize: "0.85rem",
+                    resize: "vertical",
+                  }}
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    marginTop: "0.2rem",
+                  }}
+                >
+                  <button
+                    type="submit"
+                    className="cei-btn"
+                    disabled={
+                      manualOppSaving ||
+                      (!manualOppForm.name && !manualOppForm.description)
+                    }
+                    style={{
+                      fontSize: "0.8rem",
+                      padding: "0.35rem 0.9rem",
+                    }}
+                  >
+                    {manualOppSaving ? "Saving…" : "Add opportunity"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+
           {suggestions.length === 0 ? (
             <div
               style={{
+                marginTop: "0.7rem",
                 fontSize: "0.82rem",
                 color: "var(--cei-text-muted)",
               }}
@@ -1869,7 +2040,7 @@ const SiteView: React.FC = () => {
           ) : (
             <ul
               style={{
-                margin: 0,
+                marginTop: "0.7rem",
                 paddingLeft: "1.1rem",
                 fontSize: "0.84rem",
                 color: "var(--cei-text-main)",
@@ -1927,7 +2098,6 @@ function buildSiteEfficiencySuggestions(
     }
   }
 
-  // Always-on tactical suggestions
   suggestions.push(
     `Work with the local team at ${name} to tag meters by process (e.g. "compressors", "HVAC", "ovens") so future analytics can surface process-level waste.`,
     `Add a quick weekly stand-up for ${name} where you review this page with operations and agree on one concrete action item.`,

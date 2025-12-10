@@ -1,4 +1,3 @@
-// frontend/src/pages/SitesList.tsx
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -66,6 +65,7 @@ const SitesList: React.FC = () => {
               };
 
               try {
+                // Call analytics with logical site key, NOT numeric ID
                 const kpi: any = await getSiteKpi(siteKey);
 
                 const total24 =
@@ -121,15 +121,16 @@ const SitesList: React.FC = () => {
                 };
               }
 
-              return [idStr, metrics] as const;
+              // Key metrics by siteKey, not bare id
+              return [siteKey, metrics] as const;
             })
           );
 
           if (!isMounted) return;
 
           const metricsMap: Record<string, SiteTrendMetrics> = {};
-          for (const [idStr, metrics] of entries) {
-            metricsMap[idStr] = metrics;
+          for (const [siteKey, metrics] of entries) {
+            metricsMap[siteKey] = metrics;
           }
           setSiteMetrics(metricsMap);
         }
@@ -194,6 +195,7 @@ const SitesList: React.FC = () => {
     try {
       await deleteSite(id);
       const idStr = String(id);
+      const siteKey = `site-${idStr}`;
 
       setSites((prev: SiteRecord[]) =>
         prev.filter((s) => String(s.id) !== idStr)
@@ -201,7 +203,7 @@ const SitesList: React.FC = () => {
 
       setSiteMetrics((prev: Record<string, SiteTrendMetrics>) => {
         const next = { ...prev };
-        delete next[idStr];
+        delete next[siteKey];
         return next;
       });
     } catch (e: any) {
@@ -459,10 +461,11 @@ const SitesList: React.FC = () => {
                 <tbody>
                   {sites.map((site: SiteRecord) => {
                     const idStr = String(site.id);
+                    const siteKey = `site-${idStr}`;
                     const name = site.name || `Site ${idStr}`;
                     const location = site.location || "—";
 
-                    const metrics = siteMetrics[idStr];
+                    const metrics = siteMetrics[siteKey];
 
                     let trendLabel = "No 24h data yet";
                     let pillClassName = "cei-pill cei-pill-neutral";
