@@ -4,7 +4,7 @@ import axios, {
   AxiosResponse,
 } from "axios";
 import { SiteForecast } from "../types/api";
-import type { AccountMe } from "../types/auth";
+import type { AccountMe, OrgSettingsUpdateRequest, } from "../types/auth";
 
 const rawEnv = (import.meta as any).env || {};
 const envBase = rawEnv.VITE_API_URL || "";
@@ -495,6 +495,17 @@ export async function getAccountMe(): Promise<AccountMe> {
   const resp = await api.get<AccountMe>("/account/me");
   return resp.data;
 }
+
+export async function updateOrgSettings(
+  payload: OrgSettingsUpdateRequest
+): Promise<AccountMe>  {
+  const response = await api.patch<AccountMe>(
+    "/account/org-settings",
+    payload
+  );
+  return response.data;
+}
+
 
 /**
  * Start a Stripe Checkout session for a given plan.

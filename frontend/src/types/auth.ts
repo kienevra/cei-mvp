@@ -43,3 +43,12 @@ export interface AccountMe {
 
   organization?: OrganizationSummary | null;
 }
+
+// frontend/src/types/auth.ts
+
+export interface OrgSettingsUpdateRequest {
+  primary_energy_sources?: string | null;
+  electricity_price_per_kwh?: number | null;
+  gas_price_per_kwh?: number | null;
+  currency_code?: string | null;
+}

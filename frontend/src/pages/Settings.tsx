@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from "react";
-import api, { getAccountMe } from "../services/api";
-import type { AccountMe, OrganizationSummary } from "../types/auth";
+import api, { getAccountMe, updateOrgSettings } from "../services/api";
+import type {
+  AccountMe,
+  OrganizationSummary,
+  OrgSettingsUpdateRequest,
+} from "../types/auth";
 
 type IntegrationToken = {
   id: number;
@@ -10,9 +14,6 @@ type IntegrationToken = {
   last_used_at: string | null;
 };
 
-const formatPrice = (value: number | null | undefined) =>
-  typeof value === "number" ? value.toFixed(4) : "Not configured";
-
 const Settings: React.FC = () => {
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [unitSystem, setUnitSystem] = useState<"metric" | "imperial">("metric");
@@ -21,6 +22,16 @@ const Settings: React.FC = () => {
   const [account, setAccount] = useState<AccountMe | null>(null);
   const [accountLoading, setAccountLoading] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
+
+  // Org energy/tariff form state
+  const [savingOrgSettings, setSavingOrgSettings] = useState(false);
+  const [orgSettingsError, setOrgSettingsError] = useState<string | null>(null);
+  const [orgSettingsSaved, setOrgSettingsSaved] = useState(false);
+
+  const [primaryEnergySources, setPrimaryEnergySources] = useState("");
+  const [electricityPriceInput, setElectricityPriceInput] = useState("");
+  const [gasPriceInput, setGasPriceInput] = useState("");
+  const [currencyCodeInput, setCurrencyCodeInput] = useState("");
 
   // Integration tokens state
   const [tokens, setTokens] = useState<IntegrationToken[]>([]);
@@ -42,9 +53,68 @@ const Settings: React.FC = () => {
   const loadAccount = async () => {
     setAccountLoading(true);
     setAccountError(null);
+    setOrgSettingsError(null);
+    setOrgSettingsSaved(false);
     try {
       const data = await getAccountMe();
       setAccount(data);
+
+      const anyData: any = data || {};
+      const orgFromData: OrganizationSummary | null =
+        (anyData.org as OrganizationSummary) ??
+        (anyData.organization as OrganizationSummary) ??
+        null;
+
+      if (orgFromData) {
+        // primary_energy_sources might be string or string[]
+        const p = (orgFromData as any).primary_energy_sources;
+        if (Array.isArray(p)) {
+          setPrimaryEnergySources(p.join(", "));
+        } else if (typeof p === "string") {
+          setPrimaryEnergySources(p);
+        } else if (Array.isArray(anyData.primary_energy_sources)) {
+          setPrimaryEnergySources(anyData.primary_energy_sources.join(", "));
+        } else if (typeof anyData.primary_energy_sources === "string") {
+          setPrimaryEnergySources(anyData.primary_energy_sources);
+        } else {
+          setPrimaryEnergySources("");
+        }
+
+        // Electricity price
+        if (typeof (orgFromData as any).electricity_price_per_kwh === "number") {
+          setElectricityPriceInput(
+            String((orgFromData as any).electricity_price_per_kwh)
+          );
+        } else if (typeof anyData.electricity_price_per_kwh === "number") {
+          setElectricityPriceInput(String(anyData.electricity_price_per_kwh));
+        } else {
+          setElectricityPriceInput("");
+        }
+
+        // Gas price
+        if (typeof (orgFromData as any).gas_price_per_kwh === "number") {
+          setGasPriceInput(String((orgFromData as any).gas_price_per_kwh));
+        } else if (typeof anyData.gas_price_per_kwh === "number") {
+          setGasPriceInput(String(anyData.gas_price_per_kwh));
+        } else {
+          setGasPriceInput("");
+        }
+
+        // Currency code
+        if (typeof (orgFromData as any).currency_code === "string") {
+          setCurrencyCodeInput((orgFromData as any).currency_code);
+        } else if (typeof anyData.currency_code === "string") {
+          setCurrencyCodeInput(anyData.currency_code);
+        } else {
+          setCurrencyCodeInput("");
+        }
+      } else {
+        // No org associated; keep fields blank
+        setPrimaryEnergySources("");
+        setElectricityPriceInput("");
+        setGasPriceInput("");
+        setCurrencyCodeInput("");
+      }
     } catch (err: any) {
       console.error("Failed to load account for settings", err);
       const msg =
@@ -130,52 +200,131 @@ const Settings: React.FC = () => {
     if (!createdTokenSecret) return;
     try {
       await navigator.clipboard.writeText(createdTokenSecret);
-      // no toast system here; silently succeed
+      // silent success
     } catch (e) {
       console.warn("Clipboard copy failed", e);
     }
   };
 
-  // Flexible org/account view for tariffs & energy mix
+  const handleOrgSettingsSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!account) {
+      setOrgSettingsError("Account details are not loaded yet.");
+      return;
+    }
+
+    const anyAcc: any = account;
+    const orgFromAccount: OrganizationSummary | null =
+      (anyAcc.org as OrganizationSummary) ??
+      (anyAcc.organization as OrganizationSummary) ??
+      null;
+
+    if (!orgFromAccount) {
+      setOrgSettingsError(
+        "No organization is associated with this account yet."
+      );
+      return;
+    }
+
+    setOrgSettingsError(null);
+    setOrgSettingsSaved(false);
+    setSavingOrgSettings(true);
+
+    const payload: OrgSettingsUpdateRequest = {
+      primary_energy_sources:
+        primaryEnergySources.trim() === ""
+          ? null
+          : primaryEnergySources.trim(),
+      electricity_price_per_kwh:
+        electricityPriceInput.trim() === ""
+          ? null
+          : Number(electricityPriceInput.trim()),
+      gas_price_per_kwh:
+        gasPriceInput.trim() === "" ? null : Number(gasPriceInput.trim()),
+      currency_code:
+        currencyCodeInput.trim() === ""
+          ? null
+          : currencyCodeInput.trim().toUpperCase(),
+    };
+
+    try {
+      const updated = await updateOrgSettings(payload);
+      setAccount(updated);
+
+      const updatedAny: any = updated || {};
+      const updatedOrg: OrganizationSummary | null =
+        (updatedAny.org as OrganizationSummary) ??
+        (updatedAny.organization as OrganizationSummary) ??
+        null;
+
+      if (updatedOrg) {
+        const p = (updatedOrg as any).primary_energy_sources;
+        if (Array.isArray(p)) {
+          setPrimaryEnergySources(p.join(", "));
+        } else if (typeof p === "string") {
+          setPrimaryEnergySources(p);
+        } else if (Array.isArray(updatedAny.primary_energy_sources)) {
+          setPrimaryEnergySources(updatedAny.primary_energy_sources.join(", "));
+        } else if (typeof updatedAny.primary_energy_sources === "string") {
+          setPrimaryEnergySources(updatedAny.primary_energy_sources);
+        } else {
+          setPrimaryEnergySources("");
+        }
+
+        if (typeof (updatedOrg as any).electricity_price_per_kwh === "number") {
+          setElectricityPriceInput(
+            String((updatedOrg as any).electricity_price_per_kwh)
+          );
+        } else if (typeof updatedAny.electricity_price_per_kwh === "number") {
+          setElectricityPriceInput(
+            String(updatedAny.electricity_price_per_kwh)
+          );
+        } else {
+          setElectricityPriceInput("");
+        }
+
+        if (typeof (updatedOrg as any).gas_price_per_kwh === "number") {
+          setGasPriceInput(String((updatedOrg as any).gas_price_per_kwh));
+        } else if (typeof updatedAny.gas_price_per_kwh === "number") {
+          setGasPriceInput(String(updatedAny.gas_price_per_kwh));
+        } else {
+          setGasPriceInput("");
+        }
+
+        if (typeof (updatedOrg as any).currency_code === "string") {
+          setCurrencyCodeInput((updatedOrg as any).currency_code);
+        } else if (typeof updatedAny.currency_code === "string") {
+          setCurrencyCodeInput(updatedAny.currency_code);
+        } else {
+          setCurrencyCodeInput("");
+        }
+      }
+
+      setOrgSettingsSaved(true);
+    } catch (err: any) {
+      console.error("Failed to save org settings", err);
+      const msg =
+        err?.response?.data?.detail ||
+        err?.message ||
+        "Failed to save organization settings.";
+      setOrgSettingsError(msg);
+    } finally {
+      setSavingOrgSettings(false);
+    }
+  };
+
+  // Flexible org/account view for gating
   const accountAny: any = account || {};
   const org: OrganizationSummary | null =
     (accountAny.org as OrganizationSummary) ??
     (accountAny.organization as OrganizationSummary) ??
     null;
 
-  const currencyCode: string =
-    typeof org?.currency_code === "string"
-      ? org.currency_code
-      : typeof accountAny.currency_code === "string"
-      ? accountAny.currency_code
-      : "—";
-
-  const electricityPrice: number | null =
-    typeof org?.electricity_price_per_kwh === "number"
-      ? org.electricity_price_per_kwh
-      : typeof accountAny.electricity_price_per_kwh === "number"
-      ? accountAny.electricity_price_per_kwh
-      : null;
-
-  const gasPrice: number | null =
-    typeof org?.gas_price_per_kwh === "number"
-      ? org.gas_price_per_kwh
-      : typeof accountAny.gas_price_per_kwh === "number"
-      ? accountAny.gas_price_per_kwh
-      : null;
-
-  const primarySources: string[] =
-    Array.isArray(org?.primary_energy_sources)
-      ? org.primary_energy_sources
-      : Array.isArray(accountAny.primary_energy_sources)
-      ? accountAny.primary_energy_sources
-      : [];
-
   const hasTariffConfig =
-    typeof electricityPrice === "number" ||
-    typeof gasPrice === "number" ||
-    (currencyCode && currencyCode !== "—") ||
-    (primarySources && primarySources.length > 0);
+    primaryEnergySources.trim().length > 0 ||
+    electricityPriceInput.trim().length > 0 ||
+    gasPriceInput.trim().length > 0 ||
+    currencyCodeInput.trim().length > 0;
 
   return (
     <div className="dashboard-page">
@@ -285,7 +434,7 @@ const Settings: React.FC = () => {
         </div>
       </section>
 
-      {/* Tariffs & energy mix (read-only, from /account/me) */}
+      {/* Energy & tariffs (editable; drives cost engine) */}
       <section className="dashboard-row">
         <div className="cei-card" style={{ width: "100%" }}>
           <div
@@ -299,14 +448,15 @@ const Settings: React.FC = () => {
               gap: "0.75rem",
             }}
           >
-            <span>Tariffs & energy mix</span>
+            <span>Energy & tariffs</span>
             <span
               style={{
                 fontSize: "0.75rem",
                 color: "var(--cei-text-muted)",
               }}
             >
-              Read-only. These values drive cost analytics and savings estimates.
+              Org-level settings used by the cost engine in KPIs, alerts, and
+              reports.
             </span>
           </div>
 
@@ -317,7 +467,7 @@ const Settings: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Loading organization tariffs…
+              Loading organization settings…
             </div>
           ) : accountError ? (
             <div
@@ -328,68 +478,220 @@ const Settings: React.FC = () => {
             >
               {accountError}
             </div>
-          ) : !account && !hasTariffConfig ? (
+          ) : !account ? (
             <div
               style={{
                 fontSize: "0.8rem",
                 color: "var(--cei-text-muted)",
               }}
             >
-              Account details are not available yet. Tariff and energy mix data
-              will appear here once your org is configured.
+              Account details are not available yet. Once your org is set up,
+              you can configure energy costs here.
             </div>
-          ) : !org && !hasTariffConfig ? (
+          ) : !org ? (
             <div
               style={{
                 fontSize: "0.8rem",
                 color: "var(--cei-text-muted)",
               }}
             >
-              No organization is associated with this account yet. Tariff and
-              energy mix data will appear here once your org is configured.
+              No organization is associated with this account yet. Cost
+              analytics will remain disabled until an org is created.
             </div>
           ) : (
             <>
-              <div
+              <form
+                onSubmit={handleOrgSettingsSubmit}
                 style={{
+                  marginTop: "0.75rem",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                  gap: "0.75rem",
                   fontSize: "0.8rem",
-                  color: "var(--cei-text-muted)",
-                  lineHeight: 1.6,
                 }}
               >
-                <div>
-                  <strong>Currency:</strong> {currencyCode}
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.75rem",
+                      fontWeight: 500,
+                      marginBottom: "0.2rem",
+                    }}
+                  >
+                    Primary energy sources
+                  </label>
+                  <input
+                    type="text"
+                    placeholder='e.g. "electricity", "electricity,gas"'
+                    value={primaryEnergySources}
+                    onChange={(e) => setPrimaryEnergySources(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "0.4rem 0.6rem",
+                      borderRadius: "0.375rem",
+                      border: "1px solid rgba(156, 163, 175, 0.4)",
+                      backgroundColor: "rgba(15, 23, 42, 0.8)",
+                      color: "var(--cei-text)",
+                    }}
+                  />
+                  <div
+                    style={{
+                      marginTop: "0.2rem",
+                      fontSize: "0.75rem",
+                      color: "var(--cei-text-muted)",
+                    }}
+                  >
+                    Comma-separated list; currently used for labeling and
+                    context.
+                  </div>
                 </div>
-                <div style={{ marginTop: "0.2rem" }}>
-                  <strong>Electricity price (per kWh):</strong>{" "}
-                  {formatPrice(electricityPrice)}
-                </div>
-                <div style={{ marginTop: "0.2rem" }}>
-                  <strong>Gas price (per kWh):</strong>{" "}
-                  {formatPrice(gasPrice)}
-                </div>
-                <div style={{ marginTop: "0.2rem" }}>
-                  <strong>Primary energy sources:</strong>{" "}
-                  {primarySources && primarySources.length > 0 ? (
-                    primarySources.join(", ")
-                  ) : (
-                    <span>Not specified</span>
-                  )}
-                </div>
-              </div>
 
-              {!hasTariffConfig && (
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.75rem",
+                      fontWeight: 500,
+                      marginBottom: "0.2rem",
+                    }}
+                  >
+                    Electricity price (per kWh)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.0001"
+                    placeholder="e.g. 0.18"
+                    value={electricityPriceInput}
+                    onChange={(e) => setElectricityPriceInput(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "0.4rem 0.6rem",
+                      borderRadius: "0.375rem",
+                      border: "1px solid rgba(156, 163, 175, 0.4)",
+                      backgroundColor: "rgba(15, 23, 42, 0.8)",
+                      color: "var(--cei-text)",
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.75rem",
+                      fontWeight: 500,
+                      marginBottom: "0.2rem",
+                    }}
+                  >
+                    Gas price (per kWh, optional)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.0001"
+                    placeholder="e.g. 0.06"
+                    value={gasPriceInput}
+                    onChange={(e) => setGasPriceInput(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "0.4rem 0.6rem",
+                      borderRadius: "0.375rem",
+                      border: "1px solid rgba(156, 163, 175, 0.4)",
+                      backgroundColor: "rgba(15, 23, 42, 0.8)",
+                      color: "var(--cei-text)",
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.75rem",
+                      fontWeight: 500,
+                      marginBottom: "0.2rem",
+                    }}
+                  >
+                    Currency code
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={3}
+                    placeholder="e.g. EUR"
+                    value={currencyCodeInput}
+                    onChange={(e) =>
+                      setCurrencyCodeInput(e.target.value.toUpperCase())
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "0.4rem 0.6rem",
+                      borderRadius: "0.375rem",
+                      border: "1px solid rgba(156, 163, 175, 0.4)",
+                      backgroundColor: "rgba(15, 23, 42, 0.8)",
+                      color: "var(--cei-text)",
+                    }}
+                  />
+                </div>
+
                 <div
                   style={{
-                    marginTop: "0.7rem",
-                    fontSize: "0.78rem",
-                    color: "var(--cei-text-muted)",
+                    gridColumn: "1 / -1",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginTop: "0.4rem",
+                    gap: "0.5rem",
                   }}
                 >
-                  Tariffs and energy mix are not configured yet. CEI will use
-                  kWh-only analytics until these values are set on the backend.
+                  <div style={{ minHeight: "1.1rem" }}>
+                    {orgSettingsError && (
+                      <div
+                        style={{
+                          fontSize: "0.75rem",
+                          color: "#f87171",
+                        }}
+                      >
+                        {orgSettingsError}
+                      </div>
+                    )}
+                    {orgSettingsSaved && !orgSettingsError && (
+                      <div
+                        style={{
+                          fontSize: "0.75rem",
+                          color: "#4ade80",
+                        }}
+                      >
+                        Settings saved. Cost analytics will now use these
+                        values.
+                      </div>
+                    )}
+                    {!hasTariffConfig && !orgSettingsError && !orgSettingsSaved && (
+                      <div
+                        style={{
+                          fontSize: "0.75rem",
+                          color: "var(--cei-text-muted)",
+                        }}
+                      >
+                        Until tariffs are configured, CEI will fall back to
+                        kWh-only analytics.
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    className="cei-btn"
+                    disabled={savingOrgSettings}
+                    style={{
+                      whiteSpace: "nowrap",
+                      opacity: savingOrgSettings ? 0.7 : 1,
+                    }}
+                  >
+                    {savingOrgSettings ? "Saving..." : "Save energy settings"}
+                  </button>
                 </div>
-              )}
+              </form>
             </>
           )}
         </div>
@@ -609,9 +911,7 @@ const Settings: React.FC = () => {
                     >
                       <span
                         className={
-                          t.is_active
-                            ? "cei-pill-success"
-                            : "cei-pill-muted"
+                          t.is_active ? "cei-pill-success" : "cei-pill-muted"
                         }
                         style={{ fontSize: "0.7rem" }}
                       >
