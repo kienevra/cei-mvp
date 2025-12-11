@@ -2,7 +2,7 @@
 
 import logging
 import traceback
-from typing import List, Optional
+from typing import List
 
 from fastapi import FastAPI, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,28 +36,23 @@ app = FastAPI(
 )
 
 # --- CORS setup ---
-# settings.origins_list() should return a List[str] or [] if unset
-origins: Optional[List[str]] = None
-try:
-    origins = settings.origins_list()
-except Exception:
-    origins = None
+# In dev, we remove all origin-matching ambiguity:
+# - allow any origin via regex
+# - still keep an explicit list for logging / future tightening
+dev_origins: List[str] = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "https://cei-frontend.herokuapp.com",
+    "https://cei-mvp.onrender.com",
+]
 
-# Sensible defaults during development
-if not origins:
-    origins = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "https://cei-frontend.herokuapp.com",
-        "https://cei-mvp.onrender.com",
-    ]
-
-logger.info(f"CORS allow_origins={origins}")
+logger.info(f"CORS dev allow_origins={dev_origins} (regex='.*')")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    # Regex allows *any* origin in dev
+    allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,22 +61,22 @@ app.add_middleware(
 # --- Error logging middleware ---
 @app.middleware("http")
 async def log_exceptions(request: Request, call_next):
-    try:
-        response = await call_next(request)
-        return response
-    except Exception as e:
-        logger.error(f"Unhandled error at {request.url.path}: {e}")
-        logger.error(traceback.format_exc())
-        # Return safe, short payload to clients but include last lines for debugging
-        tb_lines = traceback.format_exc().splitlines()
-        return JSONResponse(
-            status_code=500,
-            content={
-                "detail": "Internal Server Error",
-                "error": str(e),
-                "traceback_last_lines": tb_lines[-10:],
-            },
-        )
+  try:
+      response = await call_next(request)
+      return response
+  except Exception as e:
+      logger.error(f"Unhandled error at {request.url.path}: {e}")
+      logger.error(traceback.format_exc())
+      # Return safe, short payload to clients but include last lines for debugging
+      tb_lines = traceback.format_exc().splitlines()
+      return JSONResponse(
+          status_code=500,
+          content={
+              "detail": "Internal Server Error",
+              "error": str(e),
+              "traceback_last_lines": tb_lines[-10:],
+          },
+      )
 
 
 # --- Include routers (after app creation) ---
@@ -97,7 +92,7 @@ from app.api.v1 import (  # noqa: E402
     stripe_webhook,
     account,
     site_events,   # site events / timeline
-    opportunities, # opportunities (auto + manual)
+    opportunities,  # opportunities (auto + manual)
 )
 
 app.include_router(auth.router, prefix="/api/v1")

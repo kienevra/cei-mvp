@@ -4,6 +4,7 @@ import axios, {
   AxiosResponse,
 } from "axios";
 import { SiteForecast } from "../types/api";
+import type { AccountMe } from "../types/auth";
 
 const rawEnv = (import.meta as any).env || {};
 const envBase = rawEnv.VITE_API_URL || "";
@@ -188,6 +189,30 @@ export type SiteKpi = {
   last_7d_kwh: number;
   prev_7d_kwh: number | null;
   deviation_pct_7d: number | null;
+
+  /**
+   * Optional currency + cost-based KPIs (pricing analytics).
+   * Backend may populate these using org tariffs; safe to treat as null/undefined
+   * when pricing is not configured yet.
+   */
+
+  // Currency used for any cost figures, e.g. "EUR"
+  currency_code?: string | null;
+
+  // Canonical 24h cost metrics used by the UI
+  last_24h_cost?: number | null;
+  baseline_24h_cost?: number | null;
+  delta_24h_cost?: number | null; // positive = savings, negative = overspend
+
+  // 7-day cost metrics (for portfolio/reporting extensions)
+  cost_7d_actual?: number | null;
+  cost_7d_baseline?: number | null;
+  cost_7d_delta?: number | null;
+
+  // Legacy / backend synonyms for 24h cost, kept for compatibility
+  cost_24h_actual?: number | null;
+  cost_24h_baseline?: number | null;
+  cost_24h_delta?: number | null;
 };
 
 /* ===== Typed helper functions ===== */
@@ -466,8 +491,8 @@ export async function updateAlertEvent(
  * Fetch current account/org info, if the backend exposes it.
  * This is best-effort; UI will degrade gracefully if it fails.
  */
-export async function getAccountMe() {
-  const resp = await api.get("/account/me");
+export async function getAccountMe(): Promise<AccountMe> {
+  const resp = await api.get<AccountMe>("/account/me");
   return resp.data;
 }
 

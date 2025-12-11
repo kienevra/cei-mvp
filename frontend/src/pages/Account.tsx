@@ -7,30 +7,7 @@ import {
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
-
-type OrgInfo = {
-  id?: number | string;
-  name?: string;
-  plan_key?: string | null;
-  subscription_plan_key?: string | null;
-  subscription_status?: string | null;
-  enable_alerts?: boolean | null;
-  enable_reports?: boolean | null;
-  [key: string]: any;
-};
-
-type AccountMe = {
-  email?: string;
-  full_name?: string | null;
-  role?: string | null;
-  org?: OrgInfo | null;
-  organization?: OrgInfo | null;
-  subscription_plan_key?: string | null;
-  enable_alerts?: boolean | null;
-  enable_reports?: boolean | null;
-  subscription_status?: string | null;
-  [key: string]: any;
-};
+import type { AccountMe, OrganizationSummary } from "../types/auth";
 
 // Read environment once from Vite
 const rawEnv = (import.meta as any).env || {};
@@ -55,8 +32,25 @@ function getEnvironmentBlurb(env: string): string {
   return "Local / dev data. Safe to experiment, break things, and iterate quickly.";
 }
 
+type UiAccount = AccountMe & {
+  role?: string | null;
+  org: OrganizationSummary | null;
+
+  // Root-level plan flags that /account/me may expose
+  subscription_plan_key?: string | null;
+  subscription_status?: string | null;
+  enable_alerts?: boolean | null;
+  enable_reports?: boolean | null;
+
+  // Optional pricing context at account level (forward-compatible)
+  currency_code?: string | null;
+  electricity_price_per_kwh?: number | null;
+  gas_price_per_kwh?: number | null;
+  primary_energy_sources?: string[] | null;
+};
+
 const Account: React.FC = () => {
-  const [account, setAccount] = useState<AccountMe | null>(null);
+  const [account, setAccount] = useState<UiAccount | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,17 +70,15 @@ const Account: React.FC = () => {
         const data = await getAccountMe();
         if (!isMounted) return;
 
-        const org =
-          (data?.org as OrgInfo | null | undefined) ??
-          (data?.organization as OrgInfo | null | undefined) ??
-          null;
+        const org: OrganizationSummary | null =
+          (data as any)?.org ?? (data as any)?.organization ?? null;
+        const role =
+          (data as any).role ?? (data as any).user_role ?? null;
 
         setAccount({
-          email: data?.email,
-          full_name: data?.full_name ?? (data as any)?.name ?? null,
-          role: data?.role ?? (data as any)?.user_role ?? null,
+          ...(data as UiAccount),
           org,
-          ...data,
+          role,
         });
       } catch (e: any) {
         if (!isMounted) return;
@@ -108,15 +100,18 @@ const Account: React.FC = () => {
     };
   }, []);
 
-  const org =
-    account?.org ||
-    (account?.organization as OrgInfo | null | undefined) ||
-    null;
+  // Canonical org object for UI + flags
+  const org: OrganizationSummary | null = account?.org ?? null;
+
+  // Flexible view over account/org for plan + tariffs (handles org vs root fields)
+  const accountAny: any = account || {};
+  const orgLike: any =
+    accountAny.org ?? accountAny.organization ?? null;
 
   const planKey =
-    org?.subscription_plan_key ||
-    org?.plan_key ||
-    account?.subscription_plan_key ||
+    orgLike?.subscription_plan_key ||
+    orgLike?.plan_key ||
+    accountAny.subscription_plan_key ||
     "cei-starter";
 
   const planLabel = (() => {
@@ -131,23 +126,23 @@ const Account: React.FC = () => {
   })();
 
   const subscriptionStatus =
-    org?.subscription_status ||
-    account?.subscription_status ||
+    orgLike?.subscription_status ||
+    accountAny.subscription_status ||
     "Not connected";
 
   // Respect explicit false; only default to true when we truly have no signal.
   const alertsEnabled =
-    typeof account?.enable_alerts === "boolean"
-      ? account.enable_alerts
-      : typeof org?.enable_alerts === "boolean"
-      ? (org.enable_alerts as boolean)
+    typeof accountAny.enable_alerts === "boolean"
+      ? accountAny.enable_alerts
+      : typeof orgLike?.enable_alerts === "boolean"
+      ? (orgLike.enable_alerts as boolean)
       : true;
 
   const reportsEnabled =
-    typeof account?.enable_reports === "boolean"
-      ? account.enable_reports
-      : typeof org?.enable_reports === "boolean"
-      ? (org.enable_reports as boolean)
+    typeof accountAny.enable_reports === "boolean"
+      ? accountAny.enable_reports
+      : typeof orgLike?.enable_reports === "boolean"
+      ? (orgLike.enable_reports as boolean)
       : true;
 
   const handleStartStarterCheckout = async () => {
@@ -221,6 +216,44 @@ const Account: React.FC = () => {
 
   const envLabel = getEnvironmentLabel(appEnvironment);
   const envBlurb = getEnvironmentBlurb(appEnvironment);
+
+  // Pricing context (tariffs & energy mix) – unified org/root view
+  const currencyCode: string =
+    typeof orgLike?.currency_code === "string"
+      ? orgLike.currency_code
+      : typeof accountAny.currency_code === "string"
+      ? accountAny.currency_code
+      : "—";
+
+  const electricityPrice: number | null =
+    typeof orgLike?.electricity_price_per_kwh === "number"
+      ? orgLike.electricity_price_per_kwh
+      : typeof accountAny.electricity_price_per_kwh === "number"
+      ? accountAny.electricity_price_per_kwh
+      : null;
+
+  const gasPrice: number | null =
+    typeof orgLike?.gas_price_per_kwh === "number"
+      ? orgLike.gas_price_per_kwh
+      : typeof accountAny.gas_price_per_kwh === "number"
+      ? accountAny.gas_price_per_kwh
+      : null;
+
+  const primarySources: string[] =
+    Array.isArray(orgLike?.primary_energy_sources)
+      ? orgLike.primary_energy_sources
+      : Array.isArray(accountAny.primary_energy_sources)
+      ? accountAny.primary_energy_sources
+      : [];
+
+  const hasTariffConfig =
+    typeof electricityPrice === "number" ||
+    typeof gasPrice === "number" ||
+    (currencyCode && currencyCode !== "—") ||
+    (primarySources && primarySources.length > 0);
+
+  const formatPrice = (value: number | null) =>
+    typeof value === "number" ? value.toFixed(4) : "Not configured";
 
   return (
     <div className="dashboard-page">
@@ -477,6 +510,98 @@ const Account: React.FC = () => {
             >
               {billingMessage}
             </div>
+          )}
+        </div>
+      </section>
+
+      {/* Tariffs & energy mix */}
+      <section>
+        <div className="cei-card">
+          <div
+            style={{
+              fontSize: "0.9rem",
+              fontWeight: 600,
+              marginBottom: "0.4rem",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "0.75rem",
+            }}
+          >
+            <span>Tariffs & energy mix</span>
+            <span
+              style={{
+                fontSize: "0.75rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Read-only. Used for cost analytics and savings estimates.
+            </span>
+          </div>
+
+          {!account ? (
+            <div
+              style={{
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Account details are still loading. Tariff and energy mix data will
+              appear here once available.
+            </div>
+          ) : !org && !hasTariffConfig ? (
+            <div
+              style={{
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              No organization is associated with this account yet. Tariff and
+              energy mix data will appear here once your org is configured.
+            </div>
+          ) : (
+            <>
+              <div
+                style={{
+                  fontSize: "0.8rem",
+                  color: "var(--cei-text-muted)",
+                  lineHeight: 1.6,
+                }}
+              >
+                <div>
+                  <strong>Currency:</strong> {currencyCode}
+                </div>
+                <div style={{ marginTop: "0.2rem" }}>
+                  <strong>Electricity price (per kWh):</strong>{" "}
+                  {formatPrice(electricityPrice)}
+                </div>
+                <div style={{ marginTop: "0.2rem" }}>
+                  <strong>Gas price (per kWh):</strong>{" "}
+                  {formatPrice(gasPrice)}
+                </div>
+                <div style={{ marginTop: "0.2rem" }}>
+                  <strong>Primary energy sources:</strong>{" "}
+                  {primarySources && primarySources.length > 0 ? (
+                    primarySources.join(", ")
+                  ) : (
+                    <span>Not specified</span>
+                  )}
+                </div>
+              </div>
+
+              {!hasTariffConfig && (
+                <div
+                  style={{
+                    marginTop: "0.7rem",
+                    fontSize: "0.78rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  Tariffs and energy mix are not configured yet. CEI will use
+                  kWh-only analytics until these values are set on the backend.
+                </div>
+              )}
+            </>
           )}
         </div>
       </section>

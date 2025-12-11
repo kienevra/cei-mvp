@@ -23,7 +23,7 @@ export default function SiteTimelineCard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // NEW: internal state for selected lookback window + pagination
+  // internal state for selected lookback window + pagination
   const [selectedWindowHours, setSelectedWindowHours] =
     useState<number>(windowHours || DEFAULT_WINDOW_HOURS);
   const [page, setPage] = useState<number>(1);
@@ -51,7 +51,7 @@ export default function SiteTimelineCard({
         const list = data || [];
         setEvents(list);
         setHasMore(list.length === PAGE_SIZE);
-      } catch (e: any) {
+      } catch {
         if (ignore) return;
         setError("Failed to fetch site activity.");
       } finally {
@@ -85,7 +85,7 @@ export default function SiteTimelineCard({
       setEvents((prev) => [...prev, ...batch]);
       setPage(nextPage);
       setHasMore(batch.length === PAGE_SIZE);
-    } catch (e: any) {
+    } catch {
       setError("Failed to fetch more activity.");
     } finally {
       setLoading(false);
@@ -106,7 +106,7 @@ export default function SiteTimelineCard({
           Recent Activity
         </h2>
 
-        {/* NEW: lookback filters */}
+        {/* lookback filters */}
         <div className="flex items-center space-x-2 text-xs">
           {[
             { label: "24h", hours: 24 },
@@ -153,7 +153,7 @@ export default function SiteTimelineCard({
           <ul className="space-y-4 mt-1">
             {events.map((ev) => (
               <li key={ev.id} className="flex items-start space-x-3">
-                {/* NEW: iconized dot, type-aware */}
+                {/* iconized dot, type-aware */}
                 <div
                   className="mt-0.5 w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
                   style={{ background: eventAccent(ev.type) }}
@@ -184,7 +184,7 @@ export default function SiteTimelineCard({
             ))}
           </ul>
 
-          {/* NEW: Load more pagination control */}
+          {/* Load more pagination control */}
           {hasMore && (
             <div className="mt-4 flex justify-center">
               <button
@@ -220,7 +220,7 @@ function eventAccent(type: string): string {
   return "#6b7280"; // neutral gray
 }
 
-// NEW: coarse icon symbol per event type
+// coarse icon symbol per event type
 function eventIconSymbol(type: string): string {
   if (!type) return "•";
   const t = type.toLowerCase();

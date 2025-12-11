@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import api from "../services/api";
+import api, { getAccountMe } from "../services/api";
+import type { AccountMe, OrganizationSummary } from "../types/auth";
 
 type IntegrationToken = {
   id: number;
@@ -9,9 +10,17 @@ type IntegrationToken = {
   last_used_at: string | null;
 };
 
+const formatPrice = (value: number | null | undefined) =>
+  typeof value === "number" ? value.toFixed(4) : "Not configured";
+
 const Settings: React.FC = () => {
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [unitSystem, setUnitSystem] = useState<"metric" | "imperial">("metric");
+
+  // Account / org (for tariffs & energy mix)
+  const [account, setAccount] = useState<AccountMe | null>(null);
+  const [accountLoading, setAccountLoading] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
 
   // Integration tokens state
   const [tokens, setTokens] = useState<IntegrationToken[]>([]);
@@ -26,9 +35,27 @@ const Settings: React.FC = () => {
   const [revokingId, setRevokingId] = useState<number | null>(null);
 
   useEffect(() => {
+    loadAccount();
     loadIntegrationTokens();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const loadAccount = async () => {
+    setAccountLoading(true);
+    setAccountError(null);
+    try {
+      const data = await getAccountMe();
+      setAccount(data);
+    } catch (err: any) {
+      console.error("Failed to load account for settings", err);
+      const msg =
+        err?.response?.data?.detail ||
+        err?.message ||
+        "Failed to load account details.";
+      setAccountError(msg);
+    } finally {
+      setAccountLoading(false);
+    }
+  };
 
   const loadIntegrationTokens = async () => {
     setTokensLoading(true);
@@ -109,6 +136,47 @@ const Settings: React.FC = () => {
     }
   };
 
+  // Flexible org/account view for tariffs & energy mix
+  const accountAny: any = account || {};
+  const org: OrganizationSummary | null =
+    (accountAny.org as OrganizationSummary) ??
+    (accountAny.organization as OrganizationSummary) ??
+    null;
+
+  const currencyCode: string =
+    typeof org?.currency_code === "string"
+      ? org.currency_code
+      : typeof accountAny.currency_code === "string"
+      ? accountAny.currency_code
+      : "—";
+
+  const electricityPrice: number | null =
+    typeof org?.electricity_price_per_kwh === "number"
+      ? org.electricity_price_per_kwh
+      : typeof accountAny.electricity_price_per_kwh === "number"
+      ? accountAny.electricity_price_per_kwh
+      : null;
+
+  const gasPrice: number | null =
+    typeof org?.gas_price_per_kwh === "number"
+      ? org.gas_price_per_kwh
+      : typeof accountAny.gas_price_per_kwh === "number"
+      ? accountAny.gas_price_per_kwh
+      : null;
+
+  const primarySources: string[] =
+    Array.isArray(org?.primary_energy_sources)
+      ? org.primary_energy_sources
+      : Array.isArray(accountAny.primary_energy_sources)
+      ? accountAny.primary_energy_sources
+      : [];
+
+  const hasTariffConfig =
+    typeof electricityPrice === "number" ||
+    typeof gasPrice === "number" ||
+    (currencyCode && currencyCode !== "—") ||
+    (primarySources && primarySources.length > 0);
+
   return (
     <div className="dashboard-page">
       <section>
@@ -128,8 +196,8 @@ const Settings: React.FC = () => {
             color: "var(--cei-text-muted)",
           }}
         >
-          Local preferences for your CEI experience. We’ll connect these to
-          server-side settings later.
+          Local preferences for your CEI experience, plus technical settings for
+          data ingestion.
         </p>
       </section>
 
@@ -214,6 +282,116 @@ const Settings: React.FC = () => {
               Imperial (kBtu, lb CO₂)
             </button>
           </div>
+        </div>
+      </section>
+
+      {/* Tariffs & energy mix (read-only, from /account/me) */}
+      <section className="dashboard-row">
+        <div className="cei-card" style={{ width: "100%" }}>
+          <div
+            style={{
+              fontSize: "0.9rem",
+              fontWeight: 600,
+              marginBottom: "0.5rem",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "0.75rem",
+            }}
+          >
+            <span>Tariffs & energy mix</span>
+            <span
+              style={{
+                fontSize: "0.75rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Read-only. These values drive cost analytics and savings estimates.
+            </span>
+          </div>
+
+          {accountLoading ? (
+            <div
+              style={{
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Loading organization tariffs…
+            </div>
+          ) : accountError ? (
+            <div
+              style={{
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              {accountError}
+            </div>
+          ) : !account && !hasTariffConfig ? (
+            <div
+              style={{
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Account details are not available yet. Tariff and energy mix data
+              will appear here once your org is configured.
+            </div>
+          ) : !org && !hasTariffConfig ? (
+            <div
+              style={{
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              No organization is associated with this account yet. Tariff and
+              energy mix data will appear here once your org is configured.
+            </div>
+          ) : (
+            <>
+              <div
+                style={{
+                  fontSize: "0.8rem",
+                  color: "var(--cei-text-muted)",
+                  lineHeight: 1.6,
+                }}
+              >
+                <div>
+                  <strong>Currency:</strong> {currencyCode}
+                </div>
+                <div style={{ marginTop: "0.2rem" }}>
+                  <strong>Electricity price (per kWh):</strong>{" "}
+                  {formatPrice(electricityPrice)}
+                </div>
+                <div style={{ marginTop: "0.2rem" }}>
+                  <strong>Gas price (per kWh):</strong>{" "}
+                  {formatPrice(gasPrice)}
+                </div>
+                <div style={{ marginTop: "0.2rem" }}>
+                  <strong>Primary energy sources:</strong>{" "}
+                  {primarySources && primarySources.length > 0 ? (
+                    primarySources.join(", ")
+                  ) : (
+                    <span>Not specified</span>
+                  )}
+                </div>
+              </div>
+
+              {!hasTariffConfig && (
+                <div
+                  style={{
+                    marginTop: "0.7rem",
+                    fontSize: "0.78rem",
+                    color: "var(--cei-text-muted)",
+                  }}
+                >
+                  Tariffs and energy mix are not configured yet. CEI will use
+                  kWh-only analytics until these values are set on the backend.
+                </div>
+              )}
+            </>
+          )}
         </div>
       </section>
 
@@ -362,11 +540,21 @@ const Settings: React.FC = () => {
             }}
           >
             {tokensLoading ? (
-              <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              <div
+                style={{
+                  fontSize: "0.8rem",
+                  color: "var(--cei-text-muted)",
+                }}
+              >
                 Loading integration tokens...
               </div>
             ) : tokens.length === 0 ? (
-              <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              <div
+                style={{
+                  fontSize: "0.8rem",
+                  color: "var(--cei-text-muted)",
+                }}
+              >
                 No integration tokens yet. Create one above to let external
                 systems push data into CEI.
               </div>

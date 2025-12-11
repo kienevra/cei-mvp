@@ -1,7 +1,7 @@
 // src/hooks/useSites.ts
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
-import { SitesListResponse, SiteSummary, SiteDetail } from '../types/site';
+import { SitesListResponse, SiteDetail } from '../types/site';
 
 export function useSites(params: { page?: number; per_page?: number; search?: string } = {}) {
   return useQuery({
@@ -35,7 +35,8 @@ export function useCreateSite() {
 export function useUpdateSite() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...site }: Partial<SiteDetail> & { id: string }) => api.put(`/sites/${id}`, site),
+    mutationFn: ({ id, ...site }: Partial<SiteDetail> & { id: string }) =>
+      api.put(`/sites/${id}`, site),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['sites'] });
       queryClient.invalidateQueries({ queryKey: ['site', variables.id] });

@@ -54,6 +54,16 @@ class Organization(Base):
 
     billing_email = Column(String, nullable=True)
 
+    # -------- NEW Cost engine config (org-level) --------
+    # Comma-separated list, e.g. "electricity", "gas", "electricity,gas"
+    primary_energy_sources = Column(String, nullable=True)
+
+    # Flat/blended tariffs at org level (per kWh); we can refine later by site/meter
+    electricity_price_per_kwh = Column(Float, nullable=True)
+    gas_price_per_kwh = Column(Float, nullable=True)
+
+    # Currency code like "EUR", "USD"
+    currency_code = Column(String, nullable=True)
 
 
 class User(Base):
@@ -177,3 +187,109 @@ class StagingUpload(Base):
     payload_path = Column(String, nullable=False)
     status = Column(String, nullable=False, default="pending")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AlertEvent(Base):
+    __tablename__ = "alert_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Underlying DB column is "org_id"
+    organization_id = Column("org_id", Integer, index=True, nullable=True)
+
+    site_id = Column(String(128), index=True, nullable=True)
+    rule_key = Column(String(128), nullable=False, index=True)
+    severity = Column(String(32), nullable=False)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    metric = Column(String(128), nullable=True)
+    window_hours = Column(Integer, nullable=False)
+    triggered_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+    # Workflow fields used by /alerts/history and PATCH /alerts/{id}
+    status = Column(
+        String(32),
+        nullable=False,
+        default="open",
+        server_default="open",
+    )
+    owner_user_id = Column(Integer, nullable=True)
+    note = Column(Text, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class SiteEvent(Base):
+    __tablename__ = "site_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Underlying DB column is "org_id"
+    organization_id = Column("org_id", Integer, index=True, nullable=True)
+
+    site_id = Column(String(128), index=True, nullable=True)
+
+    # Underlying DB column is "kind"
+    type = Column("kind", String(64), nullable=False, index=True)
+
+    related_alert_id = Column(Integer, nullable=True)
+
+    title = Column(String(255), nullable=False)
+
+    # Underlying DB column is "description"
+    body = Column("description", Text, nullable=True)
+
+    # New column to support "created_by_user_id" in your workflow
+    created_by_user_id = Column(Integer, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class IntegrationToken(Base):
+    """
+    Long-lived org-scoped integration token.
+
+    Only the hashed token is stored in DB. The raw token is returned once
+    at creation time via /auth/integration-tokens.
+    """
+
+    __tablename__ = "integration_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Underlying DB column is "org_id"
+    organization_id = Column("org_id", Integer, index=True, nullable=False)
+
+    name = Column(String(255), nullable=False)
+    token_hash = Column(String(255), nullable=False, unique=True, index=True)
+
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="1",
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    last_used_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )

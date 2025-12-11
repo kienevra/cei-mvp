@@ -67,10 +67,15 @@ const Alerts: React.FC = () => {
   // 24h vs 7 days (168h)
   const [windowHours, setWindowHours] = useState<24 | 168>(24);
 
-  // Plan flags coming from /auth/me
+  // Plan flags coming from /account/me (backend: AccountMe/OrgSummaryOut)
   const [planKey, setPlanKey] = useState<string>("cei-starter");
   const [enableAlerts, setEnableAlerts] = useState<boolean>(true);
   const [planLoaded, setPlanLoaded] = useState<boolean>(false);
+
+  // Pricing context (org/account-level tariffs)
+  const [electricityPricePerKwh, setElectricityPricePerKwh] = useState<number | null>(null);
+  const [currencyCode, setCurrencyCode] = useState<string>("EUR");
+  const [primaryEnergySources, setPrimaryEnergySources] = useState<string[] | null>(null);
 
   // --- History / workflow state ---
   const [historyEvents, setHistoryEvents] = useState<AlertEvent[]>([]);
@@ -88,24 +93,35 @@ const Alerts: React.FC = () => {
     async function loadPlan() {
       try {
         const account = await getAccountMe().catch(() => null);
-        if (!isMounted || !account) {
+
+        if (!isMounted) return;
+
+        if (!account) {
+          // No account context; default to starter + alerts enabled so the UI isn't hard-locked.
+          setPlanKey("cei-starter");
+          setEnableAlerts(true);
+          setElectricityPricePerKwh(null);
+          setCurrencyCode("EUR");
+          setPrimaryEnergySources(null);
           setPlanLoaded(true);
           return;
         }
 
+        const accountAny: any = account || {};
+
         const org =
-          (account.org as any) ??
-          (account.organization as any) ??
+          accountAny.org ??
+          accountAny.organization ??
           null;
 
         const derivedPlanKey: string =
           org?.subscription_plan_key ||
           org?.plan_key ||
-          account.subscription_plan_key ||
+          accountAny.subscription_plan_key ||
           "cei-starter";
 
         const backendEnableAlerts: boolean | undefined =
-          account.enable_alerts ?? org?.enable_alerts;
+          accountAny.enable_alerts ?? org?.enable_alerts;
 
         const effectiveEnableAlerts =
           typeof backendEnableAlerts === "boolean"
@@ -113,16 +129,42 @@ const Alerts: React.FC = () => {
             : derivedPlanKey === "cei-starter" ||
               derivedPlanKey === "cei-growth";
 
-        if (!isMounted) return;
+        // Pricing context: tariffs + energy mix
+        const tariffElectricity: number | null =
+          typeof org?.electricity_price_per_kwh === "number"
+            ? org.electricity_price_per_kwh
+            : typeof accountAny.electricity_price_per_kwh === "number"
+            ? accountAny.electricity_price_per_kwh
+            : null;
+
+        const derivedCurrencyCode: string =
+          typeof org?.currency_code === "string"
+            ? org.currency_code
+            : typeof accountAny.currency_code === "string"
+            ? accountAny.currency_code
+            : "EUR";
+
+        const primarySources: string[] | null =
+          Array.isArray(org?.primary_energy_sources)
+            ? org.primary_energy_sources
+            : Array.isArray(accountAny.primary_energy_sources)
+            ? accountAny.primary_energy_sources
+            : null;
 
         setPlanKey(derivedPlanKey);
         setEnableAlerts(effectiveEnableAlerts);
+        setElectricityPricePerKwh(tariffElectricity);
+        setCurrencyCode(derivedCurrencyCode);
+        setPrimaryEnergySources(primarySources);
         setPlanLoaded(true);
-      } catch (_e) {
+      } catch {
         // On failure, default to "starter" and alerts enabled to avoid accidental lockout.
         if (!isMounted) return;
         setPlanKey("cei-starter");
         setEnableAlerts(true);
+        setElectricityPricePerKwh(null);
+        setCurrencyCode("EUR");
+        setPrimaryEnergySources(null);
         setPlanLoaded(true);
       }
     }
@@ -247,6 +289,35 @@ const Alerts: React.FC = () => {
   const infoCount = alerts.filter((a) => a.severity === "info").length;
 
   const windowLabel = windowHours === 24 ? "last 24 hours" : "last 7 days";
+
+  // Pricing helpers
+  const hasTariff =
+    typeof electricityPricePerKwh === "number" &&
+    electricityPricePerKwh > 0;
+
+  const effectiveTariff =
+    hasTariff && electricityPricePerKwh !== null
+      ? electricityPricePerKwh
+      : null;
+
+  const pricePerMwh =
+    effectiveTariff !== null ? effectiveTariff * 1000 : null;
+
+  const formatCurrency = (value: number | null, code: string): string => {
+    if (value === null || !Number.isFinite(value)) return "—";
+    const safeCode = code || "EUR";
+    try {
+      return value.toLocaleString(undefined, {
+        style: "currency",
+        currency: safeCode,
+        maximumFractionDigits: 2,
+      });
+    } catch {
+      return `${value.toLocaleString(undefined, {
+        maximumFractionDigits: 2,
+      })} ${safeCode}`;
+    }
+  };
 
   // --- Portfolio "top sites" aggregation (based on current alerts list) ---
   const siteAggregates: {
@@ -411,25 +482,78 @@ const Alerts: React.FC = () => {
   function handleExportCurrentAlertsCsv() {
     if (!alerts.length) return;
 
-    const rows = alerts.map((a) => ({
-      id: a.id ?? "",
-      site_id: a.site_id ?? "",
-      site_name: a.site_name ?? "",
-      severity: a.severity ?? "",
-      title: a.title ?? "",
-      message: a.message ?? "",
-      metric: a.metric ?? "",
-      window_hours: a.window_hours ?? "",
-      triggered_at: a.triggered_at ?? "",
-      deviation_pct: a.deviation_pct ?? "",
-      total_actual_kwh: a.total_actual_kwh ?? "",
-      total_expected_kwh: a.total_expected_kwh ?? "",
-      baseline_lookback_days: a.baseline_lookback_days ?? "",
-      critical_hours: a.critical_hours ?? "",
-      elevated_hours: a.elevated_hours ?? "",
-      below_baseline_hours: a.below_baseline_hours ?? "",
-      stats_source: a.stats_source ?? "",
-    }));
+    const tariff = effectiveTariff;
+    const pricePerMwhLocal = pricePerMwh;
+
+    const rows = alerts.map((a) => {
+      const totalActual =
+        typeof a.total_actual_kwh === "number"
+          ? a.total_actual_kwh
+          : null;
+      const totalExpected =
+        typeof a.total_expected_kwh === "number"
+          ? a.total_expected_kwh
+          : null;
+
+      const deltaKwh =
+        totalActual !== null && totalExpected !== null
+          ? totalActual - totalExpected
+          : null;
+
+      const estCostImpact =
+        tariff !== null && deltaKwh !== null
+          ? deltaKwh * tariff
+          : null;
+
+      return {
+        id: a.id ?? "",
+        site_id: a.site_id ?? "",
+        site_name: a.site_name ?? "",
+        severity: a.severity ?? "",
+        title: a.title ?? "",
+        message: a.message ?? "",
+        metric: a.metric ?? "",
+        window_hours: a.window_hours ?? "",
+        triggered_at: a.triggered_at ?? "",
+        deviation_pct: a.deviation_pct ?? "",
+        total_actual_kwh:
+          totalActual !== null && Number.isFinite(totalActual)
+            ? totalActual.toFixed(2)
+            : "",
+        total_expected_kwh:
+          totalExpected !== null && Number.isFinite(totalExpected)
+            ? totalExpected.toFixed(2)
+            : "",
+        delta_kwh:
+          deltaKwh !== null && Number.isFinite(deltaKwh)
+            ? deltaKwh.toFixed(2)
+            : "",
+        baseline_lookback_days: a.baseline_lookback_days ?? "",
+        critical_hours: a.critical_hours ?? "",
+        elevated_hours: a.elevated_hours ?? "",
+        below_baseline_hours: a.below_baseline_hours ?? "",
+        stats_source: a.stats_source ?? "",
+        // Cost analytics (derived from org tariff)
+        est_cost_impact:
+          estCostImpact !== null && Number.isFinite(estCostImpact)
+            ? estCostImpact.toFixed(2)
+            : "",
+        currency_code: currencyCode || "EUR",
+        tariff_electricity_price_per_kwh:
+          tariff !== null && Number.isFinite(tariff)
+            ? tariff.toFixed(6)
+            : "",
+        price_per_mwh_anchor:
+          pricePerMwhLocal !== null &&
+          Number.isFinite(pricePerMwhLocal)
+            ? pricePerMwhLocal.toFixed(2)
+            : "",
+        primary_energy_sources:
+          primaryEnergySources && primaryEnergySources.length > 0
+            ? primaryEnergySources.join(" + ")
+            : "",
+      };
+    });
 
     downloadCsv("cei_current_alerts.csv", rows);
   }
@@ -1086,13 +1210,37 @@ const Alerts: React.FC = () => {
                       ? alert.stats_source
                       : null;
 
+                  const deltaKwh =
+                    totalActual !== null && totalExpected !== null
+                      ? totalActual - totalExpected
+                      : null;
+
+                  const estCostImpact =
+                    effectiveTariff !== null && deltaKwh !== null
+                      ? deltaKwh * effectiveTariff
+                      : null;
+
+                  const estCostImpactAbs =
+                    estCostImpact !== null ? Math.abs(estCostImpact) : null;
+
+                  const costDirection =
+                    estCostImpact === null
+                      ? null
+                      : estCostImpact > 0
+                      ? "Overspend vs baseline"
+                      : estCostImpact < 0
+                      ? "Savings vs baseline"
+                      : "On baseline";
+
                   const hasStatsBand =
                     dev !== null ||
                     (totalActual !== null && totalExpected !== null) ||
                     baselineDays !== null ||
                     critHours !== null ||
                     elevHours !== null ||
-                    belowHours !== null;
+                    belowHours !== null ||
+                    (effectiveTariff !== null &&
+                      estCostImpactAbs !== null);
 
                   return (
                     <div
@@ -1257,6 +1405,29 @@ const Alerts: React.FC = () => {
                               <strong>{belowHours ?? 0}</strong>
                             </span>
                           )}
+                          {effectiveTariff !== null &&
+                            estCostImpactAbs !== null && (
+                              <span>
+                                Est. cost impact:{" "}
+                                <strong>
+                                  {formatCurrency(
+                                    estCostImpactAbs,
+                                    currencyCode
+                                  )}
+                                </strong>
+                                {costDirection &&
+                                  costDirection !== "On baseline" && (
+                                    <span
+                                      style={{
+                                        marginLeft: "0.25rem",
+                                        opacity: 0.9,
+                                      }}
+                                    >
+                                      ({costDirection})
+                                    </span>
+                                  )}
+                              </span>
+                            )}
                           {statsSource && (
                             <span
                               style={{

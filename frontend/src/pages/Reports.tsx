@@ -43,6 +43,10 @@ type SiteReportRow = {
   belowBaselineHours7d: number | null;
   baselineDays7d: number | null;
   statsSource: string | null;
+  // cost analytics (derived via org tariff)
+  totalCost7d: number | null;
+  expectedCost7d: number | null;
+  costDelta7d: number | null;
 };
 
 type SiteOpportunityRow = {
@@ -53,9 +57,8 @@ type SiteOpportunityRow = {
   name: string;
   description: string;
   est_annual_kwh_saved: number;
-  est_capex_eur: number;
-  simple_roi_years: number;
   est_co2_tons_saved_per_year: number;
+  est_annual_cost_saved: number | null;
 };
 
 const Reports: React.FC = () => {
@@ -67,12 +70,22 @@ const Reports: React.FC = () => {
     useState<SummaryResponse | null>(null);
   const [siteRows, setSiteRows] = useState<SiteReportRow[]>([]);
 
-  // Plan flags coming from /auth/me
+  // Plan flags coming from /account/me (backend: AccountMe/OrgSummaryOut)
   const [planKey, setPlanKey] = useState<string>("cei-starter");
   const [enableReports, setEnableReports] = useState<boolean>(true);
 
+  // Pricing context (org/account-level tariffs)
+  const [electricityPricePerKwh, setElectricityPricePerKwh] =
+    useState<number | null>(null);
+  const [currencyCode, setCurrencyCode] = useState<string>("EUR");
+  const [primaryEnergySources, setPrimaryEnergySources] = useState<
+    string[] | null
+  >(null);
+
   // Portfolio opportunities state (derived from /sites/{id}/opportunities)
-  const [topOpportunities, setTopOpportunities] = useState<SiteOpportunityRow[]>([]);
+  const [topOpportunities, setTopOpportunities] = useState<
+    SiteOpportunityRow[]
+  >([]);
   const [opportunitiesError, setOpportunitiesError] = useState<string | null>(
     null
   );
@@ -87,25 +100,23 @@ const Reports: React.FC = () => {
       setOpportunitiesError(null);
 
       try {
-        // 0) Pull account + plan flags
+        // 0) Pull account + plan flags (treat as any for forward-compatible fields)
         const account = await getAccountMe().catch(() => null);
-
         if (!isMounted) return;
 
-        const org =
-          (account?.org as any) ??
-          (account?.organization as any) ??
-          null;
+        const accountAny: any = account || {};
+
+        const org = accountAny.org ?? accountAny.organization ?? null;
 
         const derivedPlanKey: string =
           org?.subscription_plan_key ||
           org?.plan_key ||
-          account?.subscription_plan_key ||
+          accountAny.subscription_plan_key ||
           "cei-starter";
 
         // Backend might already send explicit flags; if not, derive from plan
         const backendEnableReports: boolean | undefined =
-          account?.enable_reports ?? org?.enable_reports;
+          accountAny.enable_reports ?? org?.enable_reports;
 
         const effectiveEnableReports =
           typeof backendEnableReports === "boolean"
@@ -115,6 +126,33 @@ const Reports: React.FC = () => {
 
         setPlanKey(derivedPlanKey);
         setEnableReports(effectiveEnableReports);
+
+        // Pricing context: tariffs + energy mix
+        const tariffElectricity: number | null =
+          typeof org?.electricity_price_per_kwh === "number"
+            ? org.electricity_price_per_kwh
+            : typeof accountAny.electricity_price_per_kwh === "number"
+            ? accountAny.electricity_price_per_kwh
+            : null;
+
+        const derivedCurrencyCode: string =
+          typeof org?.currency_code === "string"
+            ? org.currency_code
+            : typeof accountAny.currency_code === "string"
+            ? accountAny.currency_code
+            : "EUR";
+
+        const primarySources: string[] | null = Array.isArray(
+          org?.primary_energy_sources
+        )
+          ? org.primary_energy_sources
+          : Array.isArray(accountAny.primary_energy_sources)
+          ? accountAny.primary_energy_sources
+          : null;
+
+        setElectricityPricePerKwh(tariffElectricity);
+        setCurrencyCode(derivedCurrencyCode);
+        setPrimaryEnergySources(primarySources);
 
         // If the plan doesn't include reports, stop here:
         if (!effectiveEnableReports) {
@@ -138,6 +176,9 @@ const Reports: React.FC = () => {
         if (!isMounted) return;
         setPortfolioSummary(portfolio);
 
+        const hasTariffNumeric =
+          typeof tariffElectricity === "number" && tariffElectricity > 0;
+
         // 3) Per-site summaries + statistical insights (7-day window)
         const siteSummaries = await Promise.all(
           normalizedSites.map(async (site) => {
@@ -152,7 +193,7 @@ const Reports: React.FC = () => {
                 site_id: siteKey,
                 window_hours: 168,
               })) as SummaryResponse;
-            } catch (_e: any) {
+            } catch {
               summary = null;
             }
 
@@ -161,7 +202,7 @@ const Reports: React.FC = () => {
               insights = await getSiteInsights(siteKey, 168).catch(
                 () => null
               );
-            } catch (_e) {
+            } catch {
               insights = null;
             }
 
@@ -176,8 +217,7 @@ const Reports: React.FC = () => {
             const idStr = String(site.id);
             const total = summary?.total_value || 0;
             const points = summary?.points || 0;
-            const avgPerPoint =
-              points > 0 ? total / points : null;
+            const avgPerPoint = points > 0 ? total / points : null;
 
             const deviationPct7d =
               typeof insights?.deviation_pct === "number"
@@ -218,6 +258,28 @@ const Reports: React.FC = () => {
                 ? insights.stats_source
                 : null;
 
+            const totalCost7d =
+              hasTariffNumeric && Number.isFinite(total)
+                ? total * (tariffElectricity as number)
+                : null;
+
+            const expectedCost7d =
+              hasTariffNumeric &&
+              typeof expectedKwh7d === "number" &&
+              Number.isFinite(expectedKwh7d)
+                ? expectedKwh7d * (tariffElectricity as number)
+                : null;
+
+            let costDelta7d: number | null = null;
+            if (
+              totalCost7d !== null &&
+              expectedCost7d !== null &&
+              Number.isFinite(totalCost7d) &&
+              Number.isFinite(expectedCost7d)
+            ) {
+              costDelta7d = totalCost7d - expectedCost7d;
+            }
+
             return {
               siteId: idStr,
               siteName: site.name || `Site ${idStr}`,
@@ -232,13 +294,16 @@ const Reports: React.FC = () => {
               belowBaselineHours7d,
               baselineDays7d,
               statsSource,
+              totalCost7d,
+              expectedCost7d,
+              costDelta7d,
             };
           }
         );
 
         setSiteRows(rows);
 
-        // 4) Per-site opportunities (simple portfolio “top measures” view)
+        // 4) Per-site opportunities (portfolio “top measures” view; cost-first when tariff available)
         try {
           if (normalizedSites.length === 0) {
             setTopOpportunities([]);
@@ -252,7 +317,7 @@ const Reports: React.FC = () => {
                     ? oppList
                     : [];
                   return { site, opportunities: normalizedOpps };
-                } catch (_e) {
+                } catch {
                   return { site, opportunities: [] };
                 }
               })
@@ -264,34 +329,62 @@ const Reports: React.FC = () => {
               ({ site, opportunities }) => {
                 const idStr = String(site.id);
 
-                // Take best 1–3 per site by ROI (lower is better)
+                // Take best 1–3 per site by estimated annual cost savings (fallback: kWh)
                 const topForSite = [...opportunities]
                   .sort((a: any, b: any) => {
-                    const aRoi =
-                      typeof a.simple_roi_years === "number"
-                        ? a.simple_roi_years
-                        : Number.POSITIVE_INFINITY;
-                    const bRoi =
-                      typeof b.simple_roi_years === "number"
-                        ? b.simple_roi_years
-                        : Number.POSITIVE_INFINITY;
-                    return aRoi - bRoi;
+                    const aKwh =
+                      typeof a.est_annual_kwh_saved === "number"
+                        ? a.est_annual_kwh_saved
+                        : 0;
+                    const bKwh =
+                      typeof b.est_annual_kwh_saved === "number"
+                        ? b.est_annual_kwh_saved
+                        : 0;
+
+                    if (
+                      hasTariffNumeric &&
+                      typeof tariffElectricity === "number" &&
+                      tariffElectricity > 0
+                    ) {
+                      const aCost = aKwh * tariffElectricity;
+                      const bCost = bKwh * tariffElectricity;
+                      if (aCost !== bCost) {
+                        return bCost - aCost; // highest € saved first
+                      }
+                    }
+
+                    // fallback to kWh ranking
+                    return bKwh - aKwh;
                   })
                   .slice(0, 3);
 
-                return topForSite.map((opp: any) => ({
-                  siteId: idStr,
-                  siteName: site.name || `Site ${idStr}`,
-                  location: site.location,
-                  id: opp.id,
-                  name: opp.name,
-                  description: opp.description,
-                  est_annual_kwh_saved: opp.est_annual_kwh_saved,
-                  est_capex_eur: opp.est_capex_eur,
-                  simple_roi_years: opp.simple_roi_years,
-                  est_co2_tons_saved_per_year:
-                    opp.est_co2_tons_saved_per_year,
-                }));
+                return topForSite.map((opp: any) => {
+                  const kwhSaved =
+                    typeof opp.est_annual_kwh_saved === "number" &&
+                    Number.isFinite(opp.est_annual_kwh_saved)
+                      ? opp.est_annual_kwh_saved
+                      : null;
+
+                  const estAnnualCostSaved =
+                    hasTariffNumeric &&
+                    typeof tariffElectricity === "number" &&
+                    kwhSaved !== null
+                      ? kwhSaved * tariffElectricity
+                      : null;
+
+                  return {
+                    siteId: idStr,
+                    siteName: site.name || `Site ${idStr}`,
+                    location: site.location,
+                    id: opp.id,
+                    name: opp.name,
+                    description: opp.description,
+                    est_annual_kwh_saved: opp.est_annual_kwh_saved,
+                    est_co2_tons_saved_per_year:
+                      opp.est_co2_tons_saved_per_year,
+                    est_annual_cost_saved: estAnnualCostSaved,
+                  };
+                });
               }
             );
 
@@ -302,8 +395,7 @@ const Reports: React.FC = () => {
           if (!isMounted) return;
           setTopOpportunities([]);
           setOpportunitiesError(
-            e?.message ||
-              "Failed to load opportunity measures."
+            e?.message || "Failed to load opportunity measures."
           );
         }
       } catch (e: any) {
@@ -342,11 +434,107 @@ const Reports: React.FC = () => {
       ? `${(avgPerSite / 1000).toFixed(2)} MWh`
       : `${avgPerSite.toFixed(1)} kWh`;
 
+  const sitesWithDataCount = siteRows.filter((r) => r.points7d > 0).length;
+
+  const hasTariff =
+    typeof electricityPricePerKwh === "number" &&
+    electricityPricePerKwh > 0;
+
+  const formatCurrency = (value: number | null, code: string): string => {
+    if (value === null || !Number.isFinite(value)) return "—";
+    const safeCode = code || "EUR";
+    try {
+      return value.toLocaleString(undefined, {
+        style: "currency",
+        currency: safeCode,
+        maximumFractionDigits: 0,
+      });
+    } catch {
+      return `${value.toLocaleString(undefined, {
+        maximumFractionDigits: 0,
+      })} ${safeCode}`;
+    }
+  };
+
+  const formatTariffPerKwh = (
+    value: number | null,
+    code: string
+  ): string => {
+    if (value === null || !Number.isFinite(value)) return "—";
+    const safeCode = code || "EUR";
+    try {
+      return value.toLocaleString(undefined, {
+        style: "currency",
+        currency: safeCode,
+        minimumFractionDigits: 4,
+        maximumFractionDigits: 4,
+      });
+    } catch {
+      return `${value.toFixed(4)} ${safeCode}`;
+    }
+  };
+
+  // Portfolio-level cost metrics (simple tariff * kWh)
+  const portfolioCost7d =
+    hasTariff && electricityPricePerKwh !== null
+      ? totalKwh7d * electricityPricePerKwh
+      : null;
+
+  const avgCostPerActiveSite =
+    hasTariff &&
+    portfolioCost7d !== null &&
+    sitesWithDataCount > 0
+      ? portfolioCost7d / sitesWithDataCount
+      : null;
+
+  const pricePerMwh =
+    hasTariff && electricityPricePerKwh !== null
+      ? electricityPricePerKwh * 1000
+      : null;
+
   // Max site kWh for bar scaling (used by the mini chart)
   const maxSiteTotalKwh = siteRows.reduce(
     (max, row) => (row.totalKwh7d > max ? row.totalKwh7d : max),
     0
   );
+
+  // Cost-first ranking: sort by € delta vs baseline, then total cost, then kWh
+  const sortedSiteRows: SiteReportRow[] = (() => {
+    if (!siteRows.length) return [];
+    const clone = [...siteRows];
+    clone.sort((a, b) => {
+      if (hasTariff) {
+        const aDelta =
+          typeof a.costDelta7d === "number" && Number.isFinite(a.costDelta7d)
+            ? a.costDelta7d
+            : 0;
+        const bDelta =
+          typeof b.costDelta7d === "number" && Number.isFinite(b.costDelta7d)
+            ? b.costDelta7d
+            : 0;
+        if (aDelta !== bDelta) {
+          // Overspend (positive € delta) at the top
+          return bDelta - aDelta;
+        }
+
+        const aCost =
+          typeof a.totalCost7d === "number" && Number.isFinite(a.totalCost7d)
+            ? a.totalCost7d
+            : 0;
+        const bCost =
+          typeof b.totalCost7d === "number" && Number.isFinite(b.totalCost7d)
+            ? b.totalCost7d
+            : 0;
+        if (aCost !== bCost) {
+          return bCost - aCost;
+        }
+      }
+
+      // Fallback: high-energy sites first
+      return b.totalKwh7d - a.totalKwh7d;
+    });
+    return clone;
+  })();
 
   // --- CSV export via shared helper (7-day site reports) ---
   const handleDownloadCsv = () => {
@@ -359,42 +547,105 @@ const Reports: React.FC = () => {
       return;
     }
 
-    const rows = siteRows.map((row) => ({
-      // keep keys ordered to match your previous header
-      site_id: row.siteId,
-      site_name: row.siteName,
-      location: row.location ?? "",
-      total_kwh_7d: Number.isFinite(row.totalKwh7d)
-        ? row.totalKwh7d.toFixed(2)
-        : "",
-      points_7d: row.points7d,
-      avg_kwh_per_point_7d:
-        row.avgPerPoint7d !== null &&
-        Number.isFinite(row.avgPerPoint7d)
-          ? row.avgPerPoint7d.toFixed(4)
+    const tariff =
+      hasTariff && electricityPricePerKwh != null
+        ? electricityPricePerKwh
+        : null;
+
+    const rows = siteRows.map((row) => {
+      const hasRowEnergy =
+        Number.isFinite(row.totalKwh7d) && row.totalKwh7d > 0;
+
+      const computedTotalCost7d =
+        row.totalCost7d !== null && Number.isFinite(row.totalCost7d)
+          ? row.totalCost7d
+          : tariff !== null && hasRowEnergy
+          ? row.totalKwh7d * tariff
+          : null;
+
+      const computedExpectedCost7d =
+        row.expectedCost7d !== null && Number.isFinite(row.expectedCost7d)
+          ? row.expectedCost7d
+          : tariff !== null &&
+            row.expectedKwh7d !== null &&
+            Number.isFinite(row.expectedKwh7d)
+          ? row.expectedKwh7d * tariff
+          : null;
+
+      const computedCostDelta7d =
+        row.costDelta7d !== null && Number.isFinite(row.costDelta7d)
+          ? row.costDelta7d
+          : computedTotalCost7d !== null && computedExpectedCost7d !== null
+          ? computedTotalCost7d - computedExpectedCost7d
+          : null;
+
+      return {
+        // core IDs / descriptors
+        site_id: row.siteId,
+        site_name: row.siteName,
+        location: row.location ?? "",
+        // energy stats
+        total_kwh_7d: hasRowEnergy
+          ? row.totalKwh7d.toFixed(2)
           : "",
-      deviation_pct_7d:
-        row.deviationPct7d !== null &&
-        Number.isFinite(row.deviationPct7d)
-          ? row.deviationPct7d.toFixed(2)
-          : "",
-      expected_kwh_7d:
-        row.expectedKwh7d !== null &&
-        Number.isFinite(row.expectedKwh7d)
-          ? row.expectedKwh7d.toFixed(2)
-          : "",
-      critical_hours_7d:
-        row.criticalHours7d !== null ? row.criticalHours7d : "",
-      elevated_hours_7d:
-        row.elevatedHours7d !== null ? row.elevatedHours7d : "",
-      below_baseline_hours_7d:
-        row.belowBaselineHours7d !== null
-          ? row.belowBaselineHours7d
-          : "",
-      baseline_lookback_days_7d:
-        row.baselineDays7d !== null ? row.baselineDays7d : "",
-      stats_source: row.statsSource ?? "",
-    }));
+        points_7d: row.points7d,
+        avg_kwh_per_point_7d:
+          row.avgPerPoint7d !== null &&
+          Number.isFinite(row.avgPerPoint7d)
+            ? row.avgPerPoint7d.toFixed(4)
+            : "",
+        deviation_pct_7d:
+          row.deviationPct7d !== null &&
+          Number.isFinite(row.deviationPct7d)
+            ? row.deviationPct7d.toFixed(2)
+            : "",
+        expected_kwh_7d:
+          row.expectedKwh7d !== null &&
+          Number.isFinite(row.expectedKwh7d)
+            ? row.expectedKwh7d.toFixed(2)
+            : "",
+        critical_hours_7d:
+          row.criticalHours7d !== null ? row.criticalHours7d : "",
+        elevated_hours_7d:
+          row.elevatedHours7d !== null ? row.elevatedHours7d : "",
+        below_baseline_hours_7d:
+          row.belowBaselineHours7d !== null
+            ? row.belowBaselineHours7d
+            : "",
+        baseline_lookback_days_7d:
+          row.baselineDays7d !== null ? row.baselineDays7d : "",
+        stats_source: row.statsSource ?? "",
+        // cost analytics (derived, portfolio-level tariff)
+        total_cost_7d:
+          computedTotalCost7d !== null &&
+          Number.isFinite(computedTotalCost7d)
+            ? computedTotalCost7d.toFixed(2)
+            : "",
+        expected_cost_7d:
+          computedExpectedCost7d !== null &&
+          Number.isFinite(computedExpectedCost7d)
+            ? computedExpectedCost7d.toFixed(2)
+            : "",
+        cost_delta_7d:
+          computedCostDelta7d !== null &&
+          Number.isFinite(computedCostDelta7d)
+            ? computedCostDelta7d.toFixed(2)
+            : "",
+        avg_cost_per_kwh_7d:
+          tariff !== null && hasRowEnergy
+            ? tariff.toFixed(6)
+            : "",
+        price_per_mwh_anchor:
+          pricePerMwh !== null && Number.isFinite(pricePerMwh)
+            ? pricePerMwh.toFixed(2)
+            : "",
+        currency_code: currencyCode || "EUR",
+        tariff_electricity_price_per_kwh:
+          tariff !== null && Number.isFinite(tariff)
+            ? tariff.toFixed(6)
+            : "",
+      };
+    });
 
     downloadCsv("cei_7day_site_reports.csv", rows);
   };
@@ -410,18 +661,55 @@ const Reports: React.FC = () => {
       return;
     }
 
-    const rows = topOpportunities.map((row) => ({
-      site_id: row.siteId,
-      site_name: row.siteName,
-      location: row.location ?? "",
-      opportunity_id: row.id,
-      opportunity_name: row.name,
-      description: row.description,
-      est_annual_kwh_saved: row.est_annual_kwh_saved,
-      est_capex_eur: row.est_capex_eur,
-      simple_roi_years: row.simple_roi_years,
-      est_co2_tons_saved_per_year: row.est_co2_tons_saved_per_year,
-    }));
+    const tariff =
+      hasTariff && electricityPricePerKwh != null
+        ? electricityPricePerKwh
+        : null;
+
+    const rows = topOpportunities.map((row) => {
+      const hasKwh =
+        typeof row.est_annual_kwh_saved === "number" &&
+        Number.isFinite(row.est_annual_kwh_saved) &&
+        row.est_annual_kwh_saved > 0;
+
+      const estAnnualCostSaved =
+        row.est_annual_cost_saved !== null &&
+        Number.isFinite(row.est_annual_cost_saved)
+          ? row.est_annual_cost_saved
+          : tariff !== null && hasKwh
+          ? row.est_annual_kwh_saved * tariff
+          : null;
+
+      return {
+        site_id: row.siteId,
+        site_name: row.siteName,
+        location: row.location ?? "",
+        opportunity_id: row.id,
+        opportunity_name: row.name,
+        description: row.description,
+        est_annual_kwh_saved: hasKwh
+          ? row.est_annual_kwh_saved.toFixed(0)
+          : "",
+        est_annual_cost_saved:
+          estAnnualCostSaved !== null &&
+          Number.isFinite(estAnnualCostSaved)
+            ? estAnnualCostSaved.toFixed(2)
+            : "",
+        est_co2_tons_saved_per_year:
+          Number.isFinite(row.est_co2_tons_saved_per_year)
+            ? row.est_co2_tons_saved_per_year.toFixed(2)
+            : "",
+        currency_code: currencyCode || "EUR",
+        tariff_electricity_price_per_kwh:
+          tariff !== null && Number.isFinite(tariff)
+            ? tariff.toFixed(6)
+            : "",
+        price_per_mwh_anchor:
+          pricePerMwh !== null && Number.isFinite(pricePerMwh)
+            ? pricePerMwh.toFixed(2)
+            : "",
+      };
+    });
 
     downloadCsv("cei_portfolio_opportunities.csv", rows);
   };
@@ -454,9 +742,9 @@ const Reports: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Portfolio snapshot for the last 7 days. This is your first
-            production-ready report layer built directly on top of the CEI
-            timeseries engine and its learned baselines.
+            Portfolio snapshot for the last 7 days. Built directly on top of
+            the CEI timeseries engine, its learned baselines, and your
+            configured tariffs.
           </p>
         </div>
         <div
@@ -517,7 +805,7 @@ const Reports: React.FC = () => {
               >
                 Your current plan (<code>{planKey}</code>) does not include
                 the 7-day portfolio reporting layer. Upgrade to CEI Starter
-                or above to see fleet-level KPIs, per-site tables, and
+                or above to see fleet-level kWh, cost KPIs, and
                 export-ready summaries.
               </div>
               <div
@@ -548,7 +836,7 @@ const Reports: React.FC = () => {
         </section>
       )}
 
-      {/* KPI row – only when reports are enabled */}
+      {/* KPI row – energy (kWh) */}
       {enableReports && (
         <section className="dashboard-row">
           <div className="cei-card">
@@ -602,9 +890,7 @@ const Reports: React.FC = () => {
                 fontWeight: 600,
               }}
             >
-              {loading
-                ? "…"
-                : siteRows.filter((r) => r.points7d > 0).length || "0"}
+              {loading ? "…" : sitesWithDataCount || "0"}
             </div>
             <div
               style={{
@@ -651,6 +937,142 @@ const Reports: React.FC = () => {
         </section>
       )}
 
+      {/* KPI row – cost (€) */}
+      {enableReports && (
+        <section className="dashboard-row">
+          <div className="cei-card">
+            <div
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Portfolio energy cost – last 7 days
+            </div>
+            <div
+              style={{
+                marginTop: "0.35rem",
+                fontSize: "1.6rem",
+                fontWeight: 600,
+              }}
+            >
+              {loading
+                ? "…"
+                : hasTariff && portfolioCost7d !== null
+                ? formatCurrency(portfolioCost7d, currencyCode)
+                : "—"}
+            </div>
+            <div
+              style={{
+                marginTop: "0.25rem",
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              {hasTariff
+                ? `Derived by applying your electricity tariff to portfolio kWh over the last 168 hours.`
+                : `Set your electricity tariff in the Account page to unlock portfolio cost analytics.`}
+            </div>
+          </div>
+
+          <div className="cei-card">
+            <div
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Avg cost per active site – 7 days
+            </div>
+            <div
+              style={{
+                marginTop: "0.35rem",
+                fontSize: "1.4rem",
+                fontWeight: 600,
+              }}
+            >
+              {loading
+                ? "…"
+                : hasTariff && avgCostPerActiveSite !== null
+                ? formatCurrency(avgCostPerActiveSite, currencyCode)
+                : "—"}
+            </div>
+            <div
+              style={{
+                marginTop: "0.25rem",
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              {sitesWithDataCount > 0
+                ? `Spread across ${sitesWithDataCount} sites with actual data in the last week.`
+                : `No active sites with data yet – cost per site will appear once timeseries flows in.`}
+            </div>
+          </div>
+
+          <div className="cei-card">
+            <div
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              Tariff & €/MWh anchor
+            </div>
+            <div
+              style={{
+                marginTop: "0.35rem",
+                fontSize: "1.4rem",
+                fontWeight: 600,
+              }}
+            >
+              {hasTariff && pricePerMwh !== null
+                ? `${formatCurrency(pricePerMwh, currencyCode)} / MWh`
+                : "—"}
+            </div>
+            <div
+              style={{
+                marginTop: "0.25rem",
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              {hasTariff ? (
+                <>
+                  Tariff:{" "}
+                  <strong>
+                    {formatTariffPerKwh(
+                      electricityPricePerKwh,
+                      currencyCode
+                    )}{" "}
+                    / kWh
+                  </strong>
+                  {primaryEnergySources &&
+                    primaryEnergySources.length > 0 && (
+                      <>
+                        {" "}
+                        · primary sources:{" "}
+                        <span>{primaryEnergySources.join(" + ")}</span>
+                      </>
+                    )}
+                </>
+              ) : (
+                <>
+                  Configure your electricity price per kWh (and currency) in
+                  Account &amp; Settings to get €/MWh anchors here.
+                </>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Main table – only when reports are enabled */}
       {enableReports && (
         <section>
@@ -671,7 +1093,7 @@ const Reports: React.FC = () => {
                     fontWeight: 600,
                   }}
                 >
-                  Site-level 7-day energy
+                  Site-level 7-day energy & cost
                 </div>
                 <div
                   style={{
@@ -680,9 +1102,9 @@ const Reports: React.FC = () => {
                     color: "var(--cei-text-muted)",
                   }}
                 >
-                  Per-site energy, point counts, and deviation vs baseline
-                  over the last week. This is the backbone for exportable
-                  operational reports.
+                  Per-site energy, cost, and deviation vs baseline over the
+                  last week. Sorted by € impact where tariffs are
+                  configured.
                 </div>
               </div>
 
@@ -710,7 +1132,7 @@ const Reports: React.FC = () => {
               </div>
             )}
 
-            {!loading && siteRows.length === 0 && (
+            {!loading && sortedSiteRows.length === 0 && (
               <div
                 style={{
                   fontSize: "0.85rem",
@@ -718,109 +1140,108 @@ const Reports: React.FC = () => {
                 }}
               >
                 No sites available yet. Once sites and timeseries are
-                configured, this table will populate with 7-day energy
-                metrics per site.
+                configured, this table will populate with 7-day energy and
+                cost metrics per site.
               </div>
             )}
 
-            {/* New: simple bar chart of total_kwh_7d per site */}
-            {!loading && siteRows.length > 0 && maxSiteTotalKwh > 0 && (
-              <div
-                style={{
-                  marginTop: "0.75rem",
-                  borderRadius: "0.75rem",
-                  border: "1px solid rgba(148, 163, 184, 0.5)",
-                  background:
-                    "radial-gradient(circle at top left, rgba(56, 189, 248, 0.08), rgba(15, 23, 42, 0.95))",
-                  padding: "0.75rem",
-                  boxSizing: "border-box",
-                  overflowX: "auto",
-                }}
-              >
+            {/* Simple bar chart of total_kwh_7d per site (ordered by cost when tariff is set) */}
+            {!loading &&
+              sortedSiteRows.length > 0 &&
+              maxSiteTotalKwh > 0 && (
                 <div
                   style={{
-                    display: "flex",
-                    alignItems: "flex-end",
-                    justifyContent: "flex-start",
-                    gap: "0.5rem",
-                    minHeight: "180px",
+                    marginTop: "0.75rem",
+                    borderRadius: "0.75rem",
+                    border: "1px solid rgba(148, 163, 184, 0.5)",
+                    background:
+                      "radial-gradient(circle at top left, rgba(56, 189, 248, 0.08), rgba(15, 23, 42, 0.95))",
+                    padding: "0.75rem",
+                    boxSizing: "border-box",
+                    overflowX: "auto",
                   }}
                 >
-                  {siteRows.map((row) => {
-                    const val = row.totalKwh7d;
-                    const ratio =
-                      maxSiteTotalKwh > 0 ? val / maxSiteTotalKwh : 0;
-                    const heightPx =
-                      val > 0
-                        ? 20 + ratio * 140 // base + scaled
-                        : 0;
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-end",
+                      justifyContent: "flex-start",
+                      gap: "0.5rem",
+                      minHeight: "180px",
+                    }}
+                  >
+                    {sortedSiteRows.map((row) => {
+                      const val = row.totalKwh7d;
+                      const ratio =
+                        maxSiteTotalKwh > 0 ? val / maxSiteTotalKwh : 0;
+                      const heightPx =
+                        val > 0 ? 20 + ratio * 140 : 0;
 
-                    return (
-                      <div
-                        key={row.siteId}
-                        style={{
-                          flex: "0 0 auto",
-                          width: "40px",
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          justifyContent: "flex-end",
-                          gap: "0.25rem",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: "0.6rem",
-                            color: "var(--cei-text-muted)",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {val > 0 ? val.toFixed(0) : "—"}
-                        </span>
+                      return (
                         <div
+                          key={row.siteId}
                           style={{
-                            width: "100%",
-                            height: `${heightPx}px`,
-                            borderRadius: "4px",
-                            background:
-                              "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
-                            boxShadow:
-                              "0 6px 18px rgba(56, 189, 248, 0.45)",
-                            border:
-                              "1px solid rgba(226, 232, 240, 0.8)",
-                          }}
-                        />
-                        <span
-                          style={{
-                            fontSize: "0.65rem",
-                            color: "var(--cei-text-muted)",
-                            textAlign: "center",
-                            whiteSpace: "nowrap",
+                            flex: "0 0 auto",
+                            width: "40px",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            gap: "0.25rem",
                           }}
                         >
-                          {row.siteName.length > 8
-                            ? `${row.siteName.slice(0, 7)}…`
-                            : row.siteName}
-                        </span>
-                      </div>
-                    );
-                  })}
+                          <span
+                            style={{
+                              fontSize: "0.6rem",
+                              color: "var(--cei-text-muted)",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {val > 0 ? val.toFixed(0) : "—"}
+                          </span>
+                          <div
+                            style={{
+                              width: "100%",
+                              height: `${heightPx}px`,
+                              borderRadius: "4px",
+                              background:
+                                "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
+                              boxShadow:
+                                "0 6px 18px rgba(56, 189, 248, 0.45)",
+                              border:
+                                "1px solid rgba(226, 232, 240, 0.8)",
+                            }}
+                          />
+                          <span
+                            style={{
+                              fontSize: "0.65rem",
+                              color: "var(--cei-text-muted)",
+                              textAlign: "center",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {row.siteName.length > 8
+                              ? `${row.siteName.slice(0, 7)}…`
+                              : row.siteName}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div
+                    style={{
+                      marginTop: "0.5rem",
+                      fontSize: "0.75rem",
+                      color: "var(--cei-text-muted)",
+                    }}
+                  >
+                    Bar height scales with each site’s 7-day energy. Bars
+                    are ordered by € impact when tariffs are configured.
+                  </div>
                 </div>
-                <div
-                  style={{
-                    marginTop: "0.5rem",
-                    fontSize: "0.75rem",
-                    color: "var(--cei-text-muted)",
-                  }}
-                >
-                  Bar height scales with each site’s 7-day energy. Use this
-                  as a quick “which sites dominate the portfolio?” view
-                  before drilling into the table.
-                </div>
-              </div>
-            )}
+              )}
 
-            {!loading && siteRows.length > 0 && (
+            {!loading && sortedSiteRows.length > 0 && (
               <div style={{ marginTop: "0.5rem", overflowX: "auto" }}>
                 <table>
                   <thead>
@@ -828,6 +1249,9 @@ const Reports: React.FC = () => {
                       <th>Site</th>
                       <th>Location</th>
                       <th>Energy (7 days)</th>
+                      <th>Cost (7 days)</th>
+                      <th>Expected cost (7 days)</th>
+                      <th>Cost Δ vs baseline</th>
                       <th>Points</th>
                       <th>Energy / point</th>
                       <th>Deviation vs baseline</th>
@@ -838,7 +1262,7 @@ const Reports: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {siteRows.map((row) => {
+                    {sortedSiteRows.map((row) => {
                       const deviationLabel =
                         row.deviationPct7d !== null
                           ? `${row.deviationPct7d.toFixed(1)}%`
@@ -866,6 +1290,21 @@ const Reports: React.FC = () => {
                           ? row.belowBaselineHours7d
                           : 0;
 
+                      const costLabel =
+                        hasTariff && row.totalCost7d !== null
+                          ? formatCurrency(row.totalCost7d, currencyCode)
+                          : "—";
+
+                      const expectedCostLabel =
+                        hasTariff && row.expectedCost7d !== null
+                          ? formatCurrency(row.expectedCost7d, currencyCode)
+                          : "—";
+
+                      const costDeltaLabel =
+                        hasTariff && row.costDelta7d !== null
+                          ? formatCurrency(row.costDelta7d, currencyCode)
+                          : "—";
+
                       return (
                         <tr key={row.siteId}>
                           <td>{row.siteName}</td>
@@ -875,6 +1314,9 @@ const Reports: React.FC = () => {
                               ? `${row.totalKwh7d.toFixed(1)} kWh`
                               : "—"}
                           </td>
+                          <td>{costLabel}</td>
+                          <td>{expectedCostLabel}</td>
+                          <td>{costDeltaLabel}</td>
                           <td>
                             {row.points7d > 0 ? row.points7d : "—"}
                           </td>
@@ -893,7 +1335,8 @@ const Reports: React.FC = () => {
                               : `Crit: ${critLabel}, Warn: ${elevLabel}, Below: ${belowLabel}`}
                           </td>
                           <td>
-                            {row.statsSource || row.baselineDays7d !== null ? (
+                            {row.statsSource ||
+                            row.baselineDays7d !== null ? (
                               <>
                                 {row.statsSource && (
                                   <code>{row.statsSource}</code>
@@ -965,9 +1408,10 @@ const Reports: React.FC = () => {
                     color: "var(--cei-text-muted)",
                   }}
                 >
-                  Best-ROI measures per site, derived from CEI’s opportunity
-                  engine. Use this as a punch-list with local teams: tackle
-                  the fastest payback items first.
+                  Highest-impact measures per site, ranked by estimated
+                  annual cost savings when tariffs are configured (falling
+                  back to kWh). Use this as a punch-list with local teams:
+                  tackle the biggest € levers first.
                 </div>
               </div>
 
@@ -1032,17 +1476,41 @@ const Reports: React.FC = () => {
                         <th>Location</th>
                         <th>Measure</th>
                         <th>Est. kWh saved / year</th>
-                        <th>Capex (EUR)</th>
-                        <th>Simple ROI (years)</th>
+                        <th>Est. cost saved / year</th>
                         <th>CO₂ saved (t / year)</th>
                       </tr>
                     </thead>
                     <tbody>
                       {[...topOpportunities]
-                        .sort(
-                          (a, b) =>
-                            a.simple_roi_years - b.simple_roi_years
-                        )
+                        .sort((a, b) => {
+                          if (hasTariff) {
+                            const aCost =
+                              typeof a.est_annual_cost_saved === "number" &&
+                              Number.isFinite(a.est_annual_cost_saved)
+                                ? a.est_annual_cost_saved
+                                : 0;
+                            const bCost =
+                              typeof b.est_annual_cost_saved === "number" &&
+                              Number.isFinite(b.est_annual_cost_saved)
+                                ? b.est_annual_cost_saved
+                                : 0;
+                            if (aCost !== bCost) {
+                              return bCost - aCost;
+                            }
+                          }
+
+                          const aKwh =
+                            typeof a.est_annual_kwh_saved === "number" &&
+                            Number.isFinite(a.est_annual_kwh_saved)
+                              ? a.est_annual_kwh_saved
+                              : 0;
+                          const bKwh =
+                            typeof b.est_annual_kwh_saved === "number" &&
+                            Number.isFinite(b.est_annual_kwh_saved)
+                              ? b.est_annual_kwh_saved
+                              : 0;
+                          return bKwh - aKwh;
+                        })
                         .map((row, idx) => (
                           <tr
                             key={`opp-${row.siteId}-${row.id}-${idx}`}
@@ -1061,20 +1529,13 @@ const Reports: React.FC = () => {
                                 : "—"}
                             </td>
                             <td>
-                              {row.est_capex_eur > 0
-                                ? row.est_capex_eur.toLocaleString(
-                                    undefined,
-                                    {
-                                      style: "currency",
-                                      currency: "EUR",
-                                      maximumFractionDigits: 0,
-                                    }
+                              {hasTariff &&
+                              row.est_annual_cost_saved !== null &&
+                              Number.isFinite(row.est_annual_cost_saved)
+                                ? formatCurrency(
+                                    row.est_annual_cost_saved,
+                                    currencyCode
                                   )
-                                : "—"}
-                            </td>
-                            <td>
-                              {Number.isFinite(row.simple_roi_years)
-                                ? row.simple_roi_years.toFixed(2)
                                 : "—"}
                             </td>
                             <td>

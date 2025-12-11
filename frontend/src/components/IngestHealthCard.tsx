@@ -34,7 +34,7 @@ export const IngestHealthCard: React.FC<Props> = ({ windowHours = 24 }) => {
         const data = await getIngestHealth(windowHours);
         if (!active) return;
         setMeters(data.meters ?? []);
-      } catch (err: any) {
+      } catch {
         if (!active) return;
         setError("Unable to load ingest health.");
       } finally {
@@ -54,7 +54,8 @@ export const IngestHealthCard: React.FC<Props> = ({ windowHours = 24 }) => {
 
   const overallCompleteness =
     meters.length > 0
-      ? meters.reduce((acc, m) => acc + m.completeness_pct, 0) / meters.length
+      ? meters.reduce((acc, m) => acc + m.completeness_pct, 0) /
+        meters.length
       : 0;
 
   const overallStatus = getStatus(overallCompleteness);
@@ -117,7 +118,10 @@ export const IngestHealthCard: React.FC<Props> = ({ windowHours = 24 }) => {
               {meters.map((m) => {
                 const status = getStatus(m.completeness_pct);
                 return (
-                  <tr key={`${m.site_id}:${m.meter_id}`} className="border-b border-slate-900/60">
+                  <tr
+                    key={`${m.site_id}:${m.meter_id}`}
+                    className="border-b border-slate-900/60"
+                  >
                     <td className="py-1 pr-2">
                       <span className="font-mono text-[11px] text-slate-200">
                         {m.site_id}

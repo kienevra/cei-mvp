@@ -68,6 +68,15 @@ class UserCreate(BaseModel):
     # Optional organization name for self-serve signup
     organization_name: Optional[str] = None
 
+    # ---- New cost engine config at signup (org-level) ----
+    # e.g. "electricity", "gas", "electricity,gas"
+    primary_energy_sources: Optional[str] = None
+    # Flat/blended tariffs per kWh (org-wide). Gas is kWh-equivalent if used.
+    electricity_price_per_kwh: Optional[float] = None
+    gas_price_per_kwh: Optional[float] = None
+    # Currency code, default behaviour is effectively EUR if omitted
+    currency_code: Optional[str] = None
+
 
 class Token(BaseModel):
     access_token: str
@@ -92,6 +101,12 @@ class OrgSummaryOut(BaseModel):
     enable_reports: bool = True
     subscription_status: Optional[str] = None
 
+    # ---- Cost engine config surfaced to frontend ----
+    primary_energy_sources: Optional[str] = None
+    electricity_price_per_kwh: Optional[float] = None
+    gas_price_per_kwh: Optional[float] = None
+    currency_code: Optional[str] = None
+
     class Config:
         orm_mode = True
 
@@ -113,6 +128,12 @@ class AccountMeOut(BaseModel):
     enable_alerts: bool = True
     enable_reports: bool = True
     subscription_status: Optional[str] = None  # <- top-level mirror
+
+    # ---- Cost engine (top-level mirrors for convenience) ----
+    primary_energy_sources: Optional[str] = None
+    electricity_price_per_kwh: Optional[float] = None
+    gas_price_per_kwh: Optional[float] = None
+    currency_code: Optional[str] = None
 
     class Config:
         orm_mode = True
@@ -231,6 +252,7 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
 
     - If organization_id/org_id is provided, we attach the user to that org (and 400 if it doesn't exist).
     - Otherwise we auto-create an Organization using organization_name or a name derived from email.
+    - NEW: lets the user optionally seed org-level energy cost config for the cost engine.
     """
     existing_user = db.query(User).filter(User.email == user.email).first()
     if existing_user:
@@ -261,6 +283,28 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
                 status_code=400,
                 detail=f"Organization with id={organization_id} not found",
             )
+
+        # Best-effort: initialize/update cost engine config from signup payload
+        try:
+            if user.primary_energy_sources:
+                org_obj.primary_energy_sources = user.primary_energy_sources
+        except Exception:
+            pass
+        try:
+            if user.electricity_price_per_kwh is not None:
+                org_obj.electricity_price_per_kwh = float(user.electricity_price_per_kwh)
+        except Exception:
+            pass
+        try:
+            if user.gas_price_per_kwh is not None:
+                org_obj.gas_price_per_kwh = float(user.gas_price_per_kwh)
+        except Exception:
+            pass
+        try:
+            if user.currency_code:
+                org_obj.currency_code = user.currency_code
+        except Exception:
+            pass
     else:
         # Self-serve path: create or reuse an org based on organization_name or email
         if user.organization_name and user.organization_name.strip():
@@ -298,6 +342,28 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
                 pass
             try:
                 org_obj.subscription_status = "active"
+            except Exception:
+                pass
+
+            # NEW: seed cost engine config if provided
+            try:
+                if user.primary_energy_sources:
+                    org_obj.primary_energy_sources = user.primary_energy_sources
+            except Exception:
+                pass
+            try:
+                if user.electricity_price_per_kwh is not None:
+                    org_obj.electricity_price_per_kwh = float(user.electricity_price_per_kwh)
+            except Exception:
+                pass
+            try:
+                if user.gas_price_per_kwh is not None:
+                    org_obj.gas_price_per_kwh = float(user.gas_price_per_kwh)
+            except Exception:
+                pass
+            try:
+                if user.currency_code:
+                    org_obj.currency_code = user.currency_code
             except Exception:
                 pass
 
@@ -527,6 +593,7 @@ def read_me(
       - basic user info
       - attached organization summary (plan_key, flags)
       - top-level plan flags (enable_alerts, enable_reports)
+      - NEW: org-level cost engine config (tariffs, primary_energy_sources, currency)
     """
     org: Optional[Organization] = None
     if current_user.organization_id is not None:
@@ -542,6 +609,12 @@ def read_me(
     enable_alerts: bool = True
     enable_reports: bool = True
     subscription_status: Optional[str] = None
+
+    # Cost engine fields (org-level)
+    primary_energy_sources: Optional[str] = None
+    electricity_price_per_kwh: Optional[float] = None
+    gas_price_per_kwh: Optional[float] = None
+    currency_code: Optional[str] = None
 
     if org is not None:
         plan_key = getattr(org, "plan_key", None)
@@ -564,6 +637,12 @@ def read_me(
         )
 
         subscription_status = getattr(org, "subscription_status", None)
+
+        # Cost engine config from org
+        primary_energy_sources = getattr(org, "primary_energy_sources", None)
+        electricity_price_per_kwh = getattr(org, "electricity_price_per_kwh", None)
+        gas_price_per_kwh = getattr(org, "gas_price_per_kwh", None)
+        currency_code = getattr(org, "currency_code", None)
     else:
         # No org attached: default to starter-like behaviour but with no org metadata
         subscription_plan_key = "cei-starter"
@@ -581,6 +660,10 @@ def read_me(
             enable_alerts=enable_alerts,
             enable_reports=enable_reports,
             subscription_status=subscription_status,
+            primary_energy_sources=primary_energy_sources,
+            electricity_price_per_kwh=electricity_price_per_kwh,
+            gas_price_per_kwh=gas_price_per_kwh,
+            currency_code=currency_code,
         )
 
     # Derive a simple role label for now
@@ -598,6 +681,10 @@ def read_me(
         enable_alerts=enable_alerts,
         enable_reports=enable_reports,
         subscription_status=subscription_status,
+        primary_energy_sources=primary_energy_sources,
+        electricity_price_per_kwh=electricity_price_per_kwh,
+        gas_price_per_kwh=gas_price_per_kwh,
+        currency_code=currency_code,
     )
 
 

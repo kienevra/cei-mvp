@@ -523,6 +523,84 @@ const SiteView: React.FC = () => {
     downloadCsv(`cei_${safeSiteId}_timeseries.csv`, rows);
   };
 
+  const handleExportKpiCsv = () => {
+    if (!siteKey) {
+      alert("Missing site identifier; cannot export KPI CSV yet.");
+      return;
+    }
+    if (!kpi) {
+      alert("No KPI data available to export yet.");
+      return;
+    }
+
+    const kpiAny = kpi as any;
+
+    const currency =
+      typeof kpiAny.currency_code === "string" && kpiAny.currency_code
+        ? kpiAny.currency_code
+        : "EUR";
+
+    const pricePerKwh =
+      typeof kpiAny.electricity_price_per_kwh === "number"
+        ? kpiAny.electricity_price_per_kwh
+        : null;
+
+    const pricePerMwh =
+      pricePerKwh !== null && Number.isFinite(pricePerKwh)
+        ? pricePerKwh * 1000
+        : null;
+
+    const primarySources =
+      Array.isArray(kpiAny.primary_energy_sources) &&
+      kpiAny.primary_energy_sources.length > 0
+        ? kpiAny.primary_energy_sources.join(" + ")
+        : "";
+
+    const fmt = (
+      val: number | null | undefined,
+      digits: number = 2
+    ): string =>
+      typeof val === "number" && Number.isFinite(val)
+        ? val.toFixed(digits)
+        : "";
+
+    const row = {
+      // identifiers
+      site_id: siteKey,
+      site_name: site?.name ?? "",
+      location: site?.location ?? "",
+      kpi_generated_at_utc: kpi.now_utc,
+
+      // 24h energy vs baseline
+      last_24h_kwh: fmt(kpi.last_24h_kwh),
+      baseline_24h_kwh: fmt(kpi.baseline_24h_kwh),
+      deviation_pct_24h: fmt(kpi.deviation_pct_24h),
+
+      // 24h cost KPIs (backend-priced)
+      cost_24h_actual: fmt(kpiAny.cost_24h_actual),
+      cost_24h_baseline: fmt(kpiAny.cost_24h_baseline),
+      cost_24h_delta: fmt(kpiAny.cost_24h_delta),
+
+      // 7d energy vs previous 7d
+      last_7d_kwh: fmt(kpi.last_7d_kwh),
+      prev_7d_kwh: fmt(kpi.prev_7d_kwh),
+      deviation_pct_7d: fmt(kpi.deviation_pct_7d),
+
+      // 7d cost KPIs
+      cost_7d_actual: fmt(kpiAny.cost_7d_actual),
+      cost_7d_baseline: fmt(kpiAny.cost_7d_baseline),
+      cost_7d_delta: fmt(kpiAny.cost_7d_delta),
+
+      // pricing metadata (for €/MWh anchors in finance models)
+      currency_code: currency,
+      electricity_price_per_kwh: fmt(pricePerKwh, 6),
+      price_per_mwh_anchor: fmt(pricePerMwh, 2),
+      primary_energy_sources: primarySources,
+    };
+
+    downloadCsv(`cei_${siteKey}_kpi.csv`, [row]);
+  };
+
   const handleGoToUploadForSite = () => {
     if (!siteKey) return;
     navigate(`/upload?site_id=${encodeURIComponent(siteKey)}`);
@@ -563,6 +641,54 @@ const SiteView: React.FC = () => {
     if (value < -10) return "cei-pill-good";
     return "cei-pill-neutral";
   };
+
+  const formatCurrency = (
+    value: number | null | undefined,
+    currencyCode: string | null | undefined
+  ): string => {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+      return "—";
+    }
+    const safeCode = currencyCode || "EUR";
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: safeCode,
+        maximumFractionDigits: 2,
+      }).format(value);
+    } catch {
+      return `${safeCode} ${value.toFixed(2)}`;
+    }
+  };
+
+  // Derived cost KPIs from SiteKpi (optional, tariff-dependent)
+  const kpiCurrencyCode = (kpi as any)?.currency_code ?? null;
+  const last24hCost = (kpi as any)?.last_24h_cost ?? null;
+  const baseline24hCost = (kpi as any)?.baseline_24h_cost ?? null;
+  const delta24hCostRaw = (kpi as any)?.delta_24h_cost ?? null;
+
+  let inferredDeltaCost: number | null = delta24hCostRaw;
+  if (
+    inferredDeltaCost == null &&
+    last24hCost != null &&
+    baseline24hCost != null
+  ) {
+    inferredDeltaCost = last24hCost - baseline24hCost;
+  }
+
+  const hasCostKpi =
+    last24hCost != null || baseline24hCost != null || inferredDeltaCost != null;
+
+  const costDirectionLabel: string =
+    inferredDeltaCost == null
+      ? "Savings / overspend vs baseline"
+      : inferredDeltaCost < 0
+      ? "Savings vs baseline"
+      : inferredDeltaCost > 0
+      ? "Overspend vs baseline"
+      : "On baseline";
+
+  const costDeltaAbs = inferredDeltaCost != null ? Math.abs(inferredDeltaCost) : null;
 
   const renderForecastCard = () => {
     if (forecastLoading) {
@@ -1129,12 +1255,33 @@ const SiteView: React.FC = () => {
                 }}
               >
                 Last 24h vs baseline, and last 7 days vs previous 7 days for
-                this site.
+                this site. Cost metrics use your org&apos;s configured tariffs.
               </div>
             </div>
-            {kpiLoading && (
-              <span className="cei-pill cei-pill-neutral">Updating…</span>
-            )}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-end",
+                gap: "0.35rem",
+              }}
+            >
+              {kpiLoading && (
+                <span className="cei-pill cei-pill-neutral">Updating…</span>
+              )}
+              <button
+                type="button"
+                className="cei-btn cei-btn-ghost"
+                onClick={handleExportKpiCsv}
+                disabled={kpiLoading || !kpi || !siteKey}
+                style={{
+                  fontSize: "0.75rem",
+                  padding: "0.25rem 0.7rem",
+                }}
+              >
+                Download KPI CSV
+              </button>
+            </div>
           </div>
 
           {kpiError && (
@@ -1150,131 +1297,279 @@ const SiteView: React.FC = () => {
           )}
 
           {kpi && (
-            <div
-              style={{
-                marginTop: "0.6rem",
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(0, 1fr))",
-                gap: "0.9rem",
-                fontSize: "0.8rem",
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    fontSize: "0.75rem",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    color: "var(--cei-text-muted)",
-                    marginBottom: "0.25rem",
-                  }}
-                >
-                  Last 24h vs baseline
-                </div>
+            <>
+              <div
+                style={{
+                  marginTop: "0.6rem",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(0, 1fr))",
+                  gap: "0.9rem",
+                  fontSize: "0.8rem",
+                }}
+              >
                 <div>
-                  <span
-                    style={{
-                      fontFamily: "var(--cei-font-mono, monospace)",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {kpi.last_24h_kwh.toFixed(0)} kWh
-                  </span>{" "}
-                  <span
+                  <div
                     style={{
                       fontSize: "0.75rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
                       color: "var(--cei-text-muted)",
+                      marginBottom: "0.25rem",
                     }}
                   >
-                    / baseline{" "}
-                    {kpi.baseline_24h_kwh != null
-                      ? `${kpi.baseline_24h_kwh.toFixed(0)} kWh`
-                      : "—"}
-                  </span>
+                    Last 24h vs baseline
+                  </div>
+                  <div>
+                    <span
+                      style={{
+                        fontFamily: "var(--cei-font-mono, monospace)",
+                        fontWeight: 500,
+                      }}
+                    >
+                      {kpi.last_24h_kwh.toFixed(0)} kWh
+                    </span>{" "}
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "var(--cei-text-muted)",
+                      }}
+                    >
+                      / baseline{" "}
+                      {kpi.baseline_24h_kwh != null
+                        ? `${kpi.baseline_24h_kwh.toFixed(0)} kWh`
+                        : "—"}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: "0.25rem" }}>
+                    <span
+                      className={`cei-pill ${kpiDeltaBadgeClass(
+                        kpi.deviation_pct_24h
+                      )}`}
+                    >
+                      {formatPct(kpi.deviation_pct_24h)} vs baseline
+                    </span>
+                  </div>
                 </div>
-                <div style={{ marginTop: "0.25rem" }}>
-                  <span
-                    className={`cei-pill ${kpiDeltaBadgeClass(
-                      kpi.deviation_pct_24h
-                    )}`}
+
+                <div>
+                  <div
+                    style={{
+                      fontSize: "0.75rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: "var(--cei-text-muted)",
+                      marginBottom: "0.25rem",
+                    }}
                   >
-                    {formatPct(kpi.deviation_pct_24h)} vs baseline
-                  </span>
+                    Last 7 days vs previous 7 days
+                  </div>
+                  <div>
+                    <span
+                      style={{
+                        fontFamily: "var(--cei-font-mono, monospace)",
+                        fontWeight: 500,
+                      }}
+                    >
+                      {kpi.last_7d_kwh.toFixed(0)} kWh
+                    </span>{" "}
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "var(--cei-text-muted)",
+                      }}
+                    >
+                      / prev{" "}
+                      {kpi.prev_7d_kwh != null
+                        ? `${kpi.prev_7d_kwh.toFixed(0)} kWh`
+                        : "—"}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: "0.25rem" }}>
+                    <span
+                      className={`cei-pill ${kpiDeltaBadgeClass(
+                        kpi.deviation_pct_7d
+                      )}`}
+                    >
+                      {formatPct(kpi.deviation_pct_7d)} vs previous 7d
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <div
+                    style={{
+                      fontSize: "0.75rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: "var(--cei-text-muted)",
+                      marginBottom: "0.25rem",
+                    }}
+                  >
+                    Headline
+                  </div>
+                  <p
+                    style={{
+                      fontSize: "0.78rem",
+                      color: "var(--cei-text-muted)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {kpi.deviation_pct_7d != null &&
+                    Math.abs(kpi.deviation_pct_7d) > 5
+                      ? kpi.deviation_pct_7d > 0
+                        ? "Energy use is trending above the previous week. Worth a closer look at this site."
+                        : "Energy use is trending below the previous week. Capture what’s working and standardize it."
+                      : "Energy use is roughly in line with last week. Focus attention on spike alerts and anomaly windows."}
+                  </p>
                 </div>
               </div>
 
-              <div>
+              {/* Cost snapshot – 24h cost, expected 24h cost, savings/overspend */}
+              <div
+                style={{
+                  marginTop: "0.9rem",
+                  paddingTop: "0.75rem",
+                  borderTop: "1px solid var(--cei-border-subtle)",
+                }}
+              >
                 <div
                   style={{
                     fontSize: "0.75rem",
                     textTransform: "uppercase",
                     letterSpacing: "0.08em",
                     color: "var(--cei-text-muted)",
-                    marginBottom: "0.25rem",
+                    marginBottom: "0.35rem",
                   }}
                 >
-                  Last 7 days vs previous 7 days
+                  Cost snapshot (last 24h)
                 </div>
-                <div>
-                  <span
+
+                {hasCostKpi ? (
+                  <div
                     style={{
-                      fontFamily: "var(--cei-font-mono, monospace)",
-                      fontWeight: 500,
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(0, 1fr))",
+                      gap: "0.8rem",
+                      fontSize: "0.8rem",
                     }}
                   >
-                    {kpi.last_7d_kwh.toFixed(0)} kWh
-                  </span>{" "}
-                  <span
+                    <div>
+                      <div
+                        style={{
+                          fontSize: "0.75rem",
+                          color: "var(--cei-text-muted)",
+                          marginBottom: "0.15rem",
+                        }}
+                      >
+                        24h cost (actual)
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: "var(--cei-font-mono, monospace)",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {formatCurrency(last24hCost, kpiCurrencyCode)}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div
+                        style={{
+                          fontSize: "0.75rem",
+                          color: "var(--cei-text-muted)",
+                          marginBottom: "0.15rem",
+                        }}
+                      >
+                        24h cost (expected)
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: "var(--cei-font-mono, monospace)",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {formatCurrency(baseline24hCost, kpiCurrencyCode)}
+                      </div>
+                      <div
+                        style={{
+                          marginTop: "0.15rem",
+                          fontSize: "0.75rem",
+                          color: "var(--cei-text-muted)",
+                        }}
+                      >
+                        Based on baseline kWh for this site.
+                      </div>
+                    </div>
+
+                    <div>
+                      <div
+                        style={{
+                          fontSize: "0.75rem",
+                          color: "var(--cei-text-muted)",
+                          marginBottom: "0.15rem",
+                        }}
+                      >
+                        24h savings / overspend
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0.15rem",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontFamily: "var(--cei-font-mono, monospace)",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {formatCurrency(
+                            costDeltaAbs,
+                            kpiCurrencyCode
+                          )}{" "}
+                          {costDirectionLabel !== "On baseline" &&
+                          costDirectionLabel !==
+                            "Savings / overspend vs baseline" ? (
+                            <span
+                              style={{
+                                fontSize: "0.75rem",
+                                color: "var(--cei-text-muted)",
+                              }}
+                            >
+                              ({costDirectionLabel})
+                            </span>
+                          ) : null}
+                        </span>
+                        {kpi.deviation_pct_24h != null && (
+                          <span
+                            style={{
+                              fontSize: "0.75rem",
+                              color: "var(--cei-text-muted)",
+                            }}
+                          >
+                            {formatPct(kpi.deviation_pct_24h)} vs baseline on a
+                            cost basis.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div
                     style={{
-                      fontSize: "0.75rem",
+                      fontSize: "0.78rem",
                       color: "var(--cei-text-muted)",
                     }}
                   >
-                    / prev{" "}
-                    {kpi.prev_7d_kwh != null
-                      ? `${kpi.prev_7d_kwh.toFixed(0)} kWh`
-                      : "—"}
-                  </span>
-                </div>
-                <div style={{ marginTop: "0.25rem" }}>
-                  <span
-                    className={`cei-pill ${kpiDeltaBadgeClass(
-                      kpi.deviation_pct_7d
-                    )}`}
-                  >
-                    {formatPct(kpi.deviation_pct_7d)} vs previous 7d
-                  </span>
-                </div>
+                    Cost analytics for this site will light up once tariffs are
+                    configured for your organization. You can review these under
+                    Account &amp; Settings.
+                  </div>
+                )}
               </div>
-
-              <div>
-                <div
-                  style={{
-                    fontSize: "0.75rem",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    color: "var(--cei-text-muted)",
-                    marginBottom: "0.25rem",
-                  }}
-                >
-                  Headline
-                </div>
-                <p
-                  style={{
-                    fontSize: "0.78rem",
-                    color: "var(--cei-text-muted)",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {kpi.deviation_pct_7d != null &&
-                  Math.abs(kpi.deviation_pct_7d) > 5
-                    ? kpi.deviation_pct_7d > 0
-                      ? "Energy use is trending above the previous week. Worth a closer look at this site."
-                      : "Energy use is trending below the previous week. Capture what’s working and standardize it."
-                    : "Energy use is roughly in line with last week. Focus attention on spike alerts and anomaly windows."}
-                </p>
-              </div>
-            </div>
+            </>
           )}
         </div>
       </section>

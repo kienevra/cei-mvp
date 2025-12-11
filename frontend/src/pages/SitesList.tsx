@@ -111,7 +111,7 @@ const SitesList: React.FC = () => {
                       ? totalHistoryDaysFromApi
                       : null,
                 };
-              } catch (_e) {
+              } catch {
                 metrics = {
                   totalKwh24h: 0,
                   deviationPct24h: null,
