@@ -1,3 +1,4 @@
+// frontend/src/pages/Account.tsx
 import React, { useEffect, useState } from "react";
 import {
   getAccountMe,
@@ -32,6 +33,36 @@ function getEnvironmentBlurb(env: string): string {
   return "Local / dev data. Safe to experiment, break things, and iterate quickly.";
 }
 
+function normalizeRole(raw: any): "owner" | "member" | null {
+  const v = typeof raw === "string" ? raw.toLowerCase().trim() : "";
+  if (v === "owner") return "owner";
+  if (v === "member") return "member";
+  return null;
+}
+
+function roleLabel(role: string | null | undefined): string {
+  const r = normalizeRole(role);
+  if (r === "owner") return "Owner";
+  if (r === "member") return "Member";
+  return "—";
+}
+
+function parsePrimarySources(value: any): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((x) => String(x).trim())
+      .filter((x) => x.length > 0);
+  }
+  if (typeof value === "string") {
+    // backend may return "electricity,gas"
+    return value
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  return [];
+}
+
 type UiAccount = AccountMe & {
   role?: string | null;
   org: OrganizationSummary | null;
@@ -52,7 +83,12 @@ type UiAccount = AccountMe & {
 const Account: React.FC = () => {
   const [account, setAccount] = useState<UiAccount | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Hard error (used for destructive actions, billing flows, etc.)
   const [error, setError] = useState<string | null>(null);
+
+  // Non-blocking warning: /account/me failed, but we still render core UI
+  const [accountWarning, setAccountWarning] = useState<string | null>(null);
 
   const [billingMessage, setBillingMessage] = useState<string | null>(null);
   const [startingCheckout, setStartingCheckout] = useState(false);
@@ -66,26 +102,32 @@ const Account: React.FC = () => {
     async function loadAccount() {
       setLoading(true);
       setError(null);
+      setAccountWarning(null);
+
       try {
         const data = await getAccountMe();
         if (!isMounted) return;
 
         const org: OrganizationSummary | null =
           (data as any)?.org ?? (data as any)?.organization ?? null;
-        const role =
-          (data as any).role ?? (data as any).user_role ?? null;
+
+        const roleRaw =
+          (data as any)?.role ?? (data as any)?.user_role ?? null;
 
         setAccount({
           ...(data as UiAccount),
           org,
-          role,
+          role: normalizeRole(roleRaw) ?? roleRaw,
         });
       } catch (e: any) {
         if (!isMounted) return;
-        setError(
+
+        // Don’t brick the whole page if /account/me is flaky.
+        setAccount(null);
+        setAccountWarning(
           e?.response?.data?.detail ||
             e?.message ||
-            "Failed to load account details."
+            "Pricing and plan details are temporarily unavailable. Core kWh analytics will still work."
         );
       } finally {
         if (!isMounted) return;
@@ -105,8 +147,7 @@ const Account: React.FC = () => {
 
   // Flexible view over account/org for plan + tariffs (handles org vs root fields)
   const accountAny: any = account || {};
-  const orgLike: any =
-    accountAny.org ?? accountAny.organization ?? null;
+  const orgLike: any = accountAny.org ?? accountAny.organization ?? null;
 
   const planKey =
     orgLike?.subscription_plan_key ||
@@ -126,9 +167,7 @@ const Account: React.FC = () => {
   })();
 
   const subscriptionStatus =
-    orgLike?.subscription_status ||
-    accountAny.subscription_status ||
-    "Not connected";
+    orgLike?.subscription_status || accountAny.subscription_status || "Not connected";
 
   // Respect explicit false; only default to true when we truly have no signal.
   const alertsEnabled =
@@ -203,11 +242,10 @@ const Account: React.FC = () => {
     try {
       await deleteAccount();
       setDeleteSuccess(true);
+      // keep behavior consistent; don’t force redirect here
     } catch (e: any) {
       setError(
-        e?.response?.data?.detail ||
-          e?.message ||
-          "Failed to delete account."
+        e?.response?.data?.detail || e?.message || "Failed to delete account."
       );
     } finally {
       setDeleting(false);
@@ -239,12 +277,9 @@ const Account: React.FC = () => {
       ? accountAny.gas_price_per_kwh
       : null;
 
-  const primarySources: string[] =
-    Array.isArray(orgLike?.primary_energy_sources)
-      ? orgLike.primary_energy_sources
-      : Array.isArray(accountAny.primary_energy_sources)
-      ? accountAny.primary_energy_sources
-      : [];
+  const primarySources: string[] = parsePrimarySources(
+    orgLike?.primary_energy_sources ?? accountAny.primary_energy_sources
+  );
 
   const hasTariffConfig =
     typeof electricityPrice === "number" ||
@@ -301,11 +336,9 @@ const Account: React.FC = () => {
               Org: <strong>{org.name}</strong>
             </div>
           )}
-          {account?.role && (
-            <div>
-              Role: <strong>{account.role}</strong>
-            </div>
-          )}
+          <div>
+            Role: <strong>{roleLabel(account?.role)}</strong>
+          </div>
           <div style={{ marginTop: "0.2rem" }}>
             <span>
               Plan: <strong>{planLabel}</strong>
@@ -314,7 +347,22 @@ const Account: React.FC = () => {
         </div>
       </section>
 
-      {/* Error banner */}
+      {/* Non-blocking warning when /account/me fails */}
+      {accountWarning && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <div
+            className="cei-pill-muted"
+            style={{
+              padding: "0.55rem 0.75rem",
+              fontSize: "0.8rem",
+            }}
+          >
+            {accountWarning}
+          </div>
+        </section>
+      )}
+
+      {/* Error banner (hard errors like delete/billing actions) */}
       {error && (
         <section style={{ marginTop: "0.75rem" }}>
           <ErrorBanner message={error} onClose={() => setError(null)} />
@@ -539,15 +587,15 @@ const Account: React.FC = () => {
             </span>
           </div>
 
-          {!account ? (
+          {!account && !hasTariffConfig ? (
             <div
               style={{
                 fontSize: "0.8rem",
                 color: "var(--cei-text-muted)",
               }}
             >
-              Account details are still loading. Tariff and energy mix data will
-              appear here once available.
+              Account details are not available right now. Tariff and energy mix
+              data will appear here once your account context loads successfully.
             </div>
           ) : !org && !hasTariffConfig ? (
             <div
@@ -576,8 +624,7 @@ const Account: React.FC = () => {
                   {formatPrice(electricityPrice)}
                 </div>
                 <div style={{ marginTop: "0.2rem" }}>
-                  <strong>Gas price (per kWh):</strong>{" "}
-                  {formatPrice(gasPrice)}
+                  <strong>Gas price (per kWh):</strong> {formatPrice(gasPrice)}
                 </div>
                 <div style={{ marginTop: "0.2rem" }}>
                   <strong>Primary energy sources:</strong>{" "}
@@ -598,7 +645,7 @@ const Account: React.FC = () => {
                   }}
                 >
                   Tariffs and energy mix are not configured yet. CEI will use
-                  kWh-only analytics until these values are set on the backend.
+                  kWh-only analytics until these values are set.
                 </div>
               )}
             </>

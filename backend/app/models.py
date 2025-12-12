@@ -1,69 +1,69 @@
 # backend/app/models.py
+import sqlalchemy as sa
 from sqlalchemy import (
     Column,
     Integer,
     String,
     Float,
     ForeignKey,
-    TIMESTAMP,
     Text,
-    JSON,
     Index,
     DateTime,
     Numeric,
-    Boolean,   # <-- added
+    Boolean,
 )
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func, text  # <-- text added here
+from sqlalchemy.sql import text
 from app.db.base import Base
+
+# Cross-DB timestamp default (SQLite + Postgres)
+DB_NOW = text("CURRENT_TIMESTAMP")
 
 
 class Organization(Base):
     __tablename__ = "organization"
+
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False, unique=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    name = Column(String(255), nullable=False, unique=True)
+
+    # ✅ Cross-DB default (fixes SQLite "now()" issues)
+    created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
 
     sites = relationship("Site", back_populates="organization", cascade="all, delete-orphan")
     users = relationship("User", back_populates="organization", cascade="all, delete-orphan")
 
-    # -------- NEW SaaS / billing fields --------
-    # Plan & feature flags
-    plan_key = Column(String, nullable=True)  # e.g. "free", "cei-starter"
-    subscription_plan_key = Column(String, nullable=True)  # Stripe / logical plan
+    # -------- SaaS / billing fields --------
+    plan_key = Column(String(64), nullable=True)                 # e.g. "free", "cei-starter"
+    subscription_plan_key = Column(String(64), nullable=True)    # logical/Stripe plan key
+    subscription_status = Column(String(32), nullable=True)      # e.g. "active", "past_due"
 
+    # ✅ Cross-DB boolean defaults (SQLite-safe)
     enable_alerts = Column(
         Boolean,
         nullable=False,
-        server_default=text("TRUE"),   # <-- CHANGED from "1"
+        default=True,
+        server_default=text("1"),
     )
     enable_reports = Column(
         Boolean,
         nullable=False,
-        server_default=text("TRUE"),   # <-- CHANGED from "1"
+        default=True,
+        server_default=text("1"),
     )
 
-    subscription_status = Column(
-        String,
-        nullable=True,
-    )
+    stripe_customer_id = Column(String(255), nullable=True)
+    stripe_subscription_id = Column(String(255), nullable=True)
+    stripe_status = Column(String(64), nullable=True)
 
-    stripe_customer_id = Column(String, nullable=True)
-    stripe_subscription_id = Column(String, nullable=True)
-    stripe_status = Column(String, nullable=True)
+    billing_email = Column(String(255), nullable=True)
 
-    billing_email = Column(String, nullable=True)
+    # -------- Cost engine config (org-level) --------
+    primary_energy_sources = Column(String(255), nullable=True)  # "electricity,gas"
 
-    # -------- NEW Cost engine config (org-level) --------
-    # Comma-separated list, e.g. "electricity", "gas", "electricity,gas"
-    primary_energy_sources = Column(String, nullable=True)
+    electricity_price_per_kwh = Column(Numeric(10, 4), nullable=True)
+    gas_price_per_kwh = Column(Numeric(10, 4), nullable=True)
 
-    # Flat/blended tariffs at org level (per kWh); we can refine later by site/meter
-    electricity_price_per_kwh = Column(Float, nullable=True)
-    gas_price_per_kwh = Column(Float, nullable=True)
-
-    # Currency code like "EUR", "USD"
-    currency_code = Column(String, nullable=True)
+    currency_code = Column(String(8), nullable=True)  # "EUR", "USD"
 
 
 class User(Base):
@@ -72,13 +72,20 @@ class User(Base):
     Uses organization_id to link users to organizations.
     """
     __tablename__ = "user"
+
     id = Column(Integer, primary_key=True, index=True)
     organization_id = Column(Integer, ForeignKey("organization.id"), nullable=True, index=True)
     email = Column(String, unique=True, nullable=False, index=True)
     hashed_password = Column(String, nullable=False)
     is_active = Column(Integer, default=1, nullable=False)
     is_superuser = Column(Integer, default=0, nullable=False)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    # ✅ Cross-DB default
+    created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
+
+    # NEW: roles & permissions (Step 4)
+    # Stored in DB as "owner" | "member". Default is "member".
+    role = Column(String, nullable=False, server_default=text("'member'"))
 
     organization = relationship("Organization", back_populates="users")
     subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")
@@ -86,6 +93,7 @@ class User(Base):
 
 class BillingPlan(Base):
     __tablename__ = "billing_plan"
+
     id = Column(Integer, primary_key=True, index=True)
     stripe_product_id = Column(String, nullable=True)
     stripe_price_id = Column(String, nullable=True)
@@ -96,24 +104,30 @@ class BillingPlan(Base):
 
 class Subscription(Base):
     __tablename__ = "subscription"
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("user.id"), nullable=False, index=True)
     stripe_customer_id = Column(String, nullable=True, index=True)
     stripe_subscription_id = Column(String, nullable=False, index=True)
     status = Column(String, nullable=False)  # active, past_due, canceled, etc
     current_period_end = Column(DateTime(timezone=True))
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # ✅ Cross-DB default
+    created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
 
     user = relationship("User", back_populates="subscriptions")
 
 
 class Site(Base):
     __tablename__ = "site"
+
     id = Column(Integer, primary_key=True, index=True)
     org_id = Column(Integer, ForeignKey("organization.id"), nullable=True, index=True)
     name = Column(String, nullable=False)
     location = Column(String)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    # ✅ Cross-DB default
+    created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
 
     organization = relationship("Organization", back_populates="sites")
     sensors = relationship("Sensor", back_populates="site", cascade="all, delete-orphan")
@@ -123,11 +137,14 @@ class Site(Base):
 
 class Sensor(Base):
     __tablename__ = "sensor"
+
     id = Column(Integer, primary_key=True, index=True)
     site_id = Column(Integer, ForeignKey("site.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     sensor_type = Column(String, nullable=False)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    # ✅ Cross-DB default
+    created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
 
     site = relationship("Site", back_populates="sensors")
     metrics = relationship("Metric", back_populates="sensor", cascade="all, delete-orphan")
@@ -135,46 +152,58 @@ class Sensor(Base):
 
 class Opportunity(Base):
     __tablename__ = "opportunity"
+
     id = Column(Integer, primary_key=True, index=True)
     site_id = Column(Integer, ForeignKey("site.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     description = Column(Text)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    # ✅ Cross-DB default
+    created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
 
     site = relationship("Site", back_populates="opportunities")
 
 
 class Report(Base):
     __tablename__ = "report"
+
     id = Column(Integer, primary_key=True, index=True)
     site_id = Column(Integer, ForeignKey("site.id"), nullable=False, index=True)
     title = Column(String, nullable=False)
     content = Column(Text)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    # ✅ Cross-DB default
+    created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
 
     site = relationship("Site", back_populates="reports")
 
 
 class Metric(Base):
     __tablename__ = "metric"
+
     id = Column(Integer, primary_key=True, index=True)
     sensor_id = Column(Integer, ForeignKey("sensor.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     value = Column(Float, nullable=False)
-    timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    # ✅ Cross-DB default
+    timestamp = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
 
     sensor = relationship("Sensor", back_populates="metrics")
 
 
 class TimeseriesRecord(Base):
-    __tablename__ = "timeseries_record"  # <-- CHANGED FROM "timeseries_records"
+    __tablename__ = "timeseries_record"
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     site_id = Column(String, nullable=False, index=True)
     meter_id = Column(String, nullable=False)
     timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
     value = Column(Numeric, nullable=False)
     unit = Column(String, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # ✅ Cross-DB default
+    created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
 
     __table_args__ = (
         Index("ix_timeseries_site_timestamp", "site_id", "timestamp"),
@@ -183,10 +212,13 @@ class TimeseriesRecord(Base):
 
 class StagingUpload(Base):
     __tablename__ = "staging_upload"
+
     job_id = Column(String, primary_key=True)
     payload_path = Column(String, nullable=False)
     status = Column(String, nullable=False, default="pending")
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # ✅ Cross-DB default
+    created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
 
 
 class AlertEvent(Base):
@@ -219,13 +251,14 @@ class AlertEvent(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        server_default=func.now(),
+        server_default=DB_NOW,
     )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
+        server_default=DB_NOW,
+        # ✅ SQLite-safe (avoid "now()"): UPDATE ... SET updated_at = CURRENT_TIMESTAMP
+        onupdate=DB_NOW,
     )
 
 
@@ -255,7 +288,7 @@ class SiteEvent(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        server_default=func.now(),
+        server_default=DB_NOW,
     )
 
 
@@ -266,7 +299,6 @@ class IntegrationToken(Base):
     Only the hashed token is stored in DB. The raw token is returned once
     at creation time via /auth/integration-tokens.
     """
-
     __tablename__ = "integration_tokens"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -277,17 +309,18 @@ class IntegrationToken(Base):
     name = Column(String(255), nullable=False)
     token_hash = Column(String(255), nullable=False, unique=True, index=True)
 
+    # ✅ Cross-DB boolean default (SQLite-safe)
     is_active = Column(
         Boolean,
         nullable=False,
         default=True,
-        server_default="1",
+        server_default=text("1"),
     )
 
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        server_default=func.now(),
+        server_default=DB_NOW,
     )
     last_used_at = Column(
         DateTime(timezone=True),

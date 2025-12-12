@@ -17,6 +17,8 @@ const Login: React.FC = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [organizationName, setOrganizationName] = useState("");
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -39,6 +41,30 @@ const Login: React.FC = () => {
     }
   }, [location.search]);
 
+  function toErrorString(err: any): string {
+    const backendDetail =
+      err?.response?.data?.detail ??
+      err?.response?.data?.message ??
+      err?.response?.data;
+
+    if (typeof backendDetail === "string") return backendDetail;
+
+    // If backend returns an object (e.g. {code,message}), don't crash React
+    if (backendDetail && typeof backendDetail === "object") {
+      const msg =
+        (backendDetail.message && String(backendDetail.message)) ||
+        (backendDetail.detail && String(backendDetail.detail));
+      if (msg) return msg;
+      try {
+        return JSON.stringify(backendDetail);
+      } catch {
+        return "Authentication failed. Please try again.";
+      }
+    }
+
+    return err?.message || "Authentication failed. Please try again.";
+  }
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -47,7 +73,6 @@ const Login: React.FC = () => {
     try {
       if (mode === "login") {
         // ---------- LOGIN FLOW ----------
-        // Backend expects username + password
         await login({ username: email, password });
       } else {
         // ---------- SIGNUP FLOW ----------
@@ -64,29 +89,19 @@ const Login: React.FC = () => {
         }
 
         // 1) Create the user account via /auth/signup
+        // organization_name tells backend to create a new org (or reuse if it matches —
+        // we’ll harden that on the backend next to avoid accidental org collisions).
         await api.post("/auth/signup", {
           email,
           password,
-          // organization_id left null for now; we can later
-          // extend to accept organization selection / creation.
+          organization_name: organizationName.trim() || undefined,
         });
 
-        // 2) Reuse the existing login flow so the Auth context
-        //    is fully wired (token, isAuthenticated, redirects).
+        // 2) Login normally to wire Auth context (token storage, redirects)
         await login({ username: email, password });
       }
     } catch (err: any) {
-      const backendDetail =
-        err?.response?.data?.detail ??
-        err?.response?.data?.message ??
-        err?.response?.data;
-
-      const msg =
-        typeof backendDetail === "string"
-          ? backendDetail
-          : err?.message || "Authentication failed. Please try again.";
-
-      setError(msg);
+      setError(toErrorString(err));
     } finally {
       setSubmitting(false);
     }
@@ -97,9 +112,10 @@ const Login: React.FC = () => {
     setMode(nextMode);
     setError(null);
     setNotice(null);
-    // Do not auto-clear email; but reset passwords when switching.
     setPassword("");
     setPasswordConfirm("");
+    // Keep email; reset org name on switch (signup-only)
+    setOrganizationName("");
   };
 
   const isSignup = mode === "signup";
@@ -110,40 +126,35 @@ const Login: React.FC = () => {
         {/* Brand / header */}
         <div
           style={{
-            marginBottom: "0.05rem", // ~10x smaller
+            marginBottom: "0.05rem",
             display: "flex",
             flexDirection: "column",
-            gap: "0.05rem", // ~10x smaller
+            gap: "0.05rem",
             alignItems: "center",
             textAlign: "center",
           }}
         >
           <img
-            src={encodeURI(
-              "/ChatGPT Image Dec 5, 2025, 10_47_03 PM.png"
-            )}
+            src={encodeURI("/ChatGPT Image Dec 5, 2025, 10_47_03 PM.png")}
             alt="CEI – Carbon Efficiency Intelligence"
             style={{
               height: "320px",
               width: "auto",
               display: "block",
-              marginBottom: "0.05rem", // ~10x smaller
+              marginBottom: "0.05rem",
             }}
           />
 
-          <div className="auth-title">
-            We use A.I to cut manufacturing energy waste.
-          </div>
+          <div className="auth-title">We use A.I to cut manufacturing energy waste.</div>
 
           <div className="auth-subtitle">
             CEI ingests your meter and SCADA data, builds statistical baselines
             for each site, and turns night, weekend, and process inefficiencies
-            into actionable alerts and reports – without installing new
-            hardware.
+            into actionable alerts and reports – without installing new hardware.
           </div>
         </div>
 
-        {/* Mode toggle: Sign in / Create account */}
+        {/* Mode toggle */}
         <div
           style={{
             display: "flex",
@@ -167,8 +178,7 @@ const Login: React.FC = () => {
                 mode === "login"
                   ? "linear-gradient(135deg, #22d3ee, #0ea5e9)"
                   : "transparent",
-              color:
-                mode === "login" ? "#0f172a" : "var(--cei-text-muted)",
+              color: mode === "login" ? "#0f172a" : "var(--cei-text-muted)",
               fontWeight: mode === "login" ? 600 : 400,
               cursor: "pointer",
             }}
@@ -189,8 +199,7 @@ const Login: React.FC = () => {
                 mode === "signup"
                   ? "linear-gradient(135deg, #22d3ee, #0ea5e9)"
                   : "transparent",
-              color:
-                mode === "signup" ? "#0f172a" : "var(--cei-text-muted)",
+              color: mode === "signup" ? "#0f172a" : "var(--cei-text-muted)",
               fontWeight: mode === "signup" ? 600 : 400,
               cursor: "pointer",
             }}
@@ -223,12 +232,34 @@ const Login: React.FC = () => {
           </div>
         )}
 
-        {/* Auth form (login or signup depending on mode) */}
+        {/* Auth form */}
         <form className="auth-form" onSubmit={handleSubmit}>
+          {isSignup && (
+            <div>
+              <label htmlFor="organizationName">Organization name</label>
+              <input
+                id="organizationName"
+                type="text"
+                autoComplete="organization"
+                placeholder="e.g. Dev Manufacturing"
+                value={organizationName}
+                onChange={(e) => setOrganizationName(e.target.value)}
+                required
+              />
+              <div
+                style={{
+                  fontSize: "0.75rem",
+                  color: "var(--cei-text-muted)",
+                  marginTop: "0.25rem",
+                }}
+              >
+                This creates your org. (We’ll add “join via invite” next.)
+              </div>
+            </div>
+          )}
+
           <div>
-            <label htmlFor="email">
-              {isSignup ? "Work email" : "Work email"}
-            </label>
+            <label htmlFor="email">Work email</label>
             <input
               id="email"
               type="email"
@@ -241,9 +272,7 @@ const Login: React.FC = () => {
           </div>
 
           <div>
-            <label htmlFor="password">
-              {isSignup ? "Create a password" : "Password"}
-            </label>
+            <label htmlFor="password">{isSignup ? "Create a password" : "Password"}</label>
             <input
               id="password"
               type="password"

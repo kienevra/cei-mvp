@@ -1,10 +1,11 @@
+// frontend/src/services/api.ts
 import axios, {
   AxiosError,
   AxiosRequestConfig,
   AxiosResponse,
 } from "axios";
 import { SiteForecast } from "../types/api";
-import type { AccountMe, OrgSettingsUpdateRequest, } from "../types/auth";
+import type { AccountMe, OrgSettingsUpdateRequest } from "../types/auth";
 
 const rawEnv = (import.meta as any).env || {};
 const envBase = rawEnv.VITE_API_URL || "";
@@ -136,6 +137,47 @@ api.interceptors.response.use(
     }
   }
 );
+
+/* ===== Small error helper (keeps UI messaging consistent) ===== */
+
+function safeStringify(val: unknown): string {
+  if (val == null) return "";
+  if (typeof val === "string") return val;
+  if (typeof val === "number" || typeof val === "boolean") return String(val);
+  try {
+    return JSON.stringify(val);
+  } catch {
+    // Worst-case fallback
+    return String(val);
+  }
+}
+
+function getApiErrorMessage(err: unknown, fallback: string): string {
+  if (axios.isAxiosError(err)) {
+    const data: any = err.response?.data;
+
+    // FastAPI typical: { detail: "..." } OR { detail: {...} } OR { detail: [...] }
+    if (data?.detail != null) {
+      const detail =
+        typeof data.detail === "string" ? data.detail : safeStringify(data.detail);
+      return detail || fallback;
+    }
+
+    // Some endpoints return { message: "..." } or { code, message }
+    if (data?.message != null) {
+      const msg =
+        typeof data.message === "string" ? data.message : safeStringify(data.message);
+      return msg || fallback;
+    }
+
+    // AxiosError.message (string)
+    const axMsg =
+      typeof (err as any)?.message === "string" ? (err as any).message : "";
+    return axMsg || fallback;
+  }
+  if (err instanceof Error) return err.message || fallback;
+  return fallback;
+}
 
 /* ===== Auth helpers (login + signup) ===== */
 
@@ -498,14 +540,23 @@ export async function getAccountMe(): Promise<AccountMe> {
 
 export async function updateOrgSettings(
   payload: OrgSettingsUpdateRequest
-): Promise<AccountMe>  {
-  const response = await api.patch<AccountMe>(
-    "/account/org-settings",
-    payload
-  );
-  return response.data;
+): Promise<AccountMe> {
+  try {
+    const response = await api.patch<AccountMe>(
+      "/account/org-settings",
+      payload
+    );
+    return response.data;
+  } catch (err: any) {
+    // Owner-only enforcement (Step 4): normalize the message for consistent UX
+    if (axios.isAxiosError(err) && err.response?.status === 403) {
+      throw new Error("Only the org owner can update tariff settings.");
+    }
+    throw new Error(
+      getApiErrorMessage(err, "Failed to save organization settings.")
+    );
+  }
 }
-
 
 /**
  * Start a Stripe Checkout session for a given plan.
@@ -557,6 +608,69 @@ export async function openBillingPortal() {
 
   const url = data.portal_url || data.url;
   return { url };
+}
+
+/* ===== Integration tokens (owner-only) ===== */
+
+export interface IntegrationTokenOut {
+  id: number;
+  name: string;
+  is_active: boolean;
+  created_at: string;
+  last_used_at?: string | null;
+}
+
+export interface IntegrationTokenWithSecret extends IntegrationTokenOut {
+  token: string; // returned once on create
+}
+
+export async function listIntegrationTokens(): Promise<IntegrationTokenOut[]> {
+  try {
+    const resp = await api.get<IntegrationTokenOut[]>(
+      "/auth/integration-tokens"
+    );
+    return Array.isArray(resp.data) ? resp.data : [];
+  } catch (err: any) {
+    // Non-owner gets 403 — treat as empty list so UI can show gated state
+    if (axios.isAxiosError(err) && err.response?.status === 403) {
+      return [];
+    }
+    throw new Error(
+      getApiErrorMessage(err, "Failed to load integration tokens.")
+    );
+  }
+}
+
+export async function createIntegrationToken(
+  name: string
+): Promise<IntegrationTokenWithSecret> {
+  try {
+    const resp = await api.post<IntegrationTokenWithSecret>(
+      "/auth/integration-tokens",
+      { name }
+    );
+    return resp.data;
+  } catch (err: any) {
+    if (axios.isAxiosError(err) && err.response?.status === 403) {
+      throw new Error("Only the org owner can manage integration tokens.");
+    }
+    throw new Error(
+      getApiErrorMessage(err, "Failed to create integration token.")
+    );
+  }
+}
+
+export async function revokeIntegrationToken(tokenId: number): Promise<void> {
+  try {
+    await api.delete(`/auth/integration-tokens/${tokenId}`);
+  } catch (err: any) {
+    if (axios.isAxiosError(err) && err.response?.status === 403) {
+      throw new Error("Only the org owner can manage integration tokens.");
+    }
+    throw new Error(
+      getApiErrorMessage(err, "Failed to revoke integration token.")
+    );
+  }
 }
 
 /* ===== Site events (timeline + operator notes) ===== */

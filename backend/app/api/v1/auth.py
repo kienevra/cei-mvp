@@ -1,3 +1,4 @@
+# backend/app/api/v1/auth.py
 from datetime import datetime, timedelta
 import logging
 from typing import Optional, List
@@ -20,7 +21,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import User, Organization  # <- NOTE: import Organization
+from app.models import User, Organization, SiteEvent  # <- NOTE: + SiteEvent for audit trail
 from app.db.models import IntegrationToken  # <- integration tokens live here
 from app.core.rate_limit import login_rate_limit, refresh_rate_limit
 from app.core.config import settings
@@ -237,6 +238,63 @@ def _generate_integration_token_string() -> str:
     return INTEGRATION_TOKEN_PREFIX + secrets.token_urlsafe(32)
 
 
+def _require_owner(current_user: User) -> None:
+    """
+    Owner-only guard for sensitive org operations.
+
+    - Allows superusers (legacy) to proceed.
+    - Otherwise requires current_user.role == "owner".
+    """
+    is_super = bool(getattr(current_user, "is_superuser", 0))
+    if is_super:
+        return
+
+    role = (getattr(current_user, "role", None) or "").strip().lower()
+    if role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "FORBIDDEN_OWNER_ONLY",
+                "message": "Only the organization owner can manage integration tokens.",
+            },
+        )
+
+
+def _create_org_audit_event(
+    db: Session,
+    *,
+    org_id: int,
+    user_id: Optional[int],
+    title: str,
+    description: Optional[str],
+) -> None:
+    """
+    Write an audit trail entry using SiteEvent (site_id=None) for org-level actions.
+    Best-effort: audit failures must not block the main operation.
+    """
+    try:
+        ev = SiteEvent(
+            organization_id=org_id,
+            site_id=None,
+            type="org_event",
+            related_alert_id=None,
+            title=title,
+            body=description,
+            created_by_user_id=user_id,
+        )
+        db.add(ev)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
+def _normalize_currency_code(code: Optional[str]) -> Optional[str]:
+    if not code:
+        return None
+    c = str(code).strip().upper()
+    return c or None
+
+
 # === Routes ===
 
 
@@ -251,8 +309,13 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
     Signup endpoint for self-serve onboarding.
 
     - If organization_id/org_id is provided, we attach the user to that org (and 400 if it doesn't exist).
-    - Otherwise we auto-create an Organization using organization_name or a name derived from email.
-    - NEW: lets the user optionally seed org-level energy cost config for the cost engine.
+    - Otherwise we CREATE a NEW Organization using organization_name or a name derived from email.
+      IMPORTANT: We DO NOT "reuse org by name" anymore — that's ambiguous and unsafe.
+      Joining an existing org should be done via explicit org_id (or, later, invite codes).
+    - NEW: first user of a newly created org becomes role="owner".
+    - If attaching to an existing org and it currently has no owner, we also promote the first user to owner
+      (helps dev/demo DB resets; safe in a brand-new org).
+    - NEW: user can optionally seed org-level energy cost config for the cost engine.
     """
     existing_user = db.query(User).filter(User.email == user.email).first()
     if existing_user:
@@ -270,6 +333,15 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
         )
 
     org_obj: Optional[Organization] = None
+    created_new_org: bool = False
+
+    # Normalize inputs
+    primary_energy_sources = (
+        str(user.primary_energy_sources).strip()
+        if user.primary_energy_sources is not None
+        else None
+    )
+    currency_code = _normalize_currency_code(user.currency_code)
 
     if organization_id is not None:
         # Attach to an existing org; error if not found.
@@ -286,8 +358,8 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
 
         # Best-effort: initialize/update cost engine config from signup payload
         try:
-            if user.primary_energy_sources:
-                org_obj.primary_energy_sources = user.primary_energy_sources
+            if primary_energy_sources:
+                org_obj.primary_energy_sources = primary_energy_sources
         except Exception:
             pass
         try:
@@ -301,12 +373,27 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
         except Exception:
             pass
         try:
-            if user.currency_code:
-                org_obj.currency_code = user.currency_code
+            if currency_code:
+                org_obj.currency_code = currency_code
         except Exception:
             pass
+
+        # Determine if this org has an owner already (best-effort)
+        try:
+            owner_exists = (
+                db.query(User)
+                .filter(
+                    User.organization_id == org_obj.id,
+                    User.role == "owner",
+                )
+                .first()
+                is not None
+            )
+        except Exception:
+            owner_exists = True  # if schema doesn't support role, don't try to be clever
+
     else:
-        # Self-serve path: create or reuse an org based on organization_name or email
+        # Self-serve path: CREATE a new org based on organization_name or email
         if user.organization_name and user.organization_name.strip():
             org_name = user.organization_name.strip()
         else:
@@ -314,63 +401,72 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
             email_prefix = user.email.split("@")[0] if "@" in user.email else user.email
             org_name = f"{email_prefix} Org".strip() or "New Organization"
 
-        # Reuse an existing org with that name if it already exists
-        org_obj = (
+        # SAFETY: do not silently reuse org by name
+        existing_org_same_name = (
             db.query(Organization)
             .filter(Organization.name == org_name)
             .first()
         )
+        if existing_org_same_name is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "ORG_NAME_TAKEN",
+                    "message": "An organization with that name already exists. Choose a different organization name, or join using an invite/org id.",
+                },
+            )
 
-        if org_obj is None:
-            org_obj = Organization(name=org_name)  # only safe ctor arg
-            # Best-effort plan defaults, guarded to not break older schemas.
-            try:
-                org_obj.plan_key = "cei-starter"
-            except Exception:
-                pass
-            try:
-                org_obj.subscription_plan_key = "cei-starter"
-            except Exception:
-                pass
-            try:
-                org_obj.enable_alerts = True
-            except Exception:
-                pass
-            try:
-                org_obj.enable_reports = True
-            except Exception:
-                pass
-            try:
-                org_obj.subscription_status = "active"
-            except Exception:
-                pass
+        org_obj = Organization(name=org_name)  # only safe ctor arg
+        created_new_org = True
 
-            # NEW: seed cost engine config if provided
-            try:
-                if user.primary_energy_sources:
-                    org_obj.primary_energy_sources = user.primary_energy_sources
-            except Exception:
-                pass
-            try:
-                if user.electricity_price_per_kwh is not None:
-                    org_obj.electricity_price_per_kwh = float(user.electricity_price_per_kwh)
-            except Exception:
-                pass
-            try:
-                if user.gas_price_per_kwh is not None:
-                    org_obj.gas_price_per_kwh = float(user.gas_price_per_kwh)
-            except Exception:
-                pass
-            try:
-                if user.currency_code:
-                    org_obj.currency_code = user.currency_code
-            except Exception:
-                pass
+        # Best-effort plan defaults, guarded to not break older schemas.
+        try:
+            org_obj.plan_key = "cei-starter"
+        except Exception:
+            pass
+        try:
+            org_obj.subscription_plan_key = "cei-starter"
+        except Exception:
+            pass
+        try:
+            org_obj.enable_alerts = True
+        except Exception:
+            pass
+        try:
+            org_obj.enable_reports = True
+        except Exception:
+            pass
+        try:
+            org_obj.subscription_status = "active"
+        except Exception:
+            pass
 
-            db.add(org_obj)
-            db.flush()  # ensure org_obj.id is available
+        # Seed cost engine config if provided
+        try:
+            if primary_energy_sources:
+                org_obj.primary_energy_sources = primary_energy_sources
+        except Exception:
+            pass
+        try:
+            if user.electricity_price_per_kwh is not None:
+                org_obj.electricity_price_per_kwh = float(user.electricity_price_per_kwh)
+        except Exception:
+            pass
+        try:
+            if user.gas_price_per_kwh is not None:
+                org_obj.gas_price_per_kwh = float(user.gas_price_per_kwh)
+        except Exception:
+            pass
+        try:
+            if currency_code:
+                org_obj.currency_code = currency_code
+        except Exception:
+            pass
 
+        db.add(org_obj)
+        db.flush()  # ensure org_obj.id is available
         organization_id = org_obj.id
+        owner_exists = False  # brand new org
 
     # Hash password
     try:
@@ -394,9 +490,32 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
             # Column might not exist in older schemas; ignore silently.
             pass
 
+    # === ROLE ASSIGNMENT (Step 4) ===
+    # - If a new org was created, first user is the owner.
+    # - If attaching to an org with no owner (fresh DB/reset), make this user the owner.
+    # - Otherwise default to member.
+    try:
+        if created_new_org or (organization_id is not None and owner_exists is False):
+            db_user.role = "owner"
+        else:
+            db_user.role = "member"
+    except Exception:
+        # role column may not exist in older schemas; ignore silently
+        pass
+
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
+
+    # Audit trail for org creation (best-effort)
+    if created_new_org and organization_id is not None:
+        _create_org_audit_event(
+            db,
+            org_id=organization_id,
+            user_id=getattr(db_user, "id", None),
+            title="Organization created",
+            description=f"name={getattr(org_obj, 'name', None)}; owner_email={db_user.email}",
+        )
 
     access = create_access_token({"sub": db_user.email})
     refresh = create_refresh_token({"sub": db_user.email})
@@ -666,8 +785,14 @@ def read_me(
             currency_code=currency_code,
         )
 
-    # Derive a simple role label for now
-    role = "admin" if getattr(current_user, "is_superuser", 0) else "member"
+    # Role: prefer DB role ("owner" | "member") if present.
+    # Preserve superuser behavior as "admin" for backwards compatibility.
+    is_super = bool(getattr(current_user, "is_superuser", 0))
+    db_role = getattr(current_user, "role", None)
+    if is_super:
+        role = "admin"
+    else:
+        role = db_role or "member"
 
     return AccountMeOut(
         id=current_user.id,
@@ -702,6 +827,8 @@ def create_integration_token(
 
     - Returns the raw token string ONCE (caller must store it).
     - Stores only a hash server-side.
+    - Owner-only.
+    - Writes an org-level audit entry to site_events.
     """
     if not current_user.organization_id:
         raise HTTPException(
@@ -709,12 +836,16 @@ def create_integration_token(
             detail="User is not attached to an organization",
         )
 
+    _require_owner(current_user)
+
     raw_token = _generate_integration_token_string()
     token_hash = _hash_integration_token(raw_token)
 
+    name = (payload.name or "").strip() or "Integration token"
+
     db_token = IntegrationToken(
         organization_id=current_user.organization_id,
-        name=payload.name.strip() if payload.name.strip() else "Integration token",
+        name=name,
         token_hash=token_hash,
         is_active=True,
     )
@@ -722,6 +853,15 @@ def create_integration_token(
     db.add(db_token)
     db.commit()
     db.refresh(db_token)
+
+    # Audit trail (best-effort; non-blocking)
+    _create_org_audit_event(
+        db,
+        org_id=current_user.organization_id,
+        user_id=getattr(current_user, "id", None),
+        title="Integration token created",
+        description=f"name={db_token.name}; token_id={db_token.id}",
+    )
 
     return IntegrationTokenWithSecret(
         id=db_token.id,
@@ -740,9 +880,13 @@ def list_integration_tokens(
 ):
     """
     List integration tokens for the caller's organization (metadata only, no secrets).
+
+    Owner-only (keeps token inventory private).
     """
     if not current_user.organization_id:
         return []
+
+    _require_owner(current_user)
 
     tokens = (
         db.query(IntegrationToken)
@@ -761,12 +905,16 @@ def revoke_integration_token(
 ):
     """
     Soft-revoke an integration token (is_active = False).
+
+    Owner-only. Writes an org-level audit entry to site_events.
     """
     if not current_user.organization_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User is not attached to an organization",
         )
+
+    _require_owner(current_user)
 
     token = (
         db.query(IntegrationToken)
@@ -783,7 +931,20 @@ def revoke_integration_token(
             detail="Integration token not found",
         )
 
+    if not bool(getattr(token, "is_active", True)):
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     token.is_active = False
     db.add(token)
     db.commit()
+
+    # Audit trail (best-effort; non-blocking)
+    _create_org_audit_event(
+        db,
+        org_id=current_user.organization_id,
+        user_id=getattr(current_user, "id", None),
+        title="Integration token revoked",
+        description=f"name={getattr(token, 'name', None)}; token_id={token_id}",
+    )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)

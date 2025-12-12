@@ -1,6 +1,6 @@
 # backend/app/services/demo_seed.py
 
-"""
+r"""
 Unified demo seeder for CEI.
 
 - Org A: "Dev Manufacturing" (Starter plan)
@@ -20,15 +20,21 @@ Idempotent:
 - It will wipe TimeseriesRecord rows in the last N hours and re-seed for
   both orgs.
 
-Run from project root:
+Run from project root (PowerShell):
 
-    .\.venv\Scripts\activate
+    .\.venv\Scripts\Activate.ps1
+    cd backend
+    python -m app.services.demo_seed
+
+Run from project root (bash/zsh):
+
+    source ./.venv/bin/activate
     cd backend
     python -m app.services.demo_seed
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Tuple
 
 from passlib.context import CryptContext
@@ -99,6 +105,7 @@ def _get_or_create_user(
     email: str,
     password: str,
     as_admin: bool = False,
+    role: str = "member",
 ) -> User:
     user = session.query(User).filter(User.email == email).first()
     if user:
@@ -108,20 +115,49 @@ def _get_or_create_user(
             user.id,
             getattr(user, "organization_id", None),
         )
+
+        dirty = False
+
         # If user exists but organization_id is different/None, best-effort fix
         try:
             if getattr(user, "organization_id", None) != org.id:
                 user.organization_id = org.id
-                session.commit()
-                logger.info(
-                    "[demo_seed] Updated user %s organization_id -> %s",
-                    user.email,
-                    org.id,
-                )
+                dirty = True
         except Exception:
             logger.exception(
                 "[demo_seed] Failed to ensure org binding for user %s", user.email
             )
+
+        # Backfill role if missing/blank (Step 4). If column doesn't exist, ignore.
+        try:
+            current_role = (getattr(user, "role", None) or "").strip().lower()
+            desired_role = (role or "member").strip().lower()
+            if not current_role:
+                user.role = desired_role
+                dirty = True
+            # Optional: force role every run for determinism (disabled by default)
+            # elif current_role != desired_role:
+            #     user.role = desired_role
+            #     dirty = True
+        except Exception:
+            pass
+
+        # Optional: ensure admin flag if requested
+        if as_admin:
+            try:
+                if int(getattr(user, "is_superuser", 0) or 0) != 1:
+                    # IMPORTANT: use integer 1 to match INTEGER column in Supabase
+                    user.is_superuser = 1
+                    dirty = True
+            except Exception:
+                pass
+
+        if dirty:
+            session.commit()
+            logger.info(
+                "[demo_seed] Updated user %s (org/role/admin) where needed", user.email
+            )
+
         return user
 
     hashed_password = pwd_context.hash(password)
@@ -133,6 +169,12 @@ def _get_or_create_user(
     session.add(user)
     session.flush()
 
+    # Set role (Step 4). If column doesn't exist, ignore.
+    try:
+        user.role = (role or "member").strip().lower()
+    except Exception:
+        pass
+
     # Try to mark as superuser if the column exists
     if as_admin:
         try:
@@ -143,10 +185,11 @@ def _get_or_create_user(
 
     session.commit()
     logger.info(
-        "[demo_seed] Created user: %s (id=%s, org_id=%s)",
+        "[demo_seed] Created user: %s (id=%s, org_id=%s, role=%s)",
         user.email,
         user.id,
         getattr(user, "organization_id", None),
+        getattr(user, "role", None),
     )
     return user
 
@@ -289,6 +332,7 @@ def _seed_org_a(
         email="dev@cei.local",
         password="devpassword",
         as_admin=True,
+        role="owner",
     )
 
     sites: List[Site] = []
@@ -341,6 +385,7 @@ def _seed_org_b(
         email="demo2@cei.local",
         password="demo2password",
         as_admin=False,
+        role="owner",
     )
 
     sites: List[Site] = []
@@ -396,7 +441,7 @@ def main() -> None:
         hours = 24
 
         # Align to the top of the current hour for nicer charts
-        now = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
         start = now - timedelta(hours=hours)
 
         # Clear recent timeseries once for all orgs

@@ -1,15 +1,10 @@
 # backend/app/db/init_sqlite_db.py
 
-import logging
-
 from app.db.session import engine
 from app.db.base import Base
 
 # IMPORTANT: import models so all Base subclasses are registered
-from app import models as app_models  # noqa: F401
-from app.db import models as db_models  # noqa: F401
-
-logger = logging.getLogger("cei")
+import app.models  # noqa: F401
 
 
 def init_db() -> None:
