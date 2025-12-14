@@ -59,6 +59,12 @@ function normalizeCurrencyCode(code: string): string {
   return (code || "").trim().toUpperCase().slice(0, 3);
 }
 
+function isValidNonNegNumberString(s: string): boolean {
+  if (s.trim() === "") return true; // allow empty (treated as null)
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0;
+}
+
 const Settings: React.FC = () => {
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [unitSystem, setUnitSystem] = useState<"metric" | "imperial">("metric");
@@ -88,6 +94,7 @@ const Settings: React.FC = () => {
   const [createdTokenSecret, setCreatedTokenSecret] = useState<string | null>(
     null
   );
+  const [copiedTokenSecret, setCopiedTokenSecret] = useState(false);
   const [revokingId, setRevokingId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -117,8 +124,7 @@ const Settings: React.FC = () => {
   const currencyReady = normalizeCurrencyCode(currencyCodeInput).length === 3;
   const elecReady =
     electricityPriceInput.trim() !== "" && Number(electricityPriceInput) > 0;
-  const gasReady =
-    gasPriceInput.trim() !== "" && Number(gasPriceInput) > 0;
+  const gasReady = gasPriceInput.trim() !== "" && Number(gasPriceInput) > 0;
   const pricingConfigured = currencyReady && (elecReady || gasReady);
 
   const loadAccount = async () => {
@@ -225,6 +231,7 @@ const Settings: React.FC = () => {
     setCreatingToken(true);
     setTokensError(null);
     setCreatedTokenSecret(null);
+    setCopiedTokenSecret(false);
 
     try {
       const created = await createIntegrationToken(newTokenName.trim());
@@ -263,6 +270,8 @@ const Settings: React.FC = () => {
     if (!createdTokenSecret) return;
     try {
       await navigator.clipboard.writeText(createdTokenSecret);
+      setCopiedTokenSecret(true);
+      window.setTimeout(() => setCopiedTokenSecret(false), 1500);
     } catch (e) {
       console.warn("Clipboard copy failed", e);
     }
@@ -292,6 +301,21 @@ const Settings: React.FC = () => {
       return;
     }
 
+    // basic validation before hitting backend
+    const cc = normalizeCurrencyCode(currencyCodeInput);
+    if (currencyCodeInput.trim() !== "" && cc.length !== 3) {
+      setOrgSettingsError("Currency code must be a 3-letter code (e.g. EUR).");
+      return;
+    }
+    if (!isValidNonNegNumberString(electricityPriceInput)) {
+      setOrgSettingsError("Electricity price must be a non-negative number.");
+      return;
+    }
+    if (!isValidNonNegNumberString(gasPriceInput)) {
+      setOrgSettingsError("Gas price must be a non-negative number.");
+      return;
+    }
+
     setOrgSettingsError(null);
     setOrgSettingsSaved(false);
     setSavingOrgSettings(true);
@@ -305,10 +329,7 @@ const Settings: React.FC = () => {
           : Number(electricityPriceInput.trim()),
       gas_price_per_kwh:
         gasPriceInput.trim() === "" ? null : Number(gasPriceInput.trim()),
-      currency_code:
-        currencyCodeInput.trim() === ""
-          ? null
-          : normalizeCurrencyCode(currencyCodeInput),
+      currency_code: currencyCodeInput.trim() === "" ? null : cc,
     };
 
     try {
@@ -502,7 +523,9 @@ const Settings: React.FC = () => {
               flexWrap: "wrap",
             }}
           >
-            <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <span
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+            >
               <span>Energy & tariffs</span>
               {!canManageOrgSensitiveSettings && account && org && (
                 <span className="cei-pill-muted" style={{ fontSize: "0.75rem" }}>
@@ -516,8 +539,11 @@ const Settings: React.FC = () => {
               )}
             </span>
 
-            <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-              Org-level settings used by the cost engine in KPIs, alerts, and reports.
+            <span
+              style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}
+            >
+              Org-level settings used by the cost engine in KPIs, alerts, and
+              reports.
             </span>
           </div>
 
@@ -675,7 +701,9 @@ const Settings: React.FC = () => {
                   maxLength={3}
                   placeholder="e.g. EUR"
                   value={currencyCodeInput}
-                  onChange={(e) => setCurrencyCodeInput(normalizeCurrencyCode(e.target.value))}
+                  onChange={(e) =>
+                    setCurrencyCodeInput(normalizeCurrencyCode(e.target.value))
+                  }
                   disabled={!canManageOrgSensitiveSettings}
                   style={{
                     width: "100%",
@@ -711,11 +739,19 @@ const Settings: React.FC = () => {
                       Settings saved. Cost analytics will now use these values.
                     </div>
                   )}
-                  {!hasTariffConfig && !orgSettingsError && !orgSettingsSaved && (
-                    <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-                      Until tariffs are configured, CEI will fall back to kWh-only analytics.
-                    </div>
-                  )}
+                  {!hasTariffConfig &&
+                    !orgSettingsError &&
+                    !orgSettingsSaved && (
+                      <div
+                        style={{
+                          fontSize: "0.75rem",
+                          color: "var(--cei-text-muted)",
+                        }}
+                      >
+                        Until tariffs are configured, CEI will fall back to
+                        kWh-only analytics.
+                      </div>
+                    )}
                 </div>
 
                 <button
@@ -725,11 +761,13 @@ const Settings: React.FC = () => {
                   style={{
                     whiteSpace: "nowrap",
                     opacity:
-                      !canManageOrgSensitiveSettings || savingOrgSettings ? 0.7 : 1,
+                      !canManageOrgSensitiveSettings || savingOrgSettings
+                        ? 0.7
+                        : 1,
                   }}
                   title={
                     !canManageOrgSensitiveSettings
-                      ? "Owner-only."
+                      ? "Owner-only. Ask your org owner to update tariffs."
                       : undefined
                   }
                 >
@@ -741,8 +779,8 @@ const Settings: React.FC = () => {
         </div>
       </section>
 
-      {/* Integration tokens should NOT be visible to non-owners (avoid “403 UX”). */}
-      {account && org && canManageOrgSensitiveSettings && (
+      {/* Integration tokens: show card for everyone (no 403 UX), but only owners can view/manage. */}
+      {account && org && (
         <section className="dashboard-row">
           <div className="cei-card" style={{ width: "100%" }}>
             <div
@@ -754,11 +792,14 @@ const Settings: React.FC = () => {
                 justifyContent: "space-between",
                 alignItems: "center",
                 gap: "0.75rem",
+                flexWrap: "wrap",
               }}
             >
-              <span>Integration tokens</span>
-              <span className="cei-pill-muted" style={{ fontSize: "0.75rem" }}>
-                Owner-only
+              <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <span>Integration tokens</span>
+                <span className="cei-pill-muted" style={{ fontSize: "0.75rem" }}>
+                  Owner-only
+                </span>
               </span>
             </div>
 
@@ -774,211 +815,205 @@ const Settings: React.FC = () => {
               <code style={{ fontSize: "0.75rem" }}>POST /api/v1/timeseries/batch</code>.
             </p>
 
-            {tokensError && (
-              <div
-                className="cei-pill-danger"
-                style={{ marginBottom: "0.6rem", fontSize: "0.8rem" }}
-              >
-                {tokensError}
+            {!canManageOrgSensitiveSettings ? (
+              <div className="cei-pill-muted" style={{ fontSize: "0.8rem" }}>
+                You don’t have permission to view or manage integration tokens. Ask your org owner.
               </div>
-            )}
+            ) : (
+              <>
+                {tokensError && (
+                  <div
+                    className="cei-pill-danger"
+                    style={{ marginBottom: "0.6rem", fontSize: "0.8rem" }}
+                  >
+                    {tokensError}
+                  </div>
+                )}
 
-            <form
-              onSubmit={handleCreateToken}
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "0.5rem",
-                marginBottom: "0.75rem",
-                alignItems: "center",
-              }}
-            >
-              <input
-                type="text"
-                placeholder="e.g. SCADA Plant 4"
-                value={newTokenName}
-                onChange={(e) => setNewTokenName(e.target.value)}
-                disabled={!canManageOrgSensitiveSettings}
-                style={{
-                  flex: "1 1 200px",
-                  minWidth: "0",
-                  padding: "0.4rem 0.6rem",
-                  borderRadius: "0.375rem",
-                  border: "1px solid rgba(156, 163, 175, 0.4)",
-                  backgroundColor: "rgba(15, 23, 42, 0.8)",
-                  color: "var(--cei-text)",
-                  fontSize: "0.85rem",
-                  ...(canManageOrgSensitiveSettings ? {} : disabledFieldStyle),
-                }}
-              />
-              <button
-                type="submit"
-                className="cei-btn"
-                disabled={!canManageOrgSensitiveSettings || creatingToken}
-                style={{
-                  whiteSpace: "nowrap",
-                  opacity:
-                    !canManageOrgSensitiveSettings || creatingToken ? 0.7 : 1,
-                }}
-              >
-                {creatingToken ? "Creating..." : "Create token"}
-              </button>
-            </form>
-
-            {createdTokenSecret && (
-              <div
-                className="cei-card-subtle"
-                style={{
-                  border: "1px dashed rgba(34, 197, 94, 0.5)",
-                  padding: "0.6rem 0.75rem",
-                  borderRadius: "0.5rem",
-                  marginBottom: "0.75rem",
-                  background: "rgba(15, 23, 42, 0.7)",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "0.8rem",
-                    fontWeight: 500,
-                    marginBottom: "0.4rem",
-                  }}
-                >
-                  New integration token (shown only once)
-                </div>
-                <div
-                  style={{
-                    fontFamily: "monospace",
-                    fontSize: "0.8rem",
-                    wordBreak: "break-all",
-                    marginBottom: "0.4rem",
-                  }}
-                >
-                  {createdTokenSecret}
-                </div>
-                <div
+                <form
+                  onSubmit={handleCreateToken}
                   style={{
                     display: "flex",
-                    gap: "0.4rem",
-                    alignItems: "center",
-                    justifyContent: "space-between",
                     flexWrap: "wrap",
+                    gap: "0.5rem",
+                    marginBottom: "0.75rem",
+                    alignItems: "center",
                   }}
                 >
-                  <span
+                  <input
+                    type="text"
+                    placeholder="e.g. SCADA Plant 4"
+                    value={newTokenName}
+                    onChange={(e) => setNewTokenName(e.target.value)}
+                    disabled={!canManageOrgSensitiveSettings}
                     style={{
-                      fontSize: "0.75rem",
-                      color: "var(--cei-text-muted)",
+                      flex: "1 1 200px",
+                      minWidth: "0",
+                      padding: "0.4rem 0.6rem",
+                      borderRadius: "0.375rem",
+                      border: "1px solid rgba(156, 163, 175, 0.4)",
+                      backgroundColor: "rgba(15, 23, 42, 0.8)",
+                      color: "var(--cei-text)",
+                      fontSize: "0.85rem",
+                      ...(canManageOrgSensitiveSettings ? {} : disabledFieldStyle),
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    className="cei-btn"
+                    disabled={!canManageOrgSensitiveSettings || creatingToken}
+                    style={{
+                      whiteSpace: "nowrap",
+                      opacity:
+                        !canManageOrgSensitiveSettings || creatingToken ? 0.7 : 1,
+                    }}
+                    title={
+                      !canManageOrgSensitiveSettings
+                        ? "Owner-only. Ask your org owner to create a token."
+                        : undefined
+                    }
+                  >
+                    {creatingToken ? "Creating..." : "Create token"}
+                  </button>
+                </form>
+
+                {createdTokenSecret && (
+                  <div
+                    className="cei-card-subtle"
+                    style={{
+                      border: "1px dashed rgba(34, 197, 94, 0.5)",
+                      padding: "0.6rem 0.75rem",
+                      borderRadius: "0.5rem",
+                      marginBottom: "0.75rem",
+                      background: "rgba(15, 23, 42, 0.7)",
                     }}
                   >
-                    Store this token securely (vault, password manager). You won’t be able to see it again.
-                  </span>
-                  <button
-                    type="button"
-                    className="cei-btn"
-                    onClick={handleCopySecret}
-                    style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }}
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div
-              style={{
-                marginTop: "0.25rem",
-                borderTop: "1px solid rgba(31, 41, 55, 0.9)",
-                paddingTop: "0.6rem",
-              }}
-            >
-              {tokensLoading ? (
-                <div
-                  style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}
-                >
-                  Loading integration tokens...
-                </div>
-              ) : tokens.length === 0 ? (
-                <div
-                  style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}
-                >
-                  No integration tokens yet. Create one above to let external systems push data into CEI.
-                </div>
-              ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "0.4rem",
-                    fontSize: "0.8rem",
-                  }}
-                >
-                  {tokens.map((t) => (
                     <div
-                      key={t.id}
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: "0.75rem",
-                        padding: "0.4rem 0.3rem",
-                        borderRadius: "0.375rem",
-                        backgroundColor: "rgba(15, 23, 42, 0.7)",
+                        fontSize: "0.8rem",
+                        fontWeight: 500,
+                        marginBottom: "0.4rem",
                       }}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "0.15rem",
-                        }}
-                      >
-                        <span style={{ fontWeight: 500 }}>{t.name}</span>
-                        <span
-                          style={{
-                            fontSize: "0.75rem",
-                            color: "var(--cei-text-muted)",
-                          }}
-                        >
-                          Created: {fmtIsoOrRaw(t.created_at)}
-                          {t.last_used_at
-                            ? ` • Last used: ${fmtIsoOrRaw(t.last_used_at)}`
-                            : ""}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.4rem",
-                        }}
-                      >
-                        <span
-                          className={
-                            t.is_active ? "cei-pill-success" : "cei-pill-muted"
-                          }
-                          style={{ fontSize: "0.7rem" }}
-                        >
-                          {t.is_active ? "Active" : "Revoked"}
-                        </span>
-                        <button
-                          type="button"
-                          className="cei-btn"
-                          disabled={!t.is_active || revokingId === t.id}
-                          onClick={() => handleRevokeToken(t.id)}
-                          style={{
-                            fontSize: "0.75rem",
-                            padding: "0.25rem 0.6rem",
-                            opacity: !t.is_active || revokingId === t.id ? 0.6 : 1,
-                          }}
-                        >
-                          {revokingId === t.id ? "Revoking..." : "Revoke"}
-                        </button>
-                      </div>
+                      New integration token (shown only once)
                     </div>
-                  ))}
+                    <div
+                      style={{
+                        fontFamily: "monospace",
+                        fontSize: "0.8rem",
+                        wordBreak: "break-all",
+                        marginBottom: "0.4rem",
+                      }}
+                    >
+                      {createdTokenSecret}
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "0.4rem",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.75rem",
+                          color: "var(--cei-text-muted)",
+                        }}
+                      >
+                        Store this token securely (vault, password manager). You won’t be able to see it again.
+                      </span>
+                      <button
+                        type="button"
+                        className="cei-btn"
+                        onClick={handleCopySecret}
+                        style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }}
+                        title="Copy token to clipboard"
+                      >
+                        {copiedTokenSecret ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    marginTop: "0.25rem",
+                    borderTop: "1px solid rgba(31, 41, 55, 0.9)",
+                    paddingTop: "0.6rem",
+                  }}
+                >
+                  {tokensLoading ? (
+                    <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+                      Loading integration tokens...
+                    </div>
+                  ) : tokens.length === 0 ? (
+                    <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+                      No integration tokens yet. Create one above to let external systems push data into CEI.
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.4rem",
+                        fontSize: "0.8rem",
+                      }}
+                    >
+                      {tokens.map((t) => (
+                        <div
+                          key={t.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "0.75rem",
+                            padding: "0.4rem 0.3rem",
+                            borderRadius: "0.375rem",
+                            backgroundColor: "rgba(15, 23, 42, 0.7)",
+                          }}
+                        >
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+                            <span style={{ fontWeight: 500 }}>{t.name}</span>
+                            <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
+                              Created: {fmtIsoOrRaw(t.created_at)}
+                              {t.last_used_at ? ` • Last used: ${fmtIsoOrRaw(t.last_used_at)}` : ""}
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            <span
+                              className={t.is_active ? "cei-pill-success" : "cei-pill-muted"}
+                              style={{ fontSize: "0.7rem" }}
+                            >
+                              {t.is_active ? "Active" : "Revoked"}
+                            </span>
+                            <button
+                              type="button"
+                              className="cei-btn"
+                              disabled={!t.is_active || revokingId === t.id}
+                              onClick={() => handleRevokeToken(t.id)}
+                              style={{
+                                fontSize: "0.75rem",
+                                padding: "0.25rem 0.6rem",
+                                opacity: !t.is_active || revokingId === t.id ? 0.6 : 1,
+                              }}
+                              title={
+                                !t.is_active
+                                  ? "Token already revoked."
+                                  : "Revoke this token"
+                              }
+                            >
+                              {revokingId === t.id ? "Revoking..." : "Revoke"}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </>
+            )}
           </div>
         </section>
       )}
