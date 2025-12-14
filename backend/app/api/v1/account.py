@@ -12,9 +12,10 @@ from app.db.session import get_db
 from app.api.v1.auth import (
     get_current_user,
     read_me,
-    AccountMeOut,  # existing schema from auth.py
+    AccountMeOut,
 )
-from app.models import User, Organization, SiteEvent
+from app.api.deps import require_owner, create_org_audit_event
+from app.models import User, Organization
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -30,60 +31,7 @@ class OrgSettingsUpdate(BaseModel):
     gas_price_per_kwh: Optional[float] = None
     currency_code: Optional[str] = None
 
-    model_config = {
-        "extra": "forbid",
-    }
-
-
-def _require_owner(current_user: User) -> None:
-    """
-    Owner-only guard for org-level sensitive settings.
-
-    - Allows superusers (legacy) to proceed.
-    - Otherwise requires current_user.role == "owner".
-    """
-    is_super = bool(getattr(current_user, "is_superuser", 0))
-    if is_super:
-        return
-
-    role = (getattr(current_user, "role", None) or "").strip().lower()
-    if role != "owner":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "FORBIDDEN_OWNER_ONLY",
-                "message": "Only the organization owner can update organization settings.",
-            },
-        )
-
-
-def _create_org_audit_event(
-    db: Session,
-    *,
-    org_id: int,
-    user_id: Optional[int],
-    title: str,
-    description: Optional[str],
-) -> None:
-    """
-    Write an audit trail entry using SiteEvent (site_id=None) for org-level actions.
-    Best-effort: audit failures should not block the main operation.
-    """
-    try:
-        ev = SiteEvent(
-            organization_id=org_id,
-            site_id=None,
-            type="org_event",
-            related_alert_id=None,
-            title=title,
-            body=description,
-            created_by_user_id=user_id,
-        )
-        db.add(ev)
-        db.commit()
-    except Exception:
-        # Don't block the request if audit logging fails.
-        db.rollback()
+    model_config = {"extra": "forbid"}
 
 
 @router.get("/me", response_model=AccountMeOut)
@@ -107,11 +55,11 @@ def update_org_settings(
     """
     Update org-level energy & tariff settings for the current user's org.
 
-    This is PATCH-style:
-      - Only the fields present in the request body are updated.
+    PATCH-style:
+      - Only provided fields are updated.
       - Others are left as-is.
 
-    Owner-only. Returns a fresh AccountMeOut payload so the frontend can refresh its view.
+    Owner-only. Returns a fresh AccountMeOut payload so the frontend can refresh.
     """
     org_id = getattr(current_user, "organization_id", None)
     if not org_id:
@@ -120,7 +68,7 @@ def update_org_settings(
             detail="User is not associated with an organization.",
         )
 
-    _require_owner(current_user)
+    require_owner(current_user, message="Only the organization owner can update organization settings.")
 
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if not org:
@@ -134,7 +82,7 @@ def update_org_settings(
         # No-op PATCH. Still return a fresh snapshot.
         return read_me(db=db, current_user=current_user)
 
-    # Snapshot old values for audit trail (only for fields being updated)
+    # Snapshot old values (only for fields being updated)
     before: Dict[str, Any] = {k: getattr(org, k, None) for k in data.keys()}
 
     # Apply updates
@@ -145,7 +93,7 @@ def update_org_settings(
     db.commit()
     db.refresh(org)
 
-    # Audit trail: who changed what, when (org-level event)
+    # Audit trail: who changed what, when
     after: Dict[str, Any] = {k: getattr(org, k, None) for k in data.keys()}
     changes = []
     for k in data.keys():
@@ -153,7 +101,7 @@ def update_org_settings(
             changes.append(f"{k}: {before.get(k)} -> {after.get(k)}")
 
     if changes:
-        _create_org_audit_event(
+        create_org_audit_event(
             db,
             org_id=org_id,
             user_id=getattr(current_user, "id", None),
@@ -161,7 +109,6 @@ def update_org_settings(
             description="; ".join(changes),
         )
 
-    # Return a fresh account snapshot (same shape as /account/me)
     return read_me(db=db, current_user=current_user)
 
 
@@ -179,7 +126,7 @@ def delete_account_me(
 
     # Best-effort audit (before deleting user)
     if org_id:
-        _create_org_audit_event(
+        create_org_audit_event(
             db,
             org_id=org_id,
             user_id=getattr(current_user, "id", None),
@@ -193,11 +140,7 @@ def delete_account_me(
 
     # If this was the last user in the org, delete the org as well
     if org_id:
-        remaining = (
-            db.query(User)
-            .filter(User.organization_id == org_id)
-            .count()
-        )
+        remaining = db.query(User).filter(User.organization_id == org_id).count()
         if remaining == 0:
             org = db.query(Organization).filter(Organization.id == org_id).first()
             if org:

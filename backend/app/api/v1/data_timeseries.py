@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.v1.auth import get_current_user, get_org_context, OrgContext
+from app.core.security import get_current_user, get_org_context, OrgContext
 from app.db.session import get_db
 from app.models import TimeseriesRecord
 from app.api import deps  # org-scoping helpers

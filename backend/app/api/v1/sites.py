@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.api.v1.auth import get_current_user
+from app.core.security import get_current_user
 from app.models import Site, User, TimeseriesRecord
 from app.db.models import SiteEvent, AlertEvent
 

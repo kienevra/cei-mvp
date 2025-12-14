@@ -29,6 +29,7 @@ from app.models import (
     AlertEvent,
     SiteEvent,
     IntegrationToken,
+    OrgInvite,
 )
 
 __all__ = [
@@ -46,4 +47,5 @@ __all__ = [
     "AlertEvent",
     "SiteEvent",
     "IntegrationToken",
+    "OrgInvite",
 ]

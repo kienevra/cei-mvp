@@ -1,5 +1,5 @@
 // frontend/src/pages/Login.tsx
-import React, { useEffect, useState, FormEvent } from "react";
+import React, { useEffect, useMemo, useState, FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import useAuth from "../hooks/useAuth";
 import ErrorBanner from "../components/ErrorBanner";
@@ -7,10 +7,26 @@ import api from "../services/api";
 
 type AuthMode = "login" | "signup";
 
+const INVITE_PARAM_KEYS = ["invite", "invite_token", "token"];
+
+function pickInviteToken(search: string): string | null {
+  const params = new URLSearchParams(search);
+  for (const k of INVITE_PARAM_KEYS) {
+    const v = params.get(k);
+    if (v && v.trim()) return v.trim();
+  }
+  return null;
+}
+
 const Login: React.FC = () => {
   const { login, isAuthenticated } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+
+  const inviteToken = useMemo(
+    () => pickInviteToken(location.search),
+    [location.search]
+  );
 
   const [mode, setMode] = useState<AuthMode>("login");
 
@@ -35,11 +51,22 @@ const Login: React.FC = () => {
     const params = new URLSearchParams(location.search);
     const reason = params.get("reason");
     if (reason === "session_expired") {
-      setNotice("Your session expired. Please log in again to continue.");
+      setNotice("Your session expired. Please sign in again.");
     } else {
       setNotice(null);
     }
   }, [location.search]);
+
+  // If user lands with an invite token, default to signup and hide org-name creation.
+  useEffect(() => {
+    if (inviteToken) {
+      setMode("signup");
+      setOrganizationName(""); // invite flow joins an existing org
+      setNotice("You’re joining an organization via invite. Create your account to continue.");
+    }
+    // NOTE: do not include `mode` here; we intentionally force signup when invite exists.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inviteToken]);
 
   function toErrorString(err: any): string {
     const backendDetail =
@@ -49,7 +76,6 @@ const Login: React.FC = () => {
 
     if (typeof backendDetail === "string") return backendDetail;
 
-    // If backend returns an object (e.g. {code,message}), don't crash React
     if (backendDetail && typeof backendDetail === "object") {
       const msg =
         (backendDetail.message && String(backendDetail.message)) ||
@@ -88,17 +114,41 @@ const Login: React.FC = () => {
           throw new Error("Passwords do not match.");
         }
 
-        // 1) Create the user account via /auth/signup
-        // organization_name tells backend to create a new org (or reuse if it matches —
-        // we’ll harden that on the backend next to avoid accidental org collisions).
-        await api.post("/auth/signup", {
-          email,
-          password,
-          organization_name: organizationName.trim() || undefined,
-        });
+        if (inviteToken) {
+          // ---------- INVITE JOIN FLOW ----------
+          // This assumes backend implements:
+          //   POST /api/v1/auth/invites/accept  { token, email, password }
+          //
+          // If the endpoint isn't deployed yet, we fail with a clear error.
+          try {
+            await api.post("/auth/invites/accept", {
+              token: inviteToken,
+              email,
+              password,
+            });
+          } catch (err: any) {
+            const status = err?.response?.status;
+            if (status === 404) {
+              throw new Error(
+                "Invite join isn’t live on this backend yet (missing /auth/invites/accept). Deploy the invite endpoints, then retry."
+              );
+            }
+            throw err;
+          }
 
-        // 2) Login normally to wire Auth context (token storage, redirects)
-        await login({ username: email, password });
+          // Login normally to wire Auth context (token storage, redirects)
+          await login({ username: email, password });
+        } else {
+          // ---------- SELF-SERVE ORG CREATION FLOW ----------
+          await api.post("/auth/signup", {
+            email,
+            password,
+            organization_name: organizationName.trim() || undefined,
+          });
+
+          // Login normally to wire Auth context (token storage, redirects)
+          await login({ username: email, password });
+        }
       }
     } catch (err: any) {
       setError(toErrorString(err));
@@ -108,13 +158,19 @@ const Login: React.FC = () => {
   };
 
   const toggleMode = (nextMode: AuthMode) => {
+    // When an invite is present, we don't let the user switch to "login"
+    // because they likely don't have an account yet.
+    if (inviteToken && nextMode === "login") return;
+
     if (nextMode === mode) return;
     setMode(nextMode);
     setError(null);
-    setNotice(null);
+
+    // Preserve invite notice if invite exists; otherwise clear.
+    if (!inviteToken) setNotice(null);
+
     setPassword("");
     setPasswordConfirm("");
-    // Keep email; reset org name on switch (signup-only)
     setOrganizationName("");
   };
 
@@ -154,6 +210,24 @@ const Login: React.FC = () => {
           </div>
         </div>
 
+        {/* Invite badge */}
+        {inviteToken && (
+          <div
+            style={{
+              marginBottom: "0.75rem",
+              fontSize: "0.8rem",
+              padding: "0.5rem 0.7rem",
+              borderRadius: "0.6rem",
+              border: "1px solid rgba(56, 189, 248, 0.4)",
+              background: "rgba(15, 23, 42, 0.8)",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            <strong style={{ color: "var(--cei-text)" }}>Invite detected.</strong>{" "}
+            You’ll join an existing organization after account creation.
+          </div>
+        )}
+
         {/* Mode toggle */}
         <div
           style={{
@@ -162,12 +236,14 @@ const Login: React.FC = () => {
             borderRadius: "999px",
             background: "rgba(15, 23, 42, 0.7)",
             padding: "0.15rem",
+            opacity: inviteToken ? 0.9 : 1,
           }}
         >
           <button
             type="button"
             onClick={() => toggleMode("login")}
             className="cei-btn"
+            disabled={!!inviteToken}
             style={{
               flex: 1,
               borderRadius: "999px",
@@ -180,8 +256,9 @@ const Login: React.FC = () => {
                   : "transparent",
               color: mode === "login" ? "#0f172a" : "var(--cei-text-muted)",
               fontWeight: mode === "login" ? 600 : 400,
-              cursor: "pointer",
+              cursor: inviteToken ? "not-allowed" : "pointer",
             }}
+            title={inviteToken ? "Invite flow requires account creation." : undefined}
           >
             Sign in
           </button>
@@ -208,8 +285,8 @@ const Login: React.FC = () => {
           </button>
         </div>
 
-        {/* Session notice */}
-        {notice && mode === "login" && (
+        {/* Session / invite notice */}
+        {notice && (
           <div
             style={{
               marginBottom: "0.75rem",
@@ -234,7 +311,7 @@ const Login: React.FC = () => {
 
         {/* Auth form */}
         <form className="auth-form" onSubmit={handleSubmit}>
-          {isSignup && (
+          {isSignup && !inviteToken && (
             <div>
               <label htmlFor="organizationName">Organization name</label>
               <input
@@ -253,7 +330,7 @@ const Login: React.FC = () => {
                   marginTop: "0.25rem",
                 }}
               >
-                This creates your org. (We’ll add “join via invite” next.)
+                This creates your org. Use an invite link to join an existing org.
               </div>
             </div>
           )}
@@ -322,10 +399,14 @@ const Login: React.FC = () => {
           >
             {submitting
               ? isSignup
-                ? "Creating your account…"
+                ? inviteToken
+                  ? "Joining via invite…"
+                  : "Creating your account…"
                 : "Signing you in…"
               : isSignup
-              ? "Create account"
+              ? inviteToken
+                ? "Join organization"
+                : "Create account"
               : "Sign in"}
           </button>
         </form>

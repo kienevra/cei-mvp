@@ -1,96 +1,80 @@
-# backend/app/api/v1/auth.py
-from datetime import datetime, timedelta
-import logging
-from typing import Optional, List
-from dataclasses import dataclass
+from __future__ import annotations
+
 import hashlib
+import logging
 import secrets
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Optional, List
 
 from fastapi import (
     APIRouter,
+    Cookie,
     Depends,
     HTTPException,
-    status,
     Response,
-    Cookie,
+    status,
 )
-from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
-from app.models import User, Organization, SiteEvent  # <- NOTE: + SiteEvent for audit trail
-from app.db.models import IntegrationToken  # <- integration tokens live here
-from app.core.rate_limit import login_rate_limit, refresh_rate_limit
 from app.core.config import settings
+from app.core.rate_limit import login_rate_limit, refresh_rate_limit
+from app.core.security import get_current_user, get_org_context  # ✅ moved
+from app.db.models import IntegrationToken  # integration tokens live here (shim)
+from app.db.session import get_db
+from app.models import Organization, OrgInvite, User
+from app.api.deps import require_owner, create_org_audit_event
 
 logger = logging.getLogger("cei")
 
 # === JWT / security settings ===
-# Centralized via app.core.config.Settings
 SECRET_KEY = settings.jwt_secret
-ALGORITHM = settings.jwt_algorithm  # now driven by config
+ALGORITHM = settings.jwt_algorithm
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 REFRESH_TOKEN_EXPIRE_DAYS = settings.refresh_token_expire_days
 
 # Hard guard: never allow the default secret in production-like envs
 if settings.is_prod and SECRET_KEY in {"supersecret", "changeme", "secret", "", None}:
-    # Fail fast at import time so you don't accidentally boot prod with a toy key.
     raise RuntimeError(
         "Insecure JWT_SECRET configured in production environment. "
         "Set a strong random secret via the JWT_SECRET env var."
     )
 
-# Use Argon2 for password hashing (good long-term choice)
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
-# OAuth2 token endpoint (full path will be /api/v1/auth/login)
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-
-# Router mounted at /auth but included under /api/v1 in main.py (-> /api/v1/auth/*)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 REFRESH_COOKIE_NAME = "cei_refresh_token"
-INTEGRATION_TOKEN_PREFIX = "cei_int_"  # human-visible prefix for integration tokens
+INTEGRATION_TOKEN_PREFIX = "cei_int_"
+INVITE_TOKEN_PREFIX = "cei_inv_"  # recognizable prefix for org invite tokens
 
 
 # === Schemas ===
-
 
 class UserCreate(BaseModel):
     email: str
     password: str
     full_name: Optional[str] = None
-    # Support both canonical `organization_id` and the legacy `org_id`.
+
+    # Support both canonical `organization_id` and legacy `org_id`.
     organization_id: Optional[int] = None
     org_id: Optional[int] = None
-    # Optional organization name for self-serve signup
     organization_name: Optional[str] = None
 
-    # ---- New cost engine config at signup (org-level) ----
-    # e.g. "electricity", "gas", "electricity,gas"
+    # Optional org-level cost config at signup
     primary_energy_sources: Optional[str] = None
-    # Flat/blended tariffs per kWh (org-wide). Gas is kWh-equivalent if used.
     electricity_price_per_kwh: Optional[float] = None
     gas_price_per_kwh: Optional[float] = None
-    # Currency code, default behaviour is effectively EUR if omitted
     currency_code: Optional[str] = None
 
 
 class Token(BaseModel):
     access_token: str
     token_type: str
-
-
-class UserOut(BaseModel):
-    id: int
-    email: str
-    organization_id: Optional[int]
-
-    class Config:
-        orm_mode = True
 
 
 class OrgSummaryOut(BaseModel):
@@ -102,7 +86,6 @@ class OrgSummaryOut(BaseModel):
     enable_reports: bool = True
     subscription_status: Optional[str] = None
 
-    # ---- Cost engine config surfaced to frontend ----
     primary_energy_sources: Optional[str] = None
     electricity_price_per_kwh: Optional[float] = None
     gas_price_per_kwh: Optional[float] = None
@@ -120,17 +103,14 @@ class AccountMeOut(BaseModel):
     full_name: Optional[str] = None
     role: Optional[str] = None
 
-    # Duplicated for front-end convenience
     org: Optional[OrgSummaryOut] = None
     organization: Optional[OrgSummaryOut] = None
 
-    # Plan-level flags mirrored at the top level
     subscription_plan_key: Optional[str] = None
     enable_alerts: bool = True
     enable_reports: bool = True
-    subscription_status: Optional[str] = None  # <- top-level mirror
+    subscription_status: Optional[str] = None
 
-    # ---- Cost engine (top-level mirrors for convenience) ----
     primary_energy_sources: Optional[str] = None
     electricity_price_per_kwh: Optional[float] = None
     gas_price_per_kwh: Optional[float] = None
@@ -141,16 +121,10 @@ class AccountMeOut(BaseModel):
 
 
 class IntegrationTokenCreate(BaseModel):
-    """
-    Payload to create a new integration token for the caller's org.
-    """
     name: str
 
 
 class IntegrationTokenOut(BaseModel):
-    """
-    Metadata for listing integration tokens (no secret).
-    """
     id: int
     name: str
     is_active: bool
@@ -162,32 +136,55 @@ class IntegrationTokenOut(BaseModel):
 
 
 class IntegrationTokenWithSecret(IntegrationTokenOut):
-    """
-    Response when creating a token: includes the one-time raw token.
-    """
     token: str
 
 
-@dataclass
-class OrgContext:
-    """
-    Represents an org-scoped principal resolved from a Bearer token.
+# === Invites ===
 
-    - auth_type = "user"        -> interactive user JWT
-    - auth_type = "integration" -> long-lived integration token
+class OrgInviteCreate(BaseModel):
     """
-    organization_id: Optional[int]
-    user: Optional[User] = None
-    integration_token_id: Optional[int] = None
-    auth_type: str = "user"
+    Owner-minted org invite.
+    - email optional (restrict to one address)
+    - role defaults to "member"
+    - expires_in_days optional
+    """
+    email: Optional[str] = None
+    role: str = Field(default="member")
+    expires_in_days: Optional[int] = Field(default=14, ge=1, le=90)
+
+
+class OrgInviteOut(BaseModel):
+    id: int
+    organization_id: int
+    email: Optional[str] = None
+    role: str
+    is_active: bool
+    expires_at: Optional[datetime] = None
+    created_by_user_id: Optional[int] = None
+    used_by_user_id: Optional[int] = None
+    used_at: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class OrgInviteWithSecret(OrgInviteOut):
+    token: str
+    invite_link: Optional[str] = None  # best-effort (frontend_url if configured)
+
+
+class AcceptInviteRequest(BaseModel):
+    token: str
+    email: str
+    password: str
+    full_name: Optional[str] = None
 
 
 # === Token helpers ===
 
-
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
-    # Mark token type for extra safety
     to_encode.setdefault("type", "access")
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
@@ -203,10 +200,6 @@ def create_refresh_token(data: dict) -> str:
 
 
 def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
-    """
-    Set HttpOnly refresh token cookie.
-    - secure=True automatically in production-like environments.
-    """
     max_age = REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
     secure_flag = settings.is_prod
     response.set_cookie(
@@ -224,68 +217,16 @@ def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(REFRESH_COOKIE_NAME, path="/")
 
 
-def _hash_integration_token(raw: str) -> str:
-    """
-    Deterministic hash for integration tokens. Only the hash is stored in DB.
-    """
+def _hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _generate_integration_token_string() -> str:
-    """
-    Generate a new raw integration token string with a recognizable prefix.
-    """
     return INTEGRATION_TOKEN_PREFIX + secrets.token_urlsafe(32)
 
 
-def _require_owner(current_user: User) -> None:
-    """
-    Owner-only guard for sensitive org operations.
-
-    - Allows superusers (legacy) to proceed.
-    - Otherwise requires current_user.role == "owner".
-    """
-    is_super = bool(getattr(current_user, "is_superuser", 0))
-    if is_super:
-        return
-
-    role = (getattr(current_user, "role", None) or "").strip().lower()
-    if role != "owner":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "FORBIDDEN_OWNER_ONLY",
-                "message": "Only the organization owner can manage integration tokens.",
-            },
-        )
-
-
-def _create_org_audit_event(
-    db: Session,
-    *,
-    org_id: int,
-    user_id: Optional[int],
-    title: str,
-    description: Optional[str],
-) -> None:
-    """
-    Write an audit trail entry using SiteEvent (site_id=None) for org-level actions.
-    Best-effort: audit failures must not block the main operation.
-    """
-    try:
-        ev = SiteEvent(
-            organization_id=org_id,
-            site_id=None,
-            type="org_event",
-            related_alert_id=None,
-            title=title,
-            body=description,
-            created_by_user_id=user_id,
-        )
-        db.add(ev)
-        db.commit()
-    except Exception:
-        db.rollback()
+def _generate_invite_token_string() -> str:
+    return INVITE_TOKEN_PREFIX + secrets.token_urlsafe(32)
 
 
 def _normalize_currency_code(code: Optional[str]) -> Optional[str]:
@@ -295,68 +236,70 @@ def _normalize_currency_code(code: Optional[str]) -> Optional[str]:
     return c or None
 
 
-# === Routes ===
+def _best_effort_frontend_url() -> Optional[str]:
+    """
+    Best-effort frontend URL for invite links.
+    If you add FRONTEND_URL to Settings later, plug it in here.
+    """
+    for attr in ("frontend_url", "FRONTEND_URL", "ui_url", "web_url"):
+        try:
+            v = getattr(settings, attr, None)
+            if v:
+                return str(v).rstrip("/")
+        except Exception:
+            pass
+    return None
 
+
+def _org_fk_field_name_for_invites() -> str:
+    """
+    Keep compatibility with whichever attribute your SQLAlchemy model uses:
+    - org_id
+    - organization_id
+    """
+    if hasattr(OrgInvite, "organization_id"):
+        return "organization_id"
+    return "org_id"
+
+
+# === Routes ===
 
 @router.post(
     "/signup",
     response_model=Token,
-    # Re-use the login limiter for signup as well (low-volume path)
     dependencies=[Depends(login_rate_limit)],
 )
-def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
+def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) -> Token:
     """
-    Signup endpoint for self-serve onboarding.
+    Self-serve signup (no invites).
+    Joining an existing org should be done via invite accept flow.
+    """
+    email_norm = (user.email or "").strip().lower()
+    if not email_norm:
+        raise HTTPException(status_code=400, detail="Email is required")
 
-    - If organization_id/org_id is provided, we attach the user to that org (and 400 if it doesn't exist).
-    - Otherwise we CREATE a NEW Organization using organization_name or a name derived from email.
-      IMPORTANT: We DO NOT "reuse org by name" anymore — that's ambiguous and unsafe.
-      Joining an existing org should be done via explicit org_id (or, later, invite codes).
-    - NEW: first user of a newly created org becomes role="owner".
-    - If attaching to an existing org and it currently has no owner, we also promote the first user to owner
-      (helps dev/demo DB resets; safe in a brand-new org).
-    - NEW: user can optionally seed org-level energy cost config for the cost engine.
-    """
-    existing_user = db.query(User).filter(User.email == user.email).first()
+    existing_user = db.query(User).filter(User.email == email_norm).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Resolve org id
-    # Prefer explicit organization_id, then legacy org_id.
-    organization_id = (
-        user.organization_id if user.organization_id is not None else user.org_id
-    )
+    organization_id = user.organization_id if user.organization_id is not None else user.org_id
     if user.org_id is not None and user.organization_id is None:
-        logger.warning(
-            "Received deprecated payload field `org_id`; "
-            "prefer `organization_id` (will be removed in future)."
-        )
+        logger.warning("Received deprecated `org_id`; prefer `organization_id`.")
 
     org_obj: Optional[Organization] = None
-    created_new_org: bool = False
+    created_new_org = False
 
-    # Normalize inputs
-    primary_energy_sources = (
-        str(user.primary_energy_sources).strip()
-        if user.primary_energy_sources is not None
-        else None
-    )
+    primary_energy_sources = str(user.primary_energy_sources).strip() if user.primary_energy_sources else None
     currency_code = _normalize_currency_code(user.currency_code)
 
-    if organization_id is not None:
-        # Attach to an existing org; error if not found.
-        org_obj = (
-            db.query(Organization)
-            .filter(Organization.id == organization_id)
-            .first()
-        )
-        if org_obj is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Organization with id={organization_id} not found",
-            )
+    owner_exists = True
 
-        # Best-effort: initialize/update cost engine config from signup payload
+    if organization_id is not None:
+        org_obj = db.query(Organization).filter(Organization.id == organization_id).first()
+        if org_obj is None:
+            raise HTTPException(status_code=400, detail=f"Organization with id={organization_id} not found")
+
+        # Best-effort cost engine config
         try:
             if primary_energy_sources:
                 org_obj.primary_energy_sources = primary_energy_sources
@@ -378,70 +321,48 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
         except Exception:
             pass
 
-        # Determine if this org has an owner already (best-effort)
         try:
             owner_exists = (
                 db.query(User)
-                .filter(
-                    User.organization_id == org_obj.id,
-                    User.role == "owner",
-                )
+                .filter(User.organization_id == org_obj.id, User.role == "owner")
                 .first()
                 is not None
             )
         except Exception:
-            owner_exists = True  # if schema doesn't support role, don't try to be clever
+            owner_exists = True
 
     else:
-        # Self-serve path: CREATE a new org based on organization_name or email
         if user.organization_name and user.organization_name.strip():
             org_name = user.organization_name.strip()
         else:
-            # Fallback: derive something sensible from email
-            email_prefix = user.email.split("@")[0] if "@" in user.email else user.email
+            email_prefix = email_norm.split("@")[0] if "@" in email_norm else email_norm
             org_name = f"{email_prefix} Org".strip() or "New Organization"
 
-        # SAFETY: do not silently reuse org by name
-        existing_org_same_name = (
-            db.query(Organization)
-            .filter(Organization.name == org_name)
-            .first()
-        )
+        existing_org_same_name = db.query(Organization).filter(Organization.name == org_name).first()
         if existing_org_same_name is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "ORG_NAME_TAKEN",
-                    "message": "An organization with that name already exists. Choose a different organization name, or join using an invite/org id.",
-                },
+                detail={"code": "ORG_NAME_TAKEN", "message": "Organization name already exists. Use an invite to join."},
             )
 
-        org_obj = Organization(name=org_name)  # only safe ctor arg
+        org_obj = Organization(name=org_name)
         created_new_org = True
+        owner_exists = False
 
-        # Best-effort plan defaults, guarded to not break older schemas.
-        try:
-            org_obj.plan_key = "cei-starter"
-        except Exception:
-            pass
-        try:
-            org_obj.subscription_plan_key = "cei-starter"
-        except Exception:
-            pass
-        try:
-            org_obj.enable_alerts = True
-        except Exception:
-            pass
-        try:
-            org_obj.enable_reports = True
-        except Exception:
-            pass
-        try:
-            org_obj.subscription_status = "active"
-        except Exception:
-            pass
+        # Best-effort plan defaults
+        for k, v in (
+            ("plan_key", "cei-starter"),
+            ("subscription_plan_key", "cei-starter"),
+            ("enable_alerts", True),
+            ("enable_reports", True),
+            ("subscription_status", "active"),
+        ):
+            try:
+                setattr(org_obj, k, v)
+            except Exception:
+                pass
 
-        # Seed cost engine config if provided
+        # Seed cost engine config
         try:
             if primary_energy_sources:
                 org_obj.primary_energy_sources = primary_energy_sources
@@ -464,52 +385,39 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
             pass
 
         db.add(org_obj)
-        db.flush()  # ensure org_obj.id is available
+        db.flush()
         organization_id = org_obj.id
-        owner_exists = False  # brand new org
 
     # Hash password
     try:
-        password_str = str(user.password)
-        hashed_password = pwd_context.hash(password_str)
+        hashed_password = pwd_context.hash(str(user.password))
     except Exception as e:
         logger.exception("Password hashing failed")
         raise HTTPException(status_code=400, detail=f"Password hashing failed: {e}")
 
-    db_user = User(
-        email=user.email,
-        hashed_password=hashed_password,
-        organization_id=organization_id,
-    )
+    db_user = User(email=email_norm, hashed_password=hashed_password, organization_id=organization_id)
 
-    # Best-effort: populate full_name if the column exists
     if user.full_name:
         try:
             db_user.full_name = user.full_name
         except Exception:
-            # Column might not exist in older schemas; ignore silently.
             pass
 
-    # === ROLE ASSIGNMENT (Step 4) ===
-    # - If a new org was created, first user is the owner.
-    # - If attaching to an org with no owner (fresh DB/reset), make this user the owner.
-    # - Otherwise default to member.
+    # Role assignment
     try:
         if created_new_org or (organization_id is not None and owner_exists is False):
             db_user.role = "owner"
         else:
             db_user.role = "member"
     except Exception:
-        # role column may not exist in older schemas; ignore silently
         pass
 
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
 
-    # Audit trail for org creation (best-effort)
     if created_new_org and organization_id is not None:
-        _create_org_audit_event(
+        create_org_audit_event(
             db,
             org_id=organization_id,
             user_id=getattr(db_user, "id", None),
@@ -520,52 +428,40 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)):
     access = create_access_token({"sub": db_user.email})
     refresh = create_refresh_token({"sub": db_user.email})
     _set_refresh_cookie(response, refresh)
-
-    return {"access_token": access, "token_type": "bearer"}
+    return Token(access_token=access, token_type="bearer")
 
 
 @router.post(
     "/login",
     response_model=Token,
-    # Dedicated login limiter (per IP) from app.core.rate_limit
     dependencies=[Depends(login_rate_limit)],
 )
 def login(
     response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
-):
-    """
-    Login expects form-encoded fields: username and password.
-    """
-    user = db.query(User).filter(User.email == form_data.username).first()
+) -> Token:
+    email_norm = (form_data.username or "").strip().lower()
+    user = db.query(User).filter(User.email == email_norm).first()
     if not user or not pwd_context.verify(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     access = create_access_token({"sub": user.email})
     refresh = create_refresh_token({"sub": user.email})
     _set_refresh_cookie(response, refresh)
-
-    return {"access_token": access, "token_type": "bearer"}
+    return Token(access_token=access, token_type="bearer")
 
 
 @router.post(
     "/refresh",
     response_model=Token,
-    # Protect refresh endpoint from abuse
     dependencies=[Depends(refresh_rate_limit)],
 )
 def refresh_access_token(
     response: Response,
     refresh_token: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE_NAME),
     db: Session = Depends(get_db),
-):
-    """
-    Issue a new short-lived access token based on the HttpOnly refresh cookie.
-    """
+) -> Token:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not refresh credentials",
@@ -577,8 +473,7 @@ def refresh_access_token(
 
     try:
         payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
-        token_type = payload.get("type")
-        if token_type != "refresh":
+        if payload.get("type") != "refresh":
             raise credentials_exception
         email: Optional[str] = payload.get("sub")
         if email is None:
@@ -590,146 +485,33 @@ def refresh_access_token(
     if user is None:
         raise credentials_exception
 
-    # Rotate refresh token
     new_access = create_access_token({"sub": user.email})
     new_refresh = create_refresh_token({"sub": user.email})
     _set_refresh_cookie(response, new_refresh)
-
-    return {"access_token": new_access, "token_type": "bearer"}
+    return Token(access_token=new_access, token_type="bearer")
 
 
 @router.post("/logout")
-def logout_api(response: Response, user=Depends(lambda: None)):
-    """
-    Simple logout endpoint to clear the refresh cookie.
-    Frontend should ALSO clear the access token from localStorage.
-    """
+def logout_api(response: Response) -> dict:
     _clear_refresh_cookie(response)
     return {"detail": "Logged out."}
-
-
-def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
-):
-    """
-    Resolve the current user from the Bearer access token.
-    """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        token_type = payload.get("type", "access")
-        if token_type != "access":
-            raise credentials_exception
-        email: Optional[str] = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-
-    user = db.query(User).filter(User.email == email).first()
-    if user is None:
-        raise credentials_exception
-
-    return user
-
-
-def get_org_context(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
-) -> OrgContext:
-    """
-    Resolve an org-scoped principal from a Bearer token.
-
-    - First try to treat it as a normal access JWT (user).
-    - If that fails, treat it as an integration token and resolve organization_id from IntegrationToken.
-    """
-    # 1) Try as access JWT (user)
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        token_type = payload.get("type", "access")
-        if token_type == "access":
-            email: Optional[str] = payload.get("sub")
-            if email:
-                user = db.query(User).filter(User.email == email).first()
-                if user:
-                    return OrgContext(
-                        organization_id=user.organization_id,
-                        user=user,
-                        integration_token_id=None,
-                        auth_type="user",
-                    )
-    except JWTError:
-        # fall through to integration token path
-        pass
-
-    # 2) Try as integration token (opaque string)
-    token_hash = _hash_integration_token(token)
-    integ = (
-        db.query(IntegrationToken)
-        .filter(
-            IntegrationToken.token_hash == token_hash,
-            IntegrationToken.is_active == True,  # noqa: E712
-        )
-        .first()
-    )
-    if not integ:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # Best-effort last_used_at update; don't let failures break the request
-    try:
-        integ.last_used_at = datetime.utcnow()
-        db.add(integ)
-        db.commit()
-    except Exception:
-        db.rollback()
-
-    return OrgContext(
-        organization_id=integ.organization_id,
-        user=None,
-        integration_token_id=integ.id,
-        auth_type="integration",
-    )
 
 
 @router.get("/me", response_model=AccountMeOut)
 def read_me(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
-    """
-    Rich account endpoint used by the front-end to drive plan gating.
-    Returns:
-      - basic user info
-      - attached organization summary (plan_key, flags)
-      - top-level plan flags (enable_alerts, enable_reports)
-      - NEW: org-level cost engine config (tariffs, primary_energy_sources, currency)
-    """
+) -> AccountMeOut:
     org: Optional[Organization] = None
     if current_user.organization_id is not None:
-        org = (
-            db.query(Organization)
-            .filter(Organization.id == current_user.organization_id)
-            .first()
-        )
+        org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
 
-    # Derive plan + flags with sane defaults
     plan_key: Optional[str] = None
     subscription_plan_key: Optional[str] = None
     enable_alerts: bool = True
     enable_reports: bool = True
     subscription_status: Optional[str] = None
 
-    # Cost engine fields (org-level)
     primary_energy_sources: Optional[str] = None
     electricity_price_per_kwh: Optional[float] = None
     gas_price_per_kwh: Optional[float] = None
@@ -742,33 +524,23 @@ def read_me(
         raw_enable_alerts = getattr(org, "enable_alerts", None)
         raw_enable_reports = getattr(org, "enable_reports", None)
 
-        # If DB flags are None, infer from plan (starter/growth = on)
         plan_for_flags = subscription_plan_key or plan_key or "cei-starter"
         default_enabled = plan_for_flags in ("cei-starter", "cei-growth")
 
-        enable_alerts = (
-            bool(raw_enable_alerts) if raw_enable_alerts is not None else default_enabled
-        )
-        enable_reports = (
-            bool(raw_enable_reports)
-            if raw_enable_reports is not None
-            else default_enabled
-        )
+        enable_alerts = bool(raw_enable_alerts) if raw_enable_alerts is not None else default_enabled
+        enable_reports = bool(raw_enable_reports) if raw_enable_reports is not None else default_enabled
 
         subscription_status = getattr(org, "subscription_status", None)
 
-        # Cost engine config from org
         primary_energy_sources = getattr(org, "primary_energy_sources", None)
         electricity_price_per_kwh = getattr(org, "electricity_price_per_kwh", None)
         gas_price_per_kwh = getattr(org, "gas_price_per_kwh", None)
         currency_code = getattr(org, "currency_code", None)
     else:
-        # No org attached: default to starter-like behaviour but with no org metadata
         subscription_plan_key = "cei-starter"
         enable_alerts = True
         enable_reports = True
 
-    # Build org summary payload if org exists
     org_summary: Optional[OrgSummaryOut] = None
     if org is not None:
         org_summary = OrgSummaryOut(
@@ -785,14 +557,9 @@ def read_me(
             currency_code=currency_code,
         )
 
-    # Role: prefer DB role ("owner" | "member") if present.
-    # Preserve superuser behavior as "admin" for backwards compatibility.
     is_super = bool(getattr(current_user, "is_superuser", 0))
     db_role = getattr(current_user, "role", None)
-    if is_super:
-        role = "admin"
-    else:
-        role = db_role or "member"
+    role = "admin" if is_super else (db_role or "member")
 
     return AccountMeOut(
         id=current_user.id,
@@ -815,32 +582,19 @@ def read_me(
 
 # === Integration token management endpoints ===
 
-
 @router.post("/integration-tokens", response_model=IntegrationTokenWithSecret)
 def create_integration_token(
     payload: IntegrationTokenCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
-    """
-    Create a new long-lived integration token for the caller's organization.
-
-    - Returns the raw token string ONCE (caller must store it).
-    - Stores only a hash server-side.
-    - Owner-only.
-    - Writes an org-level audit entry to site_events.
-    """
+) -> IntegrationTokenWithSecret:
     if not current_user.organization_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User is not attached to an organization",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User is not attached to an organization")
 
-    _require_owner(current_user)
+    require_owner(current_user, message="Only the organization owner can manage integration tokens.")
 
     raw_token = _generate_integration_token_string()
-    token_hash = _hash_integration_token(raw_token)
-
+    token_hash = _hash_token(raw_token)
     name = (payload.name or "").strip() or "Integration token"
 
     db_token = IntegrationToken(
@@ -854,8 +608,7 @@ def create_integration_token(
     db.commit()
     db.refresh(db_token)
 
-    # Audit trail (best-effort; non-blocking)
-    _create_org_audit_event(
+    create_org_audit_event(
         db,
         org_id=current_user.organization_id,
         user_id=getattr(current_user, "id", None),
@@ -877,16 +630,11 @@ def create_integration_token(
 def list_integration_tokens(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
-    """
-    List integration tokens for the caller's organization (metadata only, no secrets).
-
-    Owner-only (keeps token inventory private).
-    """
+) -> List[IntegrationTokenOut]:
     if not current_user.organization_id:
         return []
 
-    _require_owner(current_user)
+    require_owner(current_user, message="Only the organization owner can manage integration tokens.")
 
     tokens = (
         db.query(IntegrationToken)
@@ -902,19 +650,11 @@ def revoke_integration_token(
     token_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
-    """
-    Soft-revoke an integration token (is_active = False).
-
-    Owner-only. Writes an org-level audit entry to site_events.
-    """
+) -> Response:
     if not current_user.organization_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User is not attached to an organization",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User is not attached to an organization")
 
-    _require_owner(current_user)
+    require_owner(current_user, message="Only the organization owner can manage integration tokens.")
 
     token = (
         db.query(IntegrationToken)
@@ -924,12 +664,8 @@ def revoke_integration_token(
         )
         .first()
     )
-
     if not token:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Integration token not found",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Integration token not found")
 
     if not bool(getattr(token, "is_active", True)):
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -938,8 +674,7 @@ def revoke_integration_token(
     db.add(token)
     db.commit()
 
-    # Audit trail (best-effort; non-blocking)
-    _create_org_audit_event(
+    create_org_audit_event(
         db,
         org_id=current_user.organization_id,
         user_id=getattr(current_user, "id", None),
@@ -948,3 +683,254 @@ def revoke_integration_token(
     )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# === Org invite management endpoints ===
+# (unchanged from your version below this line)
+
+@router.post("/invites", response_model=OrgInviteWithSecret)
+def create_org_invite(
+    payload: OrgInviteCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> OrgInviteWithSecret:
+    if not current_user.organization_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User is not attached to an organization")
+
+    require_owner(current_user, message="Only the organization owner can create invites.")
+
+    role = (payload.role or "member").strip().lower()
+    if role not in ("member", "owner"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role. Use 'member' or 'owner'.")
+
+    expires_at = None
+    if payload.expires_in_days:
+        expires_at = datetime.utcnow() + timedelta(days=int(payload.expires_in_days))
+
+    raw = _generate_invite_token_string()
+    token_hash = _hash_token(raw)
+
+    fk_name = _org_fk_field_name_for_invites()
+    inv_kwargs = {
+        fk_name: current_user.organization_id,
+        "email": (payload.email.strip().lower() if payload.email and payload.email.strip() else None),
+        "role": role,
+        "token_hash": token_hash,
+        "is_active": True,
+        "expires_at": expires_at,
+        "created_by_user_id": getattr(current_user, "id", None),
+        "used_by_user_id": None,
+        "used_at": None,
+    }
+
+    inv = OrgInvite(**inv_kwargs)
+
+    db.add(inv)
+    db.commit()
+    db.refresh(inv)
+
+    create_org_audit_event(
+        db,
+        org_id=current_user.organization_id,
+        user_id=getattr(current_user, "id", None),
+        title="Org invite created",
+        description=f"invite_id={getattr(inv, 'id', None)}; role={role}; email={getattr(inv, 'email', None)}; expires_at={getattr(inv, 'expires_at', None)}",
+    )
+
+    base = _best_effort_frontend_url()
+    link = f"{base}/signup?invite={raw}" if base else None
+
+    inv_org_id = getattr(inv, "organization_id", None)
+    if inv_org_id is None:
+        inv_org_id = getattr(inv, "org_id", None)
+
+    return OrgInviteWithSecret(
+        id=inv.id,
+        organization_id=int(inv_org_id) if inv_org_id is not None else int(current_user.organization_id),
+        email=inv.email,
+        role=inv.role,
+        is_active=inv.is_active,
+        expires_at=inv.expires_at,
+        created_by_user_id=inv.created_by_user_id,
+        used_by_user_id=inv.used_by_user_id,
+        used_at=inv.used_at,
+        created_at=inv.created_at,
+        token=raw,
+        invite_link=link,
+    )
+
+
+@router.get("/invites", response_model=List[OrgInviteOut])
+def list_org_invites(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> List[OrgInviteOut]:
+    if not current_user.organization_id:
+        return []
+
+    require_owner(current_user, message="Only the organization owner can view invites.")
+
+    fk_name = _org_fk_field_name_for_invites()
+    invites = (
+        db.query(OrgInvite)
+        .filter(getattr(OrgInvite, fk_name) == current_user.organization_id)
+        .order_by(OrgInvite.created_at.desc())
+        .all()
+    )
+
+    out: List[OrgInviteOut] = []
+    for inv in invites:
+        inv_org_id = getattr(inv, "organization_id", None)
+        if inv_org_id is None:
+            inv_org_id = getattr(inv, "org_id", None)
+        out.append(
+            OrgInviteOut(
+                id=inv.id,
+                organization_id=int(inv_org_id) if inv_org_id is not None else int(current_user.organization_id),
+                email=inv.email,
+                role=inv.role,
+                is_active=inv.is_active,
+                expires_at=inv.expires_at,
+                created_by_user_id=inv.created_by_user_id,
+                used_by_user_id=inv.used_by_user_id,
+                used_at=inv.used_at,
+                created_at=inv.created_at,
+            )
+        )
+    return out
+
+
+@router.delete("/invites/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_org_invite(
+    invite_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    if not current_user.organization_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User is not attached to an organization")
+
+    require_owner(current_user, message="Only the organization owner can revoke invites.")
+
+    fk_name = _org_fk_field_name_for_invites()
+    inv = (
+        db.query(OrgInvite)
+        .filter(
+            OrgInvite.id == invite_id,
+            getattr(OrgInvite, fk_name) == current_user.organization_id,
+        )
+        .first()
+    )
+    if not inv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+
+    if not bool(getattr(inv, "is_active", True)):
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    inv.is_active = False
+    db.add(inv)
+    db.commit()
+
+    create_org_audit_event(
+        db,
+        org_id=current_user.organization_id,
+        user_id=getattr(current_user, "id", None),
+        title="Org invite revoked",
+        description=f"invite_id={invite_id}",
+    )
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/invites/accept", response_model=Token, dependencies=[Depends(login_rate_limit)])
+def accept_org_invite(
+    payload: AcceptInviteRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> Token:
+    email_norm = (payload.email or "").strip().lower()
+    if not email_norm:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required")
+
+    existing_user = db.query(User).filter(User.email == email_norm).first()
+    if existing_user:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+
+    raw = (payload.token or "").strip()
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite token is required")
+
+    token_hash = _hash_token(raw)
+
+    inv = db.query(OrgInvite).filter(OrgInvite.token_hash == token_hash).first()
+    if not inv:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite token")
+
+    if not bool(getattr(inv, "is_active", True)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite is not active")
+
+    if getattr(inv, "used_at", None) is not None or getattr(inv, "used_by_user_id", None) is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite has already been used")
+
+    exp = getattr(inv, "expires_at", None)
+    if exp is not None and isinstance(exp, datetime) and datetime.utcnow() > exp:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite has expired")
+
+    restricted_email = getattr(inv, "email", None)
+    if restricted_email and restricted_email.strip().lower() != email_norm:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invite is restricted to a different email")
+
+    inv_org_id = getattr(inv, "organization_id", None)
+    if inv_org_id is None:
+        inv_org_id = getattr(inv, "org_id", None)
+    if not inv_org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite is misconfigured (missing org).")
+
+    try:
+        hashed_password = pwd_context.hash(str(payload.password))
+    except Exception as e:
+        logger.exception("Password hashing failed")
+        raise HTTPException(status_code=400, detail=f"Password hashing failed: {e}")
+
+    role = (getattr(inv, "role", None) or "member").strip().lower()
+    if role not in ("member", "owner"):
+        role = "member"
+
+    db_user = User(
+        email=email_norm,
+        hashed_password=hashed_password,
+        organization_id=int(inv_org_id),
+    )
+
+    if payload.full_name:
+        try:
+            db_user.full_name = payload.full_name
+        except Exception:
+            pass
+
+    try:
+        db_user.role = role
+    except Exception:
+        pass
+
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+
+    inv.used_by_user_id = getattr(db_user, "id", None)
+    inv.used_at = datetime.utcnow()
+    inv.is_active = False
+    db.add(inv)
+    db.commit()
+
+    create_org_audit_event(
+        db,
+        org_id=int(inv_org_id),
+        user_id=getattr(db_user, "id", None),
+        title="Org invite accepted",
+        description=f"invite_id={inv.id}; email={db_user.email}; role={role}",
+    )
+
+    access = create_access_token({"sub": db_user.email})
+    refresh = create_refresh_token({"sub": db_user.email})
+    _set_refresh_cookie(response, refresh)
+    return Token(access_token=access, token_type="bearer")

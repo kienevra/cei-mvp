@@ -22,7 +22,7 @@ def upgrade():
         sa.Column('stripe_price_id', sa.String(), nullable=False, unique=True),
         sa.Column('description', sa.String(), nullable=True),
         sa.Column('amount_cents', sa.Integer(), nullable=True),
-        sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
 
     op.create_table(
@@ -33,7 +33,7 @@ def upgrade():
         sa.Column('stripe_subscription_id', sa.String(), nullable=True, unique=True, index=True),
         sa.Column('status', sa.String(), nullable=False, index=True),
         sa.Column('current_period_end', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
 
 def downgrade():

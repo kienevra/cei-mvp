@@ -37,19 +37,9 @@ class Organization(Base):
     subscription_plan_key = Column(String(64), nullable=True)    # logical/Stripe plan key
     subscription_status = Column(String(32), nullable=True)      # e.g. "active", "past_due"
 
-    # ✅ Cross-DB boolean defaults (SQLite-safe)
-    enable_alerts = Column(
-        Boolean,
-        nullable=False,
-        default=True,
-        server_default=text("1"),
-    )
-    enable_reports = Column(
-        Boolean,
-        nullable=False,
-        default=True,
-        server_default=text("1"),
-    )
+    # ✅ Cross-DB boolean defaults (SQLite-safe + Postgres-safe)
+    enable_alerts = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    enable_reports = Column(Boolean, nullable=False, default=True, server_default=sa.true())
 
     stripe_customer_id = Column(String(255), nullable=True)
     stripe_subscription_id = Column(String(255), nullable=True)
@@ -238,28 +228,12 @@ class AlertEvent(Base):
     window_hours = Column(Integer, nullable=False)
     triggered_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
-    # Workflow fields used by /alerts/history and PATCH /alerts/{id}
-    status = Column(
-        String(32),
-        nullable=False,
-        default="open",
-        server_default="open",
-    )
+    status = Column(String(32), nullable=False, default="open", server_default="open")
     owner_user_id = Column(Integer, nullable=True)
     note = Column(Text, nullable=True)
 
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=DB_NOW,
-    )
-    updated_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=DB_NOW,
-        # ✅ SQLite-safe (avoid "now()"): UPDATE ... SET updated_at = CURRENT_TIMESTAMP
-        onupdate=DB_NOW,
-    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW, onupdate=DB_NOW)
 
 
 class SiteEvent(Base):
@@ -282,14 +256,9 @@ class SiteEvent(Base):
     # Underlying DB column is "description"
     body = Column("description", Text, nullable=True)
 
-    # New column to support "created_by_user_id" in your workflow
     created_by_user_id = Column(Integer, nullable=True)
 
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=DB_NOW,
-    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW)
 
 
 class IntegrationToken(Base):
@@ -309,20 +278,40 @@ class IntegrationToken(Base):
     name = Column(String(255), nullable=False)
     token_hash = Column(String(255), nullable=False, unique=True, index=True)
 
-    # ✅ Cross-DB boolean default (SQLite-safe)
-    is_active = Column(
-        Boolean,
-        nullable=False,
-        default=True,
-        server_default=text("1"),
-    )
+    is_active = Column(Boolean, nullable=False, default=True, server_default=sa.true())
 
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=DB_NOW,
-    )
-    last_used_at = Column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class OrgInvite(Base):
+    """
+    Owner-minted organization invite token.
+
+    Only a hash is stored. Raw token is returned once at creation.
+    """
+
+    __tablename__ = "org_invites"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Underlying DB column is "org_id"
+    organization_id = Column("org_id", Integer, index=True, nullable=False)
+
+    # optional: restrict invite to a specific email
+    email = Column(String(255), nullable=True)
+
+    # role granted on acceptance
+    role = Column(String(32), nullable=False, server_default=text("'member'"))
+
+    token_hash = Column(String(255), nullable=False, unique=True, index=True)
+
+    is_active = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_by_user_id = Column(Integer, nullable=True)
+    used_by_user_id = Column(Integer, nullable=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW)

@@ -1,11 +1,12 @@
 // frontend/src/pages/Account.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   getAccountMe,
   deleteAccount,
   startCheckout,
   openBillingPortal,
 } from "../services/api";
+import api from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import type { AccountMe, OrganizationSummary } from "../types/auth";
@@ -54,7 +55,6 @@ function parsePrimarySources(value: any): string[] {
       .filter((x) => x.length > 0);
   }
   if (typeof value === "string") {
-    // backend may return "electricity,gas"
     return value
       .split(",")
       .map((s) => s.trim())
@@ -67,18 +67,51 @@ type UiAccount = AccountMe & {
   role?: string | null;
   org: OrganizationSummary | null;
 
-  // Root-level plan flags that /account/me may expose
   subscription_plan_key?: string | null;
   subscription_status?: string | null;
   enable_alerts?: boolean | null;
   enable_reports?: boolean | null;
 
-  // Optional pricing context at account level (forward-compatible)
   currency_code?: string | null;
   electricity_price_per_kwh?: number | null;
   gas_price_per_kwh?: number | null;
   primary_energy_sources?: string[] | null;
 };
+
+// ---- Invites (owner-only) ----
+// Backend contract is intentionally flexible: we parse whatever fields exist.
+type OrgInvite = {
+  id: number;
+  org_id?: number | null;
+  email?: string | null;
+  role?: string | null;
+  is_active?: boolean | null;
+  expires_at?: string | null;
+  created_at?: string | null;
+  used_at?: string | null;
+  created_by_user_id?: number | null;
+  used_by_user_id?: number | null;
+};
+
+function safeString(v: any): string | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v);
+  return s.trim().length ? s : null;
+}
+
+function formatMaybeIso(ts?: string | null): string {
+  const v = safeString(ts);
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return v;
+  return d.toLocaleString();
+}
+
+function buildInviteLink(token: string): string {
+  // Frontend flow: user lands on /login?invite=...
+  const origin = window.location.origin;
+  return `${origin}/login?invite=${encodeURIComponent(token)}`;
+}
 
 const Account: React.FC = () => {
   const [account, setAccount] = useState<UiAccount | null>(null);
@@ -96,6 +129,18 @@ const Account: React.FC = () => {
   const [deleting, setDeleting] = useState(false);
   const [deleteSuccess, setDeleteSuccess] = useState(false);
 
+  // Invites UI state
+  const [invites, setInvites] = useState<OrgInvite[]>([]);
+  const [invitesLoading, setInvitesLoading] = useState(false);
+  const [invitesError, setInvitesError] = useState<string | null>(null);
+  const [creatingInvite, setCreatingInvite] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"member" | "owner">("member");
+  const [inviteDays, setInviteDays] = useState<number>(7);
+
+  const [createdInviteLink, setCreatedInviteLink] = useState<string | null>(null);
+  const [createdInviteNote, setCreatedInviteNote] = useState<string | null>(null);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -111,8 +156,7 @@ const Account: React.FC = () => {
         const org: OrganizationSummary | null =
           (data as any)?.org ?? (data as any)?.organization ?? null;
 
-        const roleRaw =
-          (data as any)?.role ?? (data as any)?.user_role ?? null;
+        const roleRaw = (data as any)?.role ?? (data as any)?.user_role ?? null;
 
         setAccount({
           ...(data as UiAccount),
@@ -122,7 +166,6 @@ const Account: React.FC = () => {
       } catch (e: any) {
         if (!isMounted) return;
 
-        // Don’t brick the whole page if /account/me is flaky.
         setAccount(null);
         setAccountWarning(
           e?.response?.data?.detail ||
@@ -141,6 +184,9 @@ const Account: React.FC = () => {
       isMounted = false;
     };
   }, []);
+
+  const envLabel = getEnvironmentLabel(appEnvironment);
+  const envBlurb = getEnvironmentBlurb(appEnvironment);
 
   // Canonical org object for UI + flags
   const org: OrganizationSummary | null = account?.org ?? null;
@@ -184,6 +230,8 @@ const Account: React.FC = () => {
       ? (orgLike.enable_reports as boolean)
       : true;
 
+  const isOwner = useMemo(() => normalizeRole(account?.role) === "owner", [account?.role]);
+
   const handleStartStarterCheckout = async () => {
     setBillingMessage(null);
     setStartingCheckout(true);
@@ -195,15 +243,12 @@ const Account: React.FC = () => {
         return;
       }
 
-      // Stripe / billing not configured for this environment
       setBillingMessage(
         "Billing is not fully configured for this environment. No live checkout page is available."
       );
     } catch (err) {
       console.error("Failed to start checkout:", err);
-      setBillingMessage(
-        "Could not start checkout. Please retry or contact your CEI admin."
-      );
+      setBillingMessage("Could not start checkout. Please retry or contact your CEI admin.");
     } finally {
       setStartingCheckout(false);
     }
@@ -225,35 +270,26 @@ const Account: React.FC = () => {
       );
     } catch (err) {
       console.error("Failed to open billing portal:", err);
-      setBillingMessage(
-        "Could not open the billing portal. Please retry or contact your CEI admin."
-      );
+      setBillingMessage("Could not open the billing portal. Please retry or contact your CEI admin.");
     } finally {
       setOpeningPortal(false);
     }
   };
 
   const handleDeleteAccount = async () => {
-    if (!window.confirm("Really delete your account? This cannot be undone.")) {
-      return;
-    }
+    if (!window.confirm("Really delete your account? This cannot be undone.")) return;
+
     setDeleting(true);
     setError(null);
     try {
       await deleteAccount();
       setDeleteSuccess(true);
-      // keep behavior consistent; don’t force redirect here
     } catch (e: any) {
-      setError(
-        e?.response?.data?.detail || e?.message || "Failed to delete account."
-      );
+      setError(e?.response?.data?.detail || e?.message || "Failed to delete account.");
     } finally {
       setDeleting(false);
     }
   };
-
-  const envLabel = getEnvironmentLabel(appEnvironment);
-  const envBlurb = getEnvironmentBlurb(appEnvironment);
 
   // Pricing context (tariffs & energy mix) – unified org/root view
   const currencyCode: string =
@@ -290,6 +326,136 @@ const Account: React.FC = () => {
   const formatPrice = (value: number | null) =>
     typeof value === "number" ? value.toFixed(4) : "Not configured";
 
+  // ---- Invites actions (owner-only) ----
+  const loadInvites = async () => {
+    setInvitesError(null);
+    setInvitesLoading(true);
+    try {
+      // Expected backend:
+      //   GET /api/v1/auth/invites  -> list of org_invites (metadata only)
+      const res = await api.get("/auth/invites");
+      const list = Array.isArray(res.data) ? res.data : [];
+      setInvites(list as OrgInvite[]);
+    } catch (e: any) {
+      const status = e?.response?.status;
+      if (status === 404) {
+        setInvitesError(
+          "Invite management isn’t live on this backend yet (missing /auth/invites). Deploy the invites endpoints, then refresh."
+        );
+      } else if (status === 403) {
+        setInvitesError("Owner-only. Switch to an owner account to manage invites.");
+      } else {
+        setInvitesError(e?.response?.data?.detail || e?.message || "Failed to load invites.");
+      }
+      setInvites([]);
+    } finally {
+      setInvitesLoading(false);
+    }
+  };
+
+  const handleCreateInvite = async () => {
+    setInvitesError(null);
+    setCreatedInviteLink(null);
+    setCreatedInviteNote(null);
+
+    if (!isOwner) {
+      setInvitesError("Owner-only. Only an org owner can generate invite links.");
+      return;
+    }
+
+    const email = inviteEmail.trim();
+    if (email.length > 0 && !email.includes("@")) {
+      setInvitesError("Invite email looks invalid. Either leave it blank or enter a real email.");
+      return;
+    }
+
+    const days = Number.isFinite(inviteDays) ? Math.max(1, Math.min(90, inviteDays)) : 7;
+
+    setCreatingInvite(true);
+    try {
+      // Expected backend:
+      //   POST /api/v1/auth/invites  { email?, role, expires_in_days }
+      // Returns either:
+      //   { token, invite: {...} }  OR  { token, id, expires_at } etc.
+      const res = await api.post("/auth/invites", {
+        email: email.length ? email : undefined,
+        role: inviteRole,
+        expires_in_days: days,
+      });
+
+      const token = safeString(res?.data?.token) || safeString(res?.data?.invite_token);
+      if (!token) {
+        setCreatedInviteNote(
+          "Invite created, but backend did not return a token. Make sure the create endpoint returns the one-time token."
+        );
+      } else {
+        const link = buildInviteLink(token);
+        setCreatedInviteLink(link);
+        setCreatedInviteNote("Invite link generated. Copy it and send it to the user.");
+      }
+
+      // Refresh list so we see it
+      await loadInvites();
+      setInviteEmail("");
+    } catch (e: any) {
+      const status = e?.response?.status;
+      if (status === 404) {
+        setInvitesError(
+          "Invite management isn’t live on this backend yet (missing POST /auth/invites). Deploy the invites endpoints, then retry."
+        );
+      } else {
+        setInvitesError(e?.response?.data?.detail || e?.message || "Failed to create invite.");
+      }
+    } finally {
+      setCreatingInvite(false);
+    }
+  };
+
+  const handleRevokeInvite = async (inviteId: number) => {
+    setInvitesError(null);
+    if (!isOwner) {
+      setInvitesError("Owner-only. Only an org owner can revoke invites.");
+      return;
+    }
+
+    if (!window.confirm("Revoke this invite? Anyone holding the link will be blocked.")) return;
+
+    try {
+      // Expected backend:
+      //   DELETE /api/v1/auth/invites/{id}
+      await api.delete(`/auth/invites/${inviteId}`);
+      await loadInvites();
+    } catch (e: any) {
+      const status = e?.response?.status;
+      if (status === 404) {
+        setInvitesError(
+          "Invite revoke isn’t live on this backend yet (missing DELETE /auth/invites/{id})."
+        );
+      } else {
+        setInvitesError(e?.response?.data?.detail || e?.message || "Failed to revoke invite.");
+      }
+    }
+  };
+
+  const handleCopy = async (textToCopy: string) => {
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setCreatedInviteNote("Copied to clipboard.");
+      setTimeout(() => setCreatedInviteNote("Invite link generated. Copy it and send it to the user."), 1500);
+    } catch {
+      // fallback: no-op (user can manually copy)
+      setCreatedInviteNote("Copy failed in this browser. Select the link and copy manually.");
+    }
+  };
+
+  // Load invites when account is loaded and user is owner
+  useEffect(() => {
+    if (!account) return;
+    if (!isOwner) return;
+    loadInvites();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account?.id, isOwner]);
+
   return (
     <div className="dashboard-page">
       {/* Header */}
@@ -302,35 +468,16 @@ const Account: React.FC = () => {
         }}
       >
         <div>
-          <h1
-            style={{
-              fontSize: "1.3rem",
-              fontWeight: 600,
-              letterSpacing: "-0.02em",
-            }}
-          >
+          <h1 style={{ fontSize: "1.3rem", fontWeight: 600, letterSpacing: "-0.02em" }}>
             Account & Billing
           </h1>
-          <p
-            style={{
-              marginTop: "0.3rem",
-              fontSize: "0.85rem",
-              color: "var(--cei-text-muted)",
-            }}
-          >
-            Manage your CEI profile, organization, and subscription. This is the
-            control panel for turning a single deployment into a real SaaS
-            footprint.
+          <p style={{ marginTop: "0.3rem", fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
+            Manage your CEI profile, organization, and subscription. This is the control panel for
+            turning a single deployment into a real SaaS footprint.
           </p>
         </div>
 
-        <div
-          style={{
-            fontSize: "0.8rem",
-            color: "var(--cei-text-muted)",
-            textAlign: "right",
-          }}
-        >
+        <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", textAlign: "right" }}>
           {org?.name && (
             <div>
               Org: <strong>{org.name}</strong>
@@ -350,13 +497,7 @@ const Account: React.FC = () => {
       {/* Non-blocking warning when /account/me fails */}
       {accountWarning && (
         <section style={{ marginTop: "0.75rem" }}>
-          <div
-            className="cei-pill-muted"
-            style={{
-              padding: "0.55rem 0.75rem",
-              fontSize: "0.8rem",
-            }}
-          >
+          <div className="cei-pill-muted" style={{ padding: "0.55rem 0.75rem", fontSize: "0.8rem" }}>
             {accountWarning}
           </div>
         </section>
@@ -373,50 +514,26 @@ const Account: React.FC = () => {
       <section className="dashboard-row">
         {/* Profile card */}
         <div className="cei-card">
-          <div
-            style={{
-              fontSize: "0.9rem",
-              fontWeight: 600,
-              marginBottom: "0.4rem",
-            }}
-          >
+          <div style={{ fontSize: "0.9rem", fontWeight: 600, marginBottom: "0.4rem" }}>
             Profile
           </div>
           {loading ? (
-            <div
-              style={{
-                padding: "0.8rem 0.2rem",
-                display: "flex",
-                justifyContent: "center",
-              }}
-            >
+            <div style={{ padding: "0.8rem 0.2rem", display: "flex", justifyContent: "center" }}>
               <LoadingSpinner />
             </div>
           ) : deleteSuccess ? (
-            <div
-              style={{
-                fontSize: "0.85rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              Your account has been deleted on this environment. You may need to
-              log out manually or clear your token in local storage.
+            <div style={{ fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
+              Your account has been deleted on this environment. You may need to log out manually
+              or clear your token in local storage.
             </div>
           ) : (
             <>
-              <div
-                style={{
-                  fontSize: "0.85rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
+              <div style={{ fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
                 <div>
-                  <strong>Email:</strong>{" "}
-                  {account?.email || <span>—</span>}
+                  <strong>Email:</strong> {account?.email || <span>—</span>}
                 </div>
                 <div style={{ marginTop: "0.2rem" }}>
-                  <strong>Name:</strong>{" "}
-                  {account?.full_name || <span>—</span>}
+                  <strong>Name:</strong> {account?.full_name || <span>—</span>}
                 </div>
               </div>
 
@@ -431,14 +548,9 @@ const Account: React.FC = () => {
                   gap: "0.75rem",
                 }}
               >
-                <div
-                  style={{
-                    fontSize: "0.78rem",
-                    color: "var(--cei-text-muted)",
-                  }}
-                >
-                  For now this is read-only. In a production deployment, this is
-                  where you’d manage passwords, SSO, and org membership.
+                <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+                  For now this is read-only. In a production deployment, this is where you’d manage
+                  passwords, SSO, and org membership.
                 </div>
                 <button
                   type="button"
@@ -455,22 +567,11 @@ const Account: React.FC = () => {
 
         {/* Subscription card */}
         <div className="cei-card">
-          <div
-            style={{
-              fontSize: "0.9rem",
-              fontWeight: 600,
-              marginBottom: "0.4rem",
-            }}
-          >
+          <div style={{ fontSize: "0.9rem", fontWeight: 600, marginBottom: "0.4rem" }}>
             Subscription
           </div>
 
-          <div
-            style={{
-              fontSize: "0.85rem",
-              color: "var(--cei-text-muted)",
-            }}
-          >
+          <div style={{ fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
             <div>
               <strong>Current plan:</strong> {planLabel}
             </div>
@@ -480,52 +581,23 @@ const Account: React.FC = () => {
           </div>
 
           {/* Feature flags summary */}
-          <div
-            style={{
-              marginTop: "0.4rem",
-              fontSize: "0.8rem",
-              color: "var(--cei-text-muted)",
-            }}
-          >
+          <div style={{ marginTop: "0.4rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
             <div>
               <strong>Alerts:</strong> {alertsEnabled ? "Enabled" : "Disabled"}
             </div>
             <div style={{ marginTop: "0.1rem" }}>
-              <strong>Reports:</strong>{" "}
-              {reportsEnabled ? "Enabled" : "Disabled"}
+              <strong>Reports:</strong> {reportsEnabled ? "Enabled" : "Disabled"}
             </div>
           </div>
 
-          <div
-            style={{
-              marginTop: "0.8rem",
-              fontSize: "0.8rem",
-              color: "var(--cei-text-muted)",
-            }}
-          >
-            <ul
-              style={{
-                margin: 0,
-                paddingLeft: "1.1rem",
-                lineHeight: 1.6,
-              }}
-            >
+          <div style={{ marginTop: "0.8rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+            <ul style={{ margin: 0, paddingLeft: "1.1rem", lineHeight: 1.6 }}>
               <li>Starter includes alerts, reports, and multi-site analytics.</li>
-              <li>
-                Growth (later) adds more orgs, longer history, and SLA-backed
-                support.
-              </li>
+              <li>Growth (later) adds more orgs, longer history, and SLA-backed support.</li>
             </ul>
           </div>
 
-          <div
-            style={{
-              marginTop: "0.9rem",
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "0.6rem",
-            }}
-          >
+          <div style={{ marginTop: "0.9rem", display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
             <button
               type="button"
               className="cei-btn cei-btn-primary"
@@ -562,6 +634,220 @@ const Account: React.FC = () => {
         </div>
       </section>
 
+      {/* Owner-only: Invites */}
+      <section>
+        <div className="cei-card">
+          <div
+            style={{
+              fontSize: "0.9rem",
+              fontWeight: 600,
+              marginBottom: "0.4rem",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "0.75rem",
+            }}
+          >
+            <span>Organization invites</span>
+            <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
+              Owner-only. Generates join links for this org.
+            </span>
+          </div>
+
+          {!isOwner ? (
+            <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              You are not an org owner. Invite generation is restricted.
+            </div>
+          ) : (
+            <>
+              {invitesError && (
+                <div style={{ marginBottom: "0.6rem" }}>
+                  <ErrorBanner message={invitesError} onClose={() => setInvitesError(null)} />
+                </div>
+              )}
+
+              {/* Create invite */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1.3fr 0.7fr 0.5fr auto",
+                  gap: "0.6rem",
+                  alignItems: "end",
+                }}
+              >
+                <div>
+                  <label style={{ display: "block", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+                    Invite email (optional)
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="optional: user@company.com"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    style={{ width: "100%" }}
+                  />
+                  <div style={{ marginTop: "0.25rem", fontSize: "0.74rem", color: "var(--cei-text-muted)" }}>
+                    Leave blank for a generic link. Add email to bind the invite to a recipient.
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: "block", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+                    Role
+                  </label>
+                  <select
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole((e.target.value as any) || "member")}
+                    style={{ width: "100%" }}
+                  >
+                    <option value="member">Member</option>
+                    <option value="owner">Owner</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: "block", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+                    Expires (days)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={90}
+                    value={inviteDays}
+                    onChange={(e) => setInviteDays(parseInt(e.target.value || "7", 10))}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  className="cei-btn cei-btn-primary"
+                  onClick={handleCreateInvite}
+                  disabled={creatingInvite}
+                  style={{ height: "2.35rem" }}
+                >
+                  {creatingInvite ? "Creating…" : "Generate invite link"}
+                </button>
+              </div>
+
+              {/* Created link */}
+              {(createdInviteLink || createdInviteNote) && (
+                <div
+                  style={{
+                    marginTop: "0.75rem",
+                    padding: "0.6rem 0.75rem",
+                    borderRadius: "0.6rem",
+                    border: "1px solid rgba(56, 189, 248, 0.25)",
+                    background: "rgba(15, 23, 42, 0.55)",
+                  }}
+                >
+                  {createdInviteLink && (
+                    <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+                        <strong style={{ color: "var(--cei-text)" }}>Invite link:</strong>{" "}
+                        <span style={{ wordBreak: "break-all" }}>{createdInviteLink}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="cei-btn cei-btn-ghost"
+                        onClick={() => handleCopy(createdInviteLink)}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  )}
+                  {createdInviteNote && (
+                    <div style={{ marginTop: createdInviteLink ? "0.35rem" : 0, fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+                      {createdInviteNote}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Invite list */}
+              <div style={{ marginTop: "0.9rem", display: "flex", justifyContent: "space-between", gap: "0.75rem" }}>
+                <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+                  Active links should be short-lived. Revoke after onboarding is complete.
+                </div>
+                <button
+                  type="button"
+                  className="cei-btn cei-btn-ghost"
+                  onClick={loadInvites}
+                  disabled={invitesLoading}
+                >
+                  {invitesLoading ? "Refreshing…" : "Refresh"}
+                </button>
+              </div>
+
+              <div style={{ marginTop: "0.6rem" }}>
+                {invitesLoading ? (
+                  <div style={{ padding: "0.5rem 0.2rem", display: "flex", justifyContent: "center" }}>
+                    <LoadingSpinner />
+                  </div>
+                ) : invites.length === 0 ? (
+                  <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+                    No invites yet.
+                  </div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="cei-table" style={{ width: "100%" }}>
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Email</th>
+                          <th>Role</th>
+                          <th>Status</th>
+                          <th>Expires</th>
+                          <th>Created</th>
+                          <th>Used</th>
+                          <th style={{ textAlign: "right" }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {invites.map((inv) => {
+                          const isActive =
+                            typeof inv.is_active === "boolean" ? inv.is_active : true;
+                          const usedAt = safeString(inv.used_at);
+                          const status =
+                            usedAt ? "Used" : isActive ? "Active" : "Revoked";
+
+                          return (
+                            <tr key={inv.id}>
+                              <td>{inv.id}</td>
+                              <td>{safeString(inv.email) || <span style={{ color: "var(--cei-text-muted)" }}>—</span>}</td>
+                              <td>{safeString(inv.role) || "member"}</td>
+                              <td>
+                                <span className={status === "Active" ? "cei-pill cei-pill-good" : "cei-pill cei-pill-muted"}>
+                                  {status}
+                                </span>
+                              </td>
+                              <td>{formatMaybeIso(inv.expires_at)}</td>
+                              <td>{formatMaybeIso(inv.created_at)}</td>
+                              <td>{formatMaybeIso(inv.used_at)}</td>
+                              <td style={{ textAlign: "right" }}>
+                                <button
+                                  type="button"
+                                  className="cei-btn cei-btn-ghost"
+                                  onClick={() => handleRevokeInvite(inv.id)}
+                                  disabled={!isActive || !!usedAt}
+                                  title={!isActive ? "Already revoked" : usedAt ? "Already used" : "Revoke invite"}
+                                >
+                                  Revoke
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+
       {/* Tariffs & energy mix */}
       <section>
         <div className="cei-card">
@@ -577,51 +863,29 @@ const Account: React.FC = () => {
             }}
           >
             <span>Tariffs & energy mix</span>
-            <span
-              style={{
-                fontSize: "0.75rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
+            <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
               Read-only. Used for cost analytics and savings estimates.
             </span>
           </div>
 
           {!account && !hasTariffConfig ? (
-            <div
-              style={{
-                fontSize: "0.8rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              Account details are not available right now. Tariff and energy mix
-              data will appear here once your account context loads successfully.
+            <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              Account details are not available right now. Tariff and energy mix data will appear here
+              once your account context loads successfully.
             </div>
           ) : !org && !hasTariffConfig ? (
-            <div
-              style={{
-                fontSize: "0.8rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              No organization is associated with this account yet. Tariff and
-              energy mix data will appear here once your org is configured.
+            <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              No organization is associated with this account yet. Tariff and energy mix data will
+              appear here once your org is configured.
             </div>
           ) : (
             <>
-              <div
-                style={{
-                  fontSize: "0.8rem",
-                  color: "var(--cei-text-muted)",
-                  lineHeight: 1.6,
-                }}
-              >
+              <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", lineHeight: 1.6 }}>
                 <div>
                   <strong>Currency:</strong> {currencyCode}
                 </div>
                 <div style={{ marginTop: "0.2rem" }}>
-                  <strong>Electricity price (per kWh):</strong>{" "}
-                  {formatPrice(electricityPrice)}
+                  <strong>Electricity price (per kWh):</strong> {formatPrice(electricityPrice)}
                 </div>
                 <div style={{ marginTop: "0.2rem" }}>
                   <strong>Gas price (per kWh):</strong> {formatPrice(gasPrice)}
@@ -637,15 +901,9 @@ const Account: React.FC = () => {
               </div>
 
               {!hasTariffConfig && (
-                <div
-                  style={{
-                    marginTop: "0.7rem",
-                    fontSize: "0.78rem",
-                    color: "var(--cei-text-muted)",
-                  }}
-                >
-                  Tariffs and energy mix are not configured yet. CEI will use
-                  kWh-only analytics until these values are set.
+                <div style={{ marginTop: "0.7rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+                  Tariffs and energy mix are not configured yet. CEI will use kWh-only analytics until
+                  these values are set.
                 </div>
               )}
             </>
@@ -672,40 +930,22 @@ const Account: React.FC = () => {
               {envLabel} ({appEnvironment})
             </span>
           </div>
-          <div
-            style={{
-              fontSize: "0.8rem",
-              color: "var(--cei-text-muted)",
-              lineHeight: 1.7,
-            }}
-          >
+          <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", lineHeight: 1.7 }}>
             {envBlurb}
           </div>
-          <div
-            style={{
-              marginTop: "0.6rem",
-              fontSize: "0.78rem",
-              color: "var(--cei-text-muted)",
-            }}
-          >
-            <ul
-              style={{
-                margin: 0,
-                paddingLeft: "1.1rem",
-              }}
-            >
+          <div style={{ marginTop: "0.6rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+            <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
               <li>
-                <strong>DEV:</strong> point CSV uploads and tests here; break
-                things safely before promoting changes.
+                <strong>DEV:</strong> point CSV uploads and tests here; break things safely before
+                promoting changes.
               </li>
               <li>
-                <strong>PILOT/STAGING:</strong> use for demos and early
-                customer pilots; data should be realistic but not yet
-                contract-critical.
+                <strong>PILOT/STAGING:</strong> use for demos and early customer pilots; data should be
+                realistic but not yet contract-critical.
               </li>
               <li>
-                <strong>PROD:</strong> treat as the system of record; align
-                alerts, reports, and exports with contractual expectations.
+                <strong>PROD:</strong> treat as the system of record; align alerts, reports, and exports
+                with contractual expectations.
               </li>
             </ul>
           </div>
@@ -715,39 +955,20 @@ const Account: React.FC = () => {
       {/* Feature gating explainer */}
       <section>
         <div className="cei-card">
-          <div
-            style={{
-              fontSize: "0.9rem",
-              fontWeight: 600,
-              marginBottom: "0.4rem",
-            }}
-          >
+          <div style={{ fontSize: "0.9rem", fontWeight: 600, marginBottom: "0.4rem" }}>
             What your plan controls
           </div>
-          <div
-            style={{
-              fontSize: "0.8rem",
-              color: "var(--cei-text-muted)",
-              lineHeight: 1.7,
-            }}
-          >
-            <ul
-              style={{
-                margin: 0,
-                paddingLeft: "1.1rem",
-              }}
-            >
+          <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", lineHeight: 1.7 }}>
+            <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
               <li>
-                <strong>Core (always on):</strong> CSV ingestion, per-site
-                dashboards, basic trend charts.
+                <strong>Core (always on):</strong> CSV ingestion, per-site dashboards, basic trend charts.
               </li>
               <li>
-                <strong>Starter and above:</strong> Alerts, 7-day reports, and
-                per-site insight cards.
+                <strong>Starter and above:</strong> Alerts, 7-day reports, and per-site insight cards.
               </li>
               <li>
-                <strong>Future tiers:</strong> organization-level baselines,
-                ML-based forecasting, and custom export pipelines.
+                <strong>Future tiers:</strong> organization-level baselines, ML-based forecasting, and custom
+                export pipelines.
               </li>
             </ul>
           </div>

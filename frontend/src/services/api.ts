@@ -1,9 +1,5 @@
 // frontend/src/services/api.ts
-import axios, {
-  AxiosError,
-  AxiosRequestConfig,
-  AxiosResponse,
-} from "axios";
+import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
 import { SiteForecast } from "../types/api";
 import type { AccountMe, OrgSettingsUpdateRequest } from "../types/auth";
 
@@ -18,25 +14,20 @@ export const baseURL = base
 
 const api = axios.create({
   baseURL,
-  timeout: 30000, // was 10000 – allow more time for cold starts / slow responses
-  // Needed so the HttpOnly refresh cookie is sent/received for cross-origin calls
+  timeout: 30000,
   withCredentials: true,
 });
 
 // Attach access token on every request except auth login/signup/refresh
 api.interceptors.request.use((cfg) => {
   const token = localStorage.getItem("cei_token");
-  if (!token) {
-    return cfg;
-  }
+  if (!token) return cfg;
 
   const url = cfg.url || "";
 
   // Do NOT send stale tokens to login/signup/refresh.
-  // All other /auth/* endpoints (like /auth/integration-tokens) stay authenticated.
-  if (isAuthPath(url)) {
-    return cfg;
-  }
+  // All other /auth/* endpoints (like /auth/integration-tokens, /auth/invites) stay authenticated.
+  if (isAuthPath(url)) return cfg;
 
   cfg.headers = cfg.headers || {};
   cfg.headers.Authorization = `Bearer ${token}`;
@@ -97,17 +88,12 @@ api.interceptors.response.use(
             `${baseURL}/auth/refresh`,
             {},
             {
-              // Ensure HttpOnly refresh cookie is sent and new one is accepted
               withCredentials: true,
-              // We still send the current access token; backend ignores it and
-              // only trusts the cookie, but this keeps things backwards-safe.
               headers: { Authorization: `Bearer ${currentToken}` },
               timeout: 8000,
             }
           );
-          const newToken = (resp.data as any)?.access_token as
-            | string
-            | undefined;
+          const newToken = (resp.data as any)?.access_token as string | undefined;
           if (!newToken) {
             throw new Error("No access_token in refresh response");
           }
@@ -125,9 +111,7 @@ api.interceptors.response.use(
 
     try {
       const newToken = await refreshPromise!;
-      if (!newToken) {
-        throw new Error("Refresh failed");
-      }
+      if (!newToken) throw new Error("Refresh failed");
 
       originalRequest.headers = originalRequest.headers || {};
       originalRequest.headers["Authorization"] = `Bearer ${newToken}`;
@@ -147,7 +131,6 @@ function safeStringify(val: unknown): string {
   try {
     return JSON.stringify(val);
   } catch {
-    // Worst-case fallback
     return String(val);
   }
 }
@@ -156,23 +139,19 @@ function getApiErrorMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
     const data: any = err.response?.data;
 
-    // FastAPI typical: { detail: "..." } OR { detail: {...} } OR { detail: [...] }
     if (data?.detail != null) {
       const detail =
         typeof data.detail === "string" ? data.detail : safeStringify(data.detail);
       return detail || fallback;
     }
 
-    // Some endpoints return { message: "..." } or { code, message }
     if (data?.message != null) {
       const msg =
         typeof data.message === "string" ? data.message : safeStringify(data.message);
       return msg || fallback;
     }
 
-    // AxiosError.message (string)
-    const axMsg =
-      typeof (err as any)?.message === "string" ? (err as any).message : "";
+    const axMsg = typeof (err as any)?.message === "string" ? (err as any).message : "";
     return axMsg || fallback;
   }
   if (err instanceof Error) return err.message || fallback;
@@ -194,10 +173,6 @@ export interface SignupPayload {
   organization_id?: number;
 }
 
-/**
- * Thin wrapper over POST /auth/login using form-encoded body.
- * Kept separate so useAuth.tsx can decide how to store the token.
- */
 export async function login(payload: LoginPayload) {
   const form = new URLSearchParams();
   form.set("username", payload.username);
@@ -209,10 +184,6 @@ export async function login(payload: LoginPayload) {
   return resp.data as { access_token: string; token_type: string };
 }
 
-/**
- * Self-serve signup: POST /auth/signup with JSON body.
- * Backend returns the same Token shape as login.
- */
 export async function signup(payload: SignupPayload) {
   const resp = await api.post("/auth/signup", payload);
   return resp.data as { access_token: string; token_type: string };
@@ -232,26 +203,16 @@ export type SiteKpi = {
   prev_7d_kwh: number | null;
   deviation_pct_7d: number | null;
 
-  /**
-   * Optional currency + cost-based KPIs (pricing analytics).
-   * Backend may populate these using org tariffs; safe to treat as null/undefined
-   * when pricing is not configured yet.
-   */
-
-  // Currency used for any cost figures, e.g. "EUR"
   currency_code?: string | null;
 
-  // Canonical 24h cost metrics used by the UI
   last_24h_cost?: number | null;
   baseline_24h_cost?: number | null;
-  delta_24h_cost?: number | null; // positive = savings, negative = overspend
+  delta_24h_cost?: number | null;
 
-  // 7-day cost metrics (for portfolio/reporting extensions)
   cost_7d_actual?: number | null;
   cost_7d_baseline?: number | null;
   cost_7d_delta?: number | null;
 
-  // Legacy / backend synonyms for 24h cost, kept for compatibility
   cost_24h_actual?: number | null;
   cost_24h_baseline?: number | null;
   cost_24h_delta?: number | null;
@@ -264,10 +225,7 @@ export async function getSites() {
     const r = await api.get("/sites");
     return Array.isArray(r.data) ? r.data : [];
   } catch (e) {
-    // If backend returns 404 for no sites, treat as empty list
-    if (axios.isAxiosError(e) && e.response?.status === 404) {
-      return [];
-    }
+    if (axios.isAxiosError(e) && e.response?.status === 404) return [];
     throw e;
   }
 }
@@ -277,10 +235,7 @@ export async function getSite(id: string | number) {
   return r.data;
 }
 
-export async function createSite(payload: {
-  name: string;
-  location?: string;
-}) {
+export async function createSite(payload: { name: string; location?: string }) {
   const r = await api.post("/sites", payload);
   return r.data;
 }
@@ -309,19 +264,9 @@ export async function getTimeseriesSeries(params: {
   return r.data;
 }
 
-/**
- * CSV upload.
- * - Global mode (current behaviour): uploadCsv(formData)
- * - Per-site mode: uploadCsv(formData, { siteId: "site-7" }) -> ?site_id=site-7
- */
-export async function uploadCsv(
-  formData: FormData,
-  opts?: { siteId?: string }
-) {
+export async function uploadCsv(formData: FormData, opts?: { siteId?: string }) {
   const params: Record<string, string> = {};
-  if (opts?.siteId) {
-    params.site_id = opts.siteId;
-  }
+  if (opts?.siteId) params.site_id = opts.siteId;
 
   const r = await api.post("/upload-csv", formData, {
     params,
@@ -335,33 +280,14 @@ export async function deleteAccount() {
   return r.data;
 }
 
-/**
- * Analytics insights for a site.
- *
- * siteKey must be the logical site identifier (e.g. "site-1").
- * Second argument is interpreted as window_hours, matching
- * /analytics/sites/{site_id}/insights?window_hours=...
- */
-export async function getSiteInsights(
-  siteKey: string,
-  windowHours?: number
-) {
+export async function getSiteInsights(siteKey: string, windowHours?: number) {
   const params: Record<string, number> = {};
+  if (typeof windowHours === "number") params.window_hours = windowHours;
 
-  if (typeof windowHours === "number") {
-    params.window_hours = windowHours;
-  }
-
-  const resp = await api.get(`/analytics/sites/${siteKey}/insights`, {
-    params,
-  });
+  const resp = await api.get(`/analytics/sites/${siteKey}/insights`, { params });
   return resp.data;
 }
 
-/**
- * Site KPI snapshot: hits /analytics/sites/{siteKey}/kpi on the backend.
- * siteKey must be of the form "site-<id>".
- */
 export async function getSiteKpi(siteKey: string): Promise<SiteKpi> {
   const resp = await api.get<SiteKpi>(`/analytics/sites/${siteKey}/kpi`);
   return resp.data;
@@ -379,20 +305,9 @@ export interface OpportunityMeasure {
   est_co2_tons_saved_per_year: number;
 }
 
-/**
- * Fetch opportunity measures for a single site.
- * Backed by GET /sites/{site_id}/opportunities returning:
- *   { opportunities: OpportunityMeasure[] }
- */
-export async function getSiteOpportunities(
-  siteId: string | number
-): Promise<OpportunityMeasure[]> {
+export async function getSiteOpportunities(siteId: string | number): Promise<OpportunityMeasure[]> {
   const idStr = String(siteId);
-
-  const resp = await api.get<{ opportunities: OpportunityMeasure[] }>(
-    `/sites/${idStr}/opportunities`
-  );
-
+  const resp = await api.get<{ opportunities: OpportunityMeasure[] }>(`/sites/${idStr}/opportunities`);
   const list = (resp.data as any)?.opportunities;
   return Array.isArray(list) ? list : [];
 }
@@ -406,7 +321,7 @@ export interface IngestHealthMeter {
   expected_points: number;
   actual_points: number;
   completeness_pct: number;
-  last_seen: string; // ISO timestamp
+  last_seen: string;
 }
 
 export interface IngestHealthResponse {
@@ -414,24 +329,13 @@ export interface IngestHealthResponse {
   meters: IngestHealthMeter[];
 }
 
-export async function getIngestHealth(
-  windowHours: number = 24
-): Promise<IngestHealthResponse> {
-  const res = await api.get<IngestHealthResponse>(
-    "/timeseries/ingest_health",
-    {
-      params: { window_hours: windowHours },
-    }
-  );
+export async function getIngestHealth(windowHours: number = 24): Promise<IngestHealthResponse> {
+  const res = await api.get<IngestHealthResponse>("/timeseries/ingest_health", {
+    params: { window_hours: windowHours },
+  });
   return res.data;
 }
 
-/**
- * Stub predictive forecast: hits /analytics/sites/{siteKey}/forecast on the backend.
- * Uses the same axios client and baseURL (/api/v1) as the rest of the API.
- *
- * siteKey must be the logical ID (e.g. "site-1").
- */
 export async function getSiteForecast(
   siteKey: string,
   params: {
@@ -449,12 +353,7 @@ export async function getSiteForecast(
   } = params;
 
   const resp = await api.get(`/analytics/sites/${siteKey}/forecast`, {
-    params: {
-      horizon_hours,
-      lookback_days,
-      resolution,
-      history_window_hours,
-    },
+    params: { horizon_hours, lookback_days, resolution, history_window_hours },
   });
 
   return resp.data as SiteForecast;
@@ -465,7 +364,7 @@ export async function getAlerts(params: { window_hours?: number } = {}) {
   return resp.data;
 }
 
-/* ===== Alerts history + workflow (backend: /alerts/history, PATCH /alerts/{id}) ===== */
+/* ===== Alerts history + workflow ===== */
 
 export type AlertStatus = "open" | "ack" | "resolved" | "muted";
 
@@ -493,10 +392,6 @@ export interface AlertEventUpdatePayload {
   note?: string;
 }
 
-/**
- * Fetch historical alert stream from /alerts/history.
- * Mirrors backend query params.
- */
 export async function getAlertHistory(
   params: {
     siteId?: string;
@@ -506,21 +401,15 @@ export async function getAlertHistory(
   } = {}
 ): Promise<AlertEvent[]> {
   const query: Record<string, string | number> = {};
-
   if (params.siteId) query["site_id"] = params.siteId;
   if (params.status) query["status"] = params.status;
   if (params.severity) query["severity"] = params.severity;
   if (params.limit) query["limit"] = params.limit;
 
-  const res = await api.get<AlertEvent[]>("/alerts/history", {
-    params: query,
-  });
+  const res = await api.get<AlertEvent[]>("/alerts/history", { params: query });
   return res.data;
 }
 
-/**
- * Update a single alert event (status / note).
- */
 export async function updateAlertEvent(
   id: number,
   payload: AlertEventUpdatePayload
@@ -529,43 +418,29 @@ export async function updateAlertEvent(
   return res.data;
 }
 
-/**
- * Fetch current account/org info, if the backend exposes it.
- * This is best-effort; UI will degrade gracefully if it fails.
- */
+/* ===== Account / org settings ===== */
+
 export async function getAccountMe(): Promise<AccountMe> {
   const resp = await api.get<AccountMe>("/account/me");
   return resp.data;
 }
 
-export async function updateOrgSettings(
-  payload: OrgSettingsUpdateRequest
-): Promise<AccountMe> {
+export async function updateOrgSettings(payload: OrgSettingsUpdateRequest): Promise<AccountMe> {
   try {
-    const response = await api.patch<AccountMe>(
-      "/account/org-settings",
-      payload
-    );
+    const response = await api.patch<AccountMe>("/account/org-settings", payload);
     return response.data;
   } catch (err: any) {
-    // Owner-only enforcement (Step 4): normalize the message for consistent UX
     if (axios.isAxiosError(err) && err.response?.status === 403) {
       throw new Error("Only the org owner can update tariff settings.");
     }
-    throw new Error(
-      getApiErrorMessage(err, "Failed to save organization settings.")
-    );
+    throw new Error(getApiErrorMessage(err, "Failed to save organization settings."));
   }
 }
 
-/**
- * Start a Stripe Checkout session for a given plan.
- * Backend returns: { provider: "stripe", checkout_url: string }
- * We normalize to { url?: string } for existing callers.
- */
+/* ===== Billing ===== */
+
 export async function startCheckout(planKey: string) {
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
   const success_url = `${origin}/account?billing=success`;
   const cancel_url = `${origin}/account?billing=cancel`;
 
@@ -575,37 +450,18 @@ export async function startCheckout(planKey: string) {
     cancel_url,
   });
 
-  const data = resp.data as {
-    provider?: string;
-    checkout_url?: string;
-    url?: string;
-  };
-
-  // Prefer the explicit checkout_url, fall back to url if we ever change backend
+  const data = resp.data as { provider?: string; checkout_url?: string; url?: string };
   const url = data.checkout_url || data.url;
   return { url };
 }
 
-/**
- * Open the Stripe Billing Portal for the current org.
- * Backend returns: { provider: "stripe", portal_url: string }
- * We normalize to { url?: string } for existing callers.
- */
 export async function openBillingPortal() {
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
   const return_url = `${origin}/account`;
 
-  const resp = await api.post("/billing/portal-session", {
-    return_url,
-  });
+  const resp = await api.post("/billing/portal-session", { return_url });
 
-  const data = resp.data as {
-    provider?: string;
-    portal_url?: string;
-    url?: string;
-  };
-
+  const data = resp.data as { provider?: string; portal_url?: string; url?: string };
   const url = data.portal_url || data.url;
   return { url };
 }
@@ -621,42 +477,28 @@ export interface IntegrationTokenOut {
 }
 
 export interface IntegrationTokenWithSecret extends IntegrationTokenOut {
-  token: string; // returned once on create
+  token: string;
 }
 
 export async function listIntegrationTokens(): Promise<IntegrationTokenOut[]> {
   try {
-    const resp = await api.get<IntegrationTokenOut[]>(
-      "/auth/integration-tokens"
-    );
+    const resp = await api.get<IntegrationTokenOut[]>("/auth/integration-tokens");
     return Array.isArray(resp.data) ? resp.data : [];
   } catch (err: any) {
-    // Non-owner gets 403 — treat as empty list so UI can show gated state
-    if (axios.isAxiosError(err) && err.response?.status === 403) {
-      return [];
-    }
-    throw new Error(
-      getApiErrorMessage(err, "Failed to load integration tokens.")
-    );
+    if (axios.isAxiosError(err) && err.response?.status === 403) return [];
+    throw new Error(getApiErrorMessage(err, "Failed to load integration tokens."));
   }
 }
 
-export async function createIntegrationToken(
-  name: string
-): Promise<IntegrationTokenWithSecret> {
+export async function createIntegrationToken(name: string): Promise<IntegrationTokenWithSecret> {
   try {
-    const resp = await api.post<IntegrationTokenWithSecret>(
-      "/auth/integration-tokens",
-      { name }
-    );
+    const resp = await api.post<IntegrationTokenWithSecret>("/auth/integration-tokens", { name });
     return resp.data;
   } catch (err: any) {
     if (axios.isAxiosError(err) && err.response?.status === 403) {
       throw new Error("Only the org owner can manage integration tokens.");
     }
-    throw new Error(
-      getApiErrorMessage(err, "Failed to create integration token.")
-    );
+    throw new Error(getApiErrorMessage(err, "Failed to create integration token."));
   }
 }
 
@@ -667,10 +509,90 @@ export async function revokeIntegrationToken(tokenId: number): Promise<void> {
     if (axios.isAxiosError(err) && err.response?.status === 403) {
       throw new Error("Only the org owner can manage integration tokens.");
     }
-    throw new Error(
-      getApiErrorMessage(err, "Failed to revoke integration token.")
-    );
+    throw new Error(getApiErrorMessage(err, "Failed to revoke integration token."));
   }
+}
+
+/* ===== Org invites (owner-only for create/list/revoke; public accept is separate) ===== */
+
+export interface OrgInviteOut {
+  id: number;
+  org_id: number;
+  email?: string | null;
+  role: "owner" | "member" | string;
+  is_active: boolean;
+  expires_at?: string | null;
+  created_by_user_id?: number | null;
+  used_by_user_id?: number | null;
+  used_at?: string | null;
+  created_at: string;
+}
+
+export interface OrgInviteCreateRequest {
+  email?: string;
+  role?: "owner" | "member";
+  expires_in_days?: number; // backend may accept this (recommended)
+}
+
+export interface OrgInviteCreateResponse {
+  token: string; // one-time secret
+  invite?: OrgInviteOut;
+}
+
+export async function listOrgInvites(): Promise<OrgInviteOut[]> {
+  try {
+    const resp = await api.get<OrgInviteOut[]>("/auth/invites");
+    return Array.isArray(resp.data) ? resp.data : [];
+  } catch (err: any) {
+    if (axios.isAxiosError(err) && err.response?.status === 403) return [];
+    throw new Error(getApiErrorMessage(err, "Failed to load invites."));
+  }
+}
+
+export async function createOrgInvite(
+  payload: OrgInviteCreateRequest
+): Promise<OrgInviteCreateResponse> {
+  try {
+    const resp = await api.post<OrgInviteCreateResponse>("/auth/invites", payload);
+    return resp.data;
+  } catch (err: any) {
+    if (axios.isAxiosError(err) && err.response?.status === 403) {
+      throw new Error("Only the org owner can generate invites.");
+    }
+    throw new Error(getApiErrorMessage(err, "Failed to create invite."));
+  }
+}
+
+export async function revokeOrgInvite(inviteId: number): Promise<void> {
+  try {
+    await api.delete(`/auth/invites/${inviteId}`);
+  } catch (err: any) {
+    if (axios.isAxiosError(err) && err.response?.status === 403) {
+      throw new Error("Only the org owner can revoke invites.");
+    }
+    throw new Error(getApiErrorMessage(err, "Failed to revoke invite."));
+  }
+}
+
+/**
+ * Accept an invite token during signup.
+ * This is meant to be called by the Login/Signup screen *without* being authenticated.
+ *
+ * Expected backend: POST /auth/invites/accept { token, email, password, full_name? }
+ * returning Token shape { access_token, token_type } or similar.
+ *
+ * If you choose a different contract on the backend, adjust this wrapper.
+ */
+export async function acceptInvite(payload: {
+  token: string;
+  email: string;
+  password: string;
+  full_name?: string;
+}) {
+  // Must NOT attach bearer access token here (and we don’t, because request interceptor
+  // only adds Authorization if cei_token exists; on new users it won’t exist).
+  const resp = await api.post("/auth/invites/accept", payload);
+  return resp.data as { access_token: string; token_type: string };
 }
 
 /* ===== Site events (timeline + operator notes) ===== */
@@ -688,10 +610,6 @@ export interface SiteEvent {
   created_by_user_id: number | null;
 }
 
-/**
- * Read-only site events for a given site_id.
- * Backed by GET /site-events?site_id=...&window_hours=...&limit=...&page=...
- */
 export async function getSiteEvents(
   siteId: string,
   windowHours: number = 168,
@@ -709,10 +627,6 @@ export async function getSiteEvents(
   return resp.data;
 }
 
-/**
- * Create an operator-driven site event/note.
- * Backed by POST /site-events/sites/{site_id}/events
- */
 export async function createSiteEvent(
   siteId: string,
   payload: { type?: string; title?: string; body?: string }
@@ -733,33 +647,18 @@ export interface ManualOpportunity {
   description: string | null;
 }
 
-/**
- * List manual opportunities for a given numeric site id.
- * Backed by GET /sites/{site_id}/opportunities/manual
- */
-export async function getManualOpportunities(
-  siteId: number | string
-): Promise<ManualOpportunity[]> {
+export async function getManualOpportunities(siteId: number | string): Promise<ManualOpportunity[]> {
   const idStr = String(siteId);
-  const resp = await api.get<ManualOpportunity[]>(
-    `/sites/${idStr}/opportunities/manual`
-  );
+  const resp = await api.get<ManualOpportunity[]>(`/sites/${idStr}/opportunities/manual`);
   return resp.data;
 }
 
-/**
- * Create a manual opportunity for a given numeric site id.
- * Backed by POST /sites/{site_id}/opportunities/manual
- */
 export async function createManualOpportunity(
   siteId: number | string,
   payload: { name: string; description?: string }
 ): Promise<ManualOpportunity> {
   const idStr = String(siteId);
-  const resp = await api.post<ManualOpportunity>(
-    `/sites/${idStr}/opportunities/manual`,
-    payload
-  );
+  const resp = await api.post<ManualOpportunity>(`/sites/${idStr}/opportunities/manual`, payload);
   return resp.data;
 }
 

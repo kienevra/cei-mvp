@@ -1,6 +1,6 @@
 // frontend/src/pages/SiteView.tsx
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   getSite,
@@ -139,9 +139,7 @@ const normalizeApiError = (e: any, fallback: string): string => {
   const detail = e?.response?.data?.detail;
 
   if (Array.isArray(detail)) {
-    return detail
-      .map((d: any) => d?.msg || JSON.stringify(d))
-      .join(" | ");
+    return detail.map((d: any) => d?.msg || JSON.stringify(d)).join(" | ");
   }
 
   if (detail && typeof detail === "object") {
@@ -161,6 +159,21 @@ const normalizeApiError = (e: any, fallback: string): string => {
 
   return fallback;
 };
+
+const isFiniteNumber = (v: any): v is number =>
+  typeof v === "number" && Number.isFinite(v);
+
+const pickNumber = (obj: any, keys: string[]): number | null => {
+  if (!obj) return null;
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (isFiniteNumber(v)) return v;
+  }
+  return null;
+};
+
+const formatKwhValue = (v: number | null | undefined, digits = 1): string =>
+  isFiniteNumber(v) ? v.toFixed(digits) : "—";
 
 const SiteView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -285,11 +298,7 @@ const SiteView: React.FC = () => {
       })
       .catch((e: any) => {
         if (!isMounted) return;
-        // If backend ever 404s for "no baseline yet", we could special-case:
-        // if (e?.response?.status === 404) { setInsights(null); return; }
-        setInsightsError(
-          normalizeApiError(e, "Failed to load analytics insights.")
-        );
+        setInsightsError(normalizeApiError(e, "Failed to load analytics insights."));
       })
       .finally(() => {
         if (!isMounted) return;
@@ -352,9 +361,7 @@ const SiteView: React.FC = () => {
       })
       .catch((e: any) => {
         if (!isMounted) return;
-        setOppsError(
-          normalizeApiError(e, "Failed to load opportunity suggestions.")
-        );
+        setOppsError(normalizeApiError(e, "Failed to load opportunity suggestions."));
       })
       .finally(() => {
         if (!isMounted) return;
@@ -399,9 +406,7 @@ const SiteView: React.FC = () => {
       })
       .catch((e: any) => {
         if (cancelled) return;
-        setKpiError(
-          normalizeApiError(e, "Unable to load KPI comparison.")
-        );
+        setKpiError(normalizeApiError(e, "Unable to load KPI comparison."));
       })
       .finally(() => {
         if (cancelled) return;
@@ -556,13 +561,21 @@ const SiteView: React.FC = () => {
         ? kpiAny.primary_energy_sources.join(" + ")
         : "";
 
-    const fmt = (
-      val: number | null | undefined,
-      digits: number = 2
-    ): string =>
-      typeof val === "number" && Number.isFinite(val)
-        ? val.toFixed(digits)
-        : "";
+    const fmt = (val: number | null | undefined, digits: number = 2): string =>
+      typeof val === "number" && Number.isFinite(val) ? val.toFixed(digits) : "";
+
+    // Be tolerant to backend naming differences (older vs newer fields)
+    const cost24hActual = pickNumber(kpiAny, ["cost_24h_actual", "last_24h_cost", "actual_cost_24h"]);
+    const cost24hBaseline = pickNumber(kpiAny, ["cost_24h_baseline", "baseline_24h_cost", "expected_cost_24h"]);
+    const cost24hDelta =
+      pickNumber(kpiAny, ["cost_24h_delta", "delta_24h_cost", "cost_delta_24h"]) ??
+      (cost24hActual != null && cost24hBaseline != null ? cost24hActual - cost24hBaseline : null);
+
+    const cost7dActual = pickNumber(kpiAny, ["cost_7d_actual", "last_7d_cost", "actual_cost_7d"]);
+    const cost7dBaseline = pickNumber(kpiAny, ["cost_7d_baseline", "baseline_7d_cost", "expected_cost_7d"]);
+    const cost7dDelta =
+      pickNumber(kpiAny, ["cost_7d_delta", "delta_7d_cost", "cost_delta_7d"]) ??
+      (cost7dActual != null && cost7dBaseline != null ? cost7dActual - cost7dBaseline : null);
 
     const row = {
       // identifiers
@@ -577,9 +590,9 @@ const SiteView: React.FC = () => {
       deviation_pct_24h: fmt(kpi.deviation_pct_24h),
 
       // 24h cost KPIs (backend-priced)
-      cost_24h_actual: fmt(kpiAny.cost_24h_actual),
-      cost_24h_baseline: fmt(kpiAny.cost_24h_baseline),
-      cost_24h_delta: fmt(kpiAny.cost_24h_delta),
+      cost_24h_actual: fmt(cost24hActual),
+      cost_24h_baseline: fmt(cost24hBaseline),
+      cost_24h_delta: fmt(cost24hDelta),
 
       // 7d energy vs previous 7d
       last_7d_kwh: fmt(kpi.last_7d_kwh),
@@ -587,9 +600,9 @@ const SiteView: React.FC = () => {
       deviation_pct_7d: fmt(kpi.deviation_pct_7d),
 
       // 7d cost KPIs
-      cost_7d_actual: fmt(kpiAny.cost_7d_actual),
-      cost_7d_baseline: fmt(kpiAny.cost_7d_baseline),
-      cost_7d_delta: fmt(kpiAny.cost_7d_delta),
+      cost_7d_actual: fmt(cost7dActual),
+      cost_7d_baseline: fmt(cost7dBaseline),
+      cost_7d_delta: fmt(cost7dDelta),
 
       // pricing metadata (for €/MWh anchors in finance models)
       currency_code: currency,
@@ -646,58 +659,69 @@ const SiteView: React.FC = () => {
     value: number | null | undefined,
     currencyCode: string | null | undefined
   ): string => {
-    if (value === null || value === undefined || Number.isNaN(value)) {
-      return "—";
-    }
+    if (!isFiniteNumber(value)) return "—";
     const safeCode = currencyCode || "EUR";
     try {
       return new Intl.NumberFormat(undefined, {
         style: "currency",
         currency: safeCode,
         maximumFractionDigits: 2,
+        minimumFractionDigits: 2,
       }).format(value);
     } catch {
       return `${safeCode} ${value.toFixed(2)}`;
     }
   };
 
-  // Derived cost KPIs from SiteKpi (optional, tariff-dependent)
-  const kpiCurrencyCode = (kpi as any)?.currency_code ?? null;
-  const last24hCost = (kpi as any)?.last_24h_cost ?? null;
-  const baseline24hCost = (kpi as any)?.baseline_24h_cost ?? null;
-  const delta24hCostRaw = (kpi as any)?.delta_24h_cost ?? null;
+  // --- Cost KPI wiring (robust to backend field naming) ---
+  const kpiAny = kpi as any;
 
-  let inferredDeltaCost: number | null = delta24hCostRaw;
-  if (
-    inferredDeltaCost == null &&
-    last24hCost != null &&
-    baseline24hCost != null
-  ) {
-    inferredDeltaCost = last24hCost - baseline24hCost;
-  }
+  const kpiCurrencyCode = (kpiAny?.currency_code as string | null | undefined) ?? null;
+  const electricityPricePerKwh = pickNumber(kpiAny, ["electricity_price_per_kwh"]);
 
-  const hasCostKpi =
-    last24hCost != null || baseline24hCost != null || inferredDeltaCost != null;
+  const cost24hActual = useMemo(
+    () => pickNumber(kpiAny, ["cost_24h_actual", "last_24h_cost", "actual_cost_24h"]),
+    [kpiAny]
+  );
+  const cost24hBaseline = useMemo(
+    () => pickNumber(kpiAny, ["cost_24h_baseline", "baseline_24h_cost", "expected_cost_24h"]),
+    [kpiAny]
+  );
+  const cost24hDelta = useMemo(() => {
+    const direct = pickNumber(kpiAny, ["cost_24h_delta", "delta_24h_cost", "cost_delta_24h"]);
+    if (direct != null) return direct;
+    if (cost24hActual != null && cost24hBaseline != null) return cost24hActual - cost24hBaseline;
+    return null;
+  }, [kpiAny, cost24hActual, cost24hBaseline]);
+
+  const tariffsConfigured =
+    electricityPricePerKwh != null ||
+    cost24hActual != null ||
+    cost24hBaseline != null ||
+    cost24hDelta != null;
+
+  const hasCostKpi = tariffsConfigured;
 
   const costDirectionLabel: string =
-    inferredDeltaCost == null
+    cost24hDelta == null
       ? "Savings / overspend vs baseline"
-      : inferredDeltaCost < 0
+      : cost24hDelta < 0
       ? "Savings vs baseline"
-      : inferredDeltaCost > 0
+      : cost24hDelta > 0
       ? "Overspend vs baseline"
       : "On baseline";
 
-  const costDeltaAbs = inferredDeltaCost != null ? Math.abs(inferredDeltaCost) : null;
+  const costDeltaAbs = cost24hDelta != null ? Math.abs(cost24hDelta) : null;
+
+  const savingsTooltip =
+    "24h savings/overspend = (Actual 24h kWh − Baseline 24h kWh) × your org electricity tariff. Negative is savings; positive is overspend.";
 
   const renderForecastCard = () => {
     if (forecastLoading) {
       return (
         <section className="cei-card">
           <div className="cei-card-header">
-            <h2 style={{ fontSize: "0.95rem", fontWeight: 600 }}>
-              Next 24h forecast
-            </h2>
+            <h2 style={{ fontSize: "0.95rem", fontWeight: 600 }}>Next 24h forecast</h2>
             <span className="cei-pill cei-pill-neutral">Loading</span>
           </div>
           <p
@@ -718,18 +742,10 @@ const SiteView: React.FC = () => {
     }
 
     const localForecast = forecast as SiteForecast;
-    const points = Array.isArray(localForecast.points)
-      ? localForecast.points
-      : [];
+    const points = Array.isArray(localForecast.points) ? localForecast.points : [];
+    if (points.length === 0) return null;
 
-    if (points.length === 0) {
-      return null;
-    }
-
-    const totalExpected = points.reduce(
-      (sum, p) => sum + (p.expected_kwh ?? 0),
-      0
-    );
+    const totalExpected = points.reduce((sum, p) => sum + (p.expected_kwh ?? 0), 0);
     const peak = points.reduce((max, p) =>
       (p.expected_kwh ?? 0) > (max.expected_kwh ?? 0) ? p : max
     );
@@ -741,10 +757,7 @@ const SiteView: React.FC = () => {
         minute: "2-digit",
         hour12: false,
       });
-      return {
-        label,
-        value: p.expected_kwh ?? 0,
-      };
+      return { label, value: p.expected_kwh ?? 0 };
     });
 
     const forecastValues = forecastTrendPoints.map((p) => p.value);
@@ -763,14 +776,9 @@ const SiteView: React.FC = () => {
 
     return (
       <section className="cei-card">
-        <div
-          className="cei-card-header"
-          style={{ display: "flex", justifyContent: "space-between" }}
-        >
+        <div className="cei-card-header" style={{ display: "flex", justifyContent: "space-between" }}>
           <div>
-            <h2 style={{ fontSize: "0.95rem", fontWeight: 600 }}>
-              Next 24h forecast
-            </h2>
+            <h2 style={{ fontSize: "0.95rem", fontWeight: 600 }}>Next 24h forecast</h2>
             <p
               style={{
                 marginTop: "0.1rem",
@@ -781,9 +789,7 @@ const SiteView: React.FC = () => {
               Baseline-driven preview of expected energy over the next 24 hours.
             </p>
           </div>
-          <span className="cei-pill cei-pill-neutral">
-            Stub: {localForecast.method}
-          </span>
+          <span className="cei-pill cei-pill-neutral">Stub: {localForecast.method}</span>
         </div>
 
         <div
@@ -797,16 +803,12 @@ const SiteView: React.FC = () => {
         >
           <div className="cei-kpi">
             <div className="cei-kpi-label">Expected next 24h</div>
-            <div className="cei-kpi-value">
-              {totalExpected.toFixed(1)} kWh
-            </div>
+            <div className="cei-kpi-value">{totalExpected.toFixed(1)} kWh</div>
           </div>
           <div className="cei-kpi">
             <div className="cei-kpi-label">Peak hour (forecast)</div>
             <div className="cei-kpi-value">{peakTimeLabel}</div>
-            <div className="cei-kpi-subvalue">
-              {(peak.expected_kwh ?? 0).toFixed(1)} kWh
-            </div>
+            <div className="cei-kpi-subvalue">{(peak.expected_kwh ?? 0).toFixed(1)} kWh</div>
           </div>
         </div>
 
@@ -842,8 +844,7 @@ const SiteView: React.FC = () => {
               let heightPx = 0;
               if (hasForecastTrend && forecastMax > 0) {
                 if (forecastMax > forecastMin) {
-                  const ratio =
-                    (val - forecastMin) / (forecastMax - forecastMin || 1);
+                  const ratio = (val - forecastMin) / (forecastMax - forecastMin || 1);
                   heightPx = baseBarHeightPx + ratio * maxBarHeightPx;
                 } else {
                   heightPx = baseBarHeightPx + maxBarHeightPx;
@@ -905,11 +906,9 @@ const SiteView: React.FC = () => {
             color: "var(--cei-text-muted)",
           }}
         >
-          Based on a{" "}
-          <strong>{localForecast.baseline_lookback_days}-day</strong> baseline
-          and a <strong>{localForecast.history_window_hours}-hour</strong>{" "}
-          recent performance window. Use this strip as a forward-looking mirror
-          of the last 24h trend chart above.
+          Based on a <strong>{localForecast.baseline_lookback_days}-day</strong> baseline and a{" "}
+          <strong>{localForecast.history_window_hours}-hour</strong> recent performance window. Use
+          this strip as a forward-looking mirror of the last 24h trend chart above.
         </p>
       </section>
     );
@@ -941,9 +940,7 @@ const SiteView: React.FC = () => {
       setNoteBody("");
       setTimelineRefreshKey((k) => k + 1);
     } catch (err: any) {
-      setNoteError(
-        normalizeApiError(err, "Failed to save note. Please try again.")
-      );
+      setNoteError(normalizeApiError(err, "Failed to save note. Please try again."));
     } finally {
       setNoteSaving(false);
     }
@@ -985,19 +982,14 @@ const SiteView: React.FC = () => {
 
       setManualOppForm({ name: "", description: "" });
     } catch (err: any) {
-      setManualOppError(
-        normalizeApiError(err, "Failed to create opportunity.")
-      );
+      setManualOppError(normalizeApiError(err, "Failed to create opportunity."));
     } finally {
       setManualOppSaving(false);
     }
   };
 
   return (
-    <div
-      className="dashboard-page"
-      style={{ maxWidth: "100vw", overflowX: "hidden" }}
-    >
+    <div className="dashboard-page" style={{ maxWidth: "100vw", overflowX: "hidden" }}>
       {/* Header */}
       <section
         style={{
@@ -1052,26 +1044,20 @@ const SiteView: React.FC = () => {
         >
           {site?.location && (
             <div>
-              <span style={{ fontWeight: 500 }}>Location:</span>{" "}
-              {site.location}
+              <span style={{ fontWeight: 500 }}>Location:</span> {site.location}
             </div>
           )}
           <div>
-            <span style={{ fontWeight: 500 }}>Site ID:</span>{" "}
-            {siteKey ?? id ?? "—"}
+            <span style={{ fontWeight: 500 }}>Site ID:</span> {siteKey ?? id ?? "—"}
           </div>
           {lastUpdatedLabel && (
             <div style={{ marginTop: "0.15rem" }}>
               Last updated:{" "}
-              <span style={{ color: "var(--cei-text-accent)" }}>
-                {lastUpdatedLabel}
-              </span>
+              <span style={{ color: "var(--cei-text-accent)" }}>{lastUpdatedLabel}</span>
             </div>
           )}
           {dataWindowLabel && (
-            <div style={{ marginTop: "0.1rem", fontSize: "0.75rem" }}>
-              Data window: {dataWindowLabel}
-            </div>
+            <div style={{ marginTop: "0.1rem", fontSize: "0.75rem" }}>Data window: {dataWindowLabel}</div>
           )}
           <button
             type="button"
@@ -1152,19 +1138,17 @@ const SiteView: React.FC = () => {
           >
             {hasSummaryData ? (
               <>
-                Aggregated from{" "}
-                <strong>{summary!.points.toLocaleString()} readings</strong> in
-                the last {summary!.window_hours} hours for this site.
+                Aggregated from <strong>{summary!.points.toLocaleString()} readings</strong> in the last{" "}
+                {summary!.window_hours} hours for this site.
               </>
             ) : summaryLoading ? (
               "Loading per-site energy data…"
             ) : (
               <>
-                No recent data for this site. Either ensure your uploaded
-                timeseries includes{" "}
+                No recent data for this site. Either ensure your uploaded timeseries includes{" "}
                 <code>site_id = {siteKey ?? "site-N"}</code>, or use the{" "}
-                <strong>“Upload CSV for this site”</strong> button so CEI routes
-                rows here automatically when your CSV has no site_id column.
+                <strong>“Upload CSV for this site”</strong> button so CEI routes rows here automatically when your CSV has
+                no site_id column.
               </>
             )}
           </div>
@@ -1228,8 +1212,7 @@ const SiteView: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Simple heuristic status based on whether we see any recent
-            timeseries for this site.
+            Simple heuristic status based on whether we see any recent timeseries for this site.
           </div>
         </div>
       </section>
@@ -1239,14 +1222,7 @@ const SiteView: React.FC = () => {
         <div className="cei-card">
           <div className="cei-card-header">
             <div>
-              <div
-                style={{
-                  fontSize: "0.9rem",
-                  fontWeight: 600,
-                }}
-              >
-                Performance snapshot
-              </div>
+              <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>Performance snapshot</div>
               <div
                 style={{
                   marginTop: "0.2rem",
@@ -1254,30 +1230,26 @@ const SiteView: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                Last 24h vs baseline, and last 7 days vs previous 7 days for
-                this site. Cost metrics use your org&apos;s configured tariffs.
+                Last 24h vs baseline, and last 7 days vs previous 7 days for this site. Cost metrics use your
+                org&apos;s configured tariffs.
               </div>
             </div>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-end",
-                gap: "0.35rem",
-              }}
-            >
-              {kpiLoading && (
-                <span className="cei-pill cei-pill-neutral">Updating…</span>
+
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.35rem" }}>
+              {kpiLoading && <span className="cei-pill cei-pill-neutral">Updating…</span>}
+
+              {!kpiLoading && kpi && !tariffsConfigured && (
+                <span className="cei-pill cei-pill-neutral" title="Configure tariffs under Settings to enable € KPIs.">
+                  No tariffs configured – showing kWh only
+                </span>
               )}
+
               <button
                 type="button"
                 className="cei-btn cei-btn-ghost"
                 onClick={handleExportKpiCsv}
                 disabled={kpiLoading || !kpi || !siteKey}
-                style={{
-                  fontSize: "0.75rem",
-                  padding: "0.25rem 0.7rem",
-                }}
+                style={{ fontSize: "0.75rem", padding: "0.25rem 0.7rem" }}
               >
                 Download KPI CSV
               </button>
@@ -1285,15 +1257,7 @@ const SiteView: React.FC = () => {
           </div>
 
           {kpiError && (
-            <div
-              style={{
-                marginTop: "0.35rem",
-                fontSize: "0.78rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              {kpiError}
-            </div>
+            <div style={{ marginTop: "0.35rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>{kpiError}</div>
           )}
 
           {kpi && (
@@ -1320,32 +1284,16 @@ const SiteView: React.FC = () => {
                     Last 24h vs baseline
                   </div>
                   <div>
-                    <span
-                      style={{
-                        fontFamily: "var(--cei-font-mono, monospace)",
-                        fontWeight: 500,
-                      }}
-                    >
-                      {kpi.last_24h_kwh.toFixed(0)} kWh
+                    <span style={{ fontFamily: "var(--cei-font-mono, monospace)", fontWeight: 500 }}>
+                      {formatKwhValue(kpi.last_24h_kwh, 0)} kWh
                     </span>{" "}
-                    <span
-                      style={{
-                        fontSize: "0.75rem",
-                        color: "var(--cei-text-muted)",
-                      }}
-                    >
+                    <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
                       / baseline{" "}
-                      {kpi.baseline_24h_kwh != null
-                        ? `${kpi.baseline_24h_kwh.toFixed(0)} kWh`
-                        : "—"}
+                      {kpi.baseline_24h_kwh != null ? `${formatKwhValue(kpi.baseline_24h_kwh, 0)} kWh` : "—"}
                     </span>
                   </div>
                   <div style={{ marginTop: "0.25rem" }}>
-                    <span
-                      className={`cei-pill ${kpiDeltaBadgeClass(
-                        kpi.deviation_pct_24h
-                      )}`}
-                    >
+                    <span className={`cei-pill ${kpiDeltaBadgeClass(kpi.deviation_pct_24h)}`}>
                       {formatPct(kpi.deviation_pct_24h)} vs baseline
                     </span>
                   </div>
@@ -1364,32 +1312,15 @@ const SiteView: React.FC = () => {
                     Last 7 days vs previous 7 days
                   </div>
                   <div>
-                    <span
-                      style={{
-                        fontFamily: "var(--cei-font-mono, monospace)",
-                        fontWeight: 500,
-                      }}
-                    >
-                      {kpi.last_7d_kwh.toFixed(0)} kWh
+                    <span style={{ fontFamily: "var(--cei-font-mono, monospace)", fontWeight: 500 }}>
+                      {formatKwhValue(kpi.last_7d_kwh, 0)} kWh
                     </span>{" "}
-                    <span
-                      style={{
-                        fontSize: "0.75rem",
-                        color: "var(--cei-text-muted)",
-                      }}
-                    >
-                      / prev{" "}
-                      {kpi.prev_7d_kwh != null
-                        ? `${kpi.prev_7d_kwh.toFixed(0)} kWh`
-                        : "—"}
+                    <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
+                      / prev {kpi.prev_7d_kwh != null ? `${formatKwhValue(kpi.prev_7d_kwh, 0)} kWh` : "—"}
                     </span>
                   </div>
                   <div style={{ marginTop: "0.25rem" }}>
-                    <span
-                      className={`cei-pill ${kpiDeltaBadgeClass(
-                        kpi.deviation_pct_7d
-                      )}`}
-                    >
+                    <span className={`cei-pill ${kpiDeltaBadgeClass(kpi.deviation_pct_7d)}`}>
                       {formatPct(kpi.deviation_pct_7d)} vs previous 7d
                     </span>
                   </div>
@@ -1407,15 +1338,8 @@ const SiteView: React.FC = () => {
                   >
                     Headline
                   </div>
-                  <p
-                    style={{
-                      fontSize: "0.78rem",
-                      color: "var(--cei-text-muted)",
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {kpi.deviation_pct_7d != null &&
-                    Math.abs(kpi.deviation_pct_7d) > 5
+                  <p style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", lineHeight: 1.5 }}>
+                    {kpi.deviation_pct_7d != null && Math.abs(kpi.deviation_pct_7d) > 5
                       ? kpi.deviation_pct_7d > 0
                         ? "Energy use is trending above the previous week. Worth a closer look at this site."
                         : "Energy use is trending below the previous week. Capture what’s working and standardize it."
@@ -1434,14 +1358,31 @@ const SiteView: React.FC = () => {
               >
                 <div
                   style={{
-                    fontSize: "0.75rem",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    color: "var(--cei-text-muted)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "0.75rem",
                     marginBottom: "0.35rem",
                   }}
                 >
-                  Cost snapshot (last 24h)
+                  <div
+                    style={{
+                      fontSize: "0.75rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: "var(--cei-text-muted)",
+                    }}
+                  >
+                    Cost snapshot (last 24h)
+                  </div>
+
+                  <span
+                    className="cei-pill cei-pill-neutral"
+                    title={savingsTooltip}
+                    style={{ cursor: "help", userSelect: "none" }}
+                  >
+                    How is 24h savings calculated?
+                  </span>
                 </div>
 
                 {hasCostKpi ? (
@@ -1454,118 +1395,52 @@ const SiteView: React.FC = () => {
                     }}
                   >
                     <div>
-                      <div
-                        style={{
-                          fontSize: "0.75rem",
-                          color: "var(--cei-text-muted)",
-                          marginBottom: "0.15rem",
-                        }}
-                      >
+                      <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginBottom: "0.15rem" }}>
                         24h cost (actual)
                       </div>
-                      <div
-                        style={{
-                          fontFamily: "var(--cei-font-mono, monospace)",
-                          fontWeight: 500,
-                        }}
-                      >
-                        {formatCurrency(last24hCost, kpiCurrencyCode)}
+                      <div style={{ fontFamily: "var(--cei-font-mono, monospace)", fontWeight: 500 }}>
+                        {formatCurrency(cost24hActual, kpiCurrencyCode)}
                       </div>
                     </div>
 
                     <div>
-                      <div
-                        style={{
-                          fontSize: "0.75rem",
-                          color: "var(--cei-text-muted)",
-                          marginBottom: "0.15rem",
-                        }}
-                      >
+                      <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginBottom: "0.15rem" }}>
                         24h cost (expected)
                       </div>
-                      <div
-                        style={{
-                          fontFamily: "var(--cei-font-mono, monospace)",
-                          fontWeight: 500,
-                        }}
-                      >
-                        {formatCurrency(baseline24hCost, kpiCurrencyCode)}
+                      <div style={{ fontFamily: "var(--cei-font-mono, monospace)", fontWeight: 500 }}>
+                        {formatCurrency(cost24hBaseline, kpiCurrencyCode)}
                       </div>
-                      <div
-                        style={{
-                          marginTop: "0.15rem",
-                          fontSize: "0.75rem",
-                          color: "var(--cei-text-muted)",
-                        }}
-                      >
+                      <div style={{ marginTop: "0.15rem", fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
                         Based on baseline kWh for this site.
                       </div>
                     </div>
 
                     <div>
-                      <div
-                        style={{
-                          fontSize: "0.75rem",
-                          color: "var(--cei-text-muted)",
-                          marginBottom: "0.15rem",
-                        }}
-                      >
+                      <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginBottom: "0.15rem" }}>
                         24h savings / overspend
                       </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "0.15rem",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontFamily: "var(--cei-font-mono, monospace)",
-                            fontWeight: 500,
-                          }}
-                        >
-                          {formatCurrency(
-                            costDeltaAbs,
-                            kpiCurrencyCode
-                          )}{" "}
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+                        <span style={{ fontFamily: "var(--cei-font-mono, monospace)", fontWeight: 500 }}>
+                          {formatCurrency(costDeltaAbs, kpiCurrencyCode)}{" "}
                           {costDirectionLabel !== "On baseline" &&
-                          costDirectionLabel !==
-                            "Savings / overspend vs baseline" ? (
-                            <span
-                              style={{
-                                fontSize: "0.75rem",
-                                color: "var(--cei-text-muted)",
-                              }}
-                            >
+                          costDirectionLabel !== "Savings / overspend vs baseline" ? (
+                            <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
                               ({costDirectionLabel})
                             </span>
                           ) : null}
                         </span>
                         {kpi.deviation_pct_24h != null && (
-                          <span
-                            style={{
-                              fontSize: "0.75rem",
-                              color: "var(--cei-text-muted)",
-                            }}
-                          >
-                            {formatPct(kpi.deviation_pct_24h)} vs baseline on a
-                            cost basis.
+                          <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
+                            {formatPct(kpi.deviation_pct_24h)} vs baseline on an energy basis.
                           </span>
                         )}
                       </div>
                     </div>
                   </div>
                 ) : (
-                  <div
-                    style={{
-                      fontSize: "0.78rem",
-                      color: "var(--cei-text-muted)",
-                    }}
-                  >
-                    Cost analytics for this site will light up once tariffs are
-                    configured for your organization. You can review these under
-                    Account &amp; Settings.
+                  <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+                    Cost analytics for this site will light up once tariffs are configured for your organization. You can
+                    review these under Account &amp; Settings.
                   </div>
                 )}
               </div>
@@ -1576,10 +1451,7 @@ const SiteView: React.FC = () => {
 
       {/* Trend + metadata */}
       <section className="dashboard-main-grid">
-        <div
-          className="cei-card"
-          style={{ maxWidth: "100%", overflow: "hidden" }}
-        >
+        <div className="cei-card" style={{ maxWidth: "100%", overflow: "hidden" }}>
           <div
             style={{
               display: "flex",
@@ -1590,23 +1462,9 @@ const SiteView: React.FC = () => {
             }}
           >
             <div>
-              <div
-                style={{
-                  fontSize: "0.9rem",
-                  fontWeight: 600,
-                }}
-              >
-                Site energy trend – last 24 hours
-              </div>
-              <div
-                style={{
-                  marginTop: "0.2rem",
-                  fontSize: "0.8rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
-                Per-site series aggregated by hour. Uses{" "}
-                <code>site_id = {siteKey}</code> from timeseries.
+              <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>Site energy trend – last 24 hours</div>
+              <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+                Per-site series aggregated by hour. Uses <code>site_id = {siteKey}</code> from timeseries.
               </div>
             </div>
             <div
@@ -1630,10 +1488,7 @@ const SiteView: React.FC = () => {
                   !Array.isArray(series.points) ||
                   series.points.length === 0
                 }
-                style={{
-                  fontSize: "0.75rem",
-                  padding: "0.25rem 0.6rem",
-                }}
+                style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }}
               >
                 {seriesLoading ? "Preparing…" : "Download CSV"}
               </button>
@@ -1641,28 +1496,15 @@ const SiteView: React.FC = () => {
           </div>
 
           {seriesLoading && (
-            <div
-              style={{
-                padding: "1.2rem 0.5rem",
-                display: "flex",
-                justifyContent: "center",
-              }}
-            >
+            <div style={{ padding: "1.2rem 0.5rem", display: "flex", justifyContent: "center" }}>
               <LoadingSpinner />
             </div>
           )}
 
           {!seriesLoading && !hasTrend ? (
-            <div
-              style={{
-                fontSize: "0.8rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              No recent per-site series data. Once your timeseries has matching{" "}
-              <code>site_id = {siteKey}</code>, or you upload via{" "}
-              <strong>“Upload CSV for this site”</strong> with no site_id
-              column, this chart will light up.
+            <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              No recent per-site series data. Once your timeseries has matching <code>site_id = {siteKey}</code>, or you
+              upload via <strong>“Upload CSV for this site”</strong> with no site_id column, this chart will light up.
             </div>
           ) : (
             hasTrend && (
@@ -1699,8 +1541,7 @@ const SiteView: React.FC = () => {
                       let heightPx = 0;
                       if (hasTrend && maxVal > 0) {
                         if (maxVal > minVal) {
-                          const ratio =
-                            (val - minVal) / (maxVal - minVal || 1);
+                          const ratio = (val - minVal) / (maxVal - minVal || 1);
                           heightPx = baseBarHeightPx + ratio * maxBarHeightPx;
                         } else {
                           heightPx = baseBarHeightPx + maxBarHeightPx;
@@ -1736,8 +1577,7 @@ const SiteView: React.FC = () => {
                               background:
                                 "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
                               height: `${heightPx}px`,
-                              boxShadow:
-                                "0 6px 18px rgba(56, 189, 248, 0.45)",
+                              boxShadow: "0 6px 18px rgba(56, 189, 248, 0.45)",
                               border: "1px solid rgba(226, 232, 240, 0.8)",
                             }}
                           />
@@ -1757,13 +1597,7 @@ const SiteView: React.FC = () => {
                 </div>
 
                 {trendSummary && (
-                  <div
-                    style={{
-                      marginTop: "0.75rem",
-                      fontSize: "0.8rem",
-                      color: "var(--cei-text-muted)",
-                    }}
-                  >
+                  <div style={{ marginTop: "0.75rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
                     {trendSummary}
                   </div>
                 )}
@@ -1773,39 +1607,16 @@ const SiteView: React.FC = () => {
         </div>
 
         <div className="cei-card">
-          <div
-            style={{
-              marginBottom: "0.6rem",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "0.9rem",
-                fontWeight: 600,
-              }}
-            >
-              Site metadata
-            </div>
-            <div
-              style={{
-                marginTop: "0.2rem",
-                fontSize: "0.8rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              Basic descriptive information for this site. We&apos;ll extend
-              this with tags, baseline, and other fields later.
+          <div style={{ marginBottom: "0.6rem" }}>
+            <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>Site metadata</div>
+            <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              Basic descriptive information for this site. We&apos;ll extend this with tags, baseline, and other fields
+              later.
             </div>
           </div>
 
           {siteLoading && (
-            <div
-              style={{
-                padding: "1.2rem 0.5rem",
-                display: "flex",
-                justifyContent: "center",
-              }}
-            >
+            <div style={{ padding: "1.2rem 0.5rem", display: "flex", justifyContent: "center" }}>
               <LoadingSpinner />
             </div>
           )}
@@ -1820,33 +1631,21 @@ const SiteView: React.FC = () => {
               }}
             >
               <div>
-                <span style={{ color: "var(--cei-text-muted)" }}>Name:</span>{" "}
-                <span>{site.name}</span>
+                <span style={{ color: "var(--cei-text-muted)" }}>Name:</span> <span>{site.name}</span>
               </div>
               <div>
-                <span style={{ color: "var(--cei-text-muted)" }}>
-                  Location:
-                </span>{" "}
+                <span style={{ color: "var(--cei-text-muted)" }}>Location:</span>{" "}
                 <span>{site.location || "—"}</span>
               </div>
               <div>
-                <span style={{ color: "var(--cei-text-muted)" }}>
-                  Internal ID:
-                </span>{" "}
+                <span style={{ color: "var(--cei-text-muted)" }}>Internal ID:</span>{" "}
                 <span>{site.id}</span>
               </div>
             </div>
           )}
 
           {!siteLoading && !site && !siteError && (
-            <div
-              style={{
-                fontSize: "0.85rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              Site not found.
-            </div>
+            <div style={{ fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>Site not found.</div>
           )}
         </div>
       </section>
@@ -1863,50 +1662,21 @@ const SiteView: React.FC = () => {
             <div className="cei-card">
               <div className="cei-card-header">
                 <div>
-                  <div
-                    style={{
-                      fontSize: "0.9rem",
-                      fontWeight: 600,
-                    }}
-                  >
-                    Add site note
-                  </div>
-                  <div
-                    style={{
-                      marginTop: "0.2rem",
-                      fontSize: "0.8rem",
-                      color: "var(--cei-text-muted)",
-                    }}
-                  >
-                    Log operational changes, decisions, or observations. These
-                    events populate the activity timeline for this site.
+                  <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>Add site note</div>
+                  <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+                    Log operational changes, decisions, or observations. These events populate the activity timeline for
+                    this site.
                   </div>
                 </div>
-                {noteSaving && (
-                  <span className="cei-pill cei-pill-neutral">Saving…</span>
-                )}
+                {noteSaving && <span className="cei-pill cei-pill-neutral">Saving…</span>}
               </div>
 
               {noteError && (
-                <div
-                  style={{
-                    marginTop: "0.5rem",
-                    fontSize: "0.78rem",
-                    color: "#f97373",
-                  }}
-                >
-                  {noteError}
-                </div>
+                <div style={{ marginTop: "0.5rem", fontSize: "0.78rem", color: "#f97373" }}>{noteError}</div>
               )}
 
               <form onSubmit={handleAddSiteNote} style={{ marginTop: "0.6rem" }}>
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "0.4rem",
-                  }}
-                >
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                   <input
                     type="text"
                     placeholder="Short title (optional)"
@@ -1938,21 +1708,12 @@ const SiteView: React.FC = () => {
                       resize: "vertical",
                     }}
                   />
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "flex-end",
-                      marginTop: "0.2rem",
-                    }}
-                  >
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.2rem" }}>
                     <button
                       type="submit"
                       className="cei-btn"
                       disabled={noteSaving || (!noteTitle && !noteBody)}
-                      style={{
-                        fontSize: "0.8rem",
-                        padding: "0.35rem 0.9rem",
-                      }}
+                      style={{ fontSize: "0.8rem", padding: "0.35rem 0.9rem" }}
                     >
                       {noteSaving ? "Saving…" : "Save note"}
                     </button>
@@ -1961,11 +1722,7 @@ const SiteView: React.FC = () => {
               </form>
             </div>
 
-            <SiteTimelineCard
-              siteId={siteKey}
-              windowHours={168}
-              refreshKey={timelineRefreshKey}
-            />
+            <SiteTimelineCard siteId={siteKey} windowHours={168} refreshKey={timelineRefreshKey} />
           </div>
         </section>
       )}
@@ -1987,15 +1744,7 @@ const SiteView: React.FC = () => {
             >
               CEI hybrid view
             </div>
-            <div
-              style={{
-                marginTop: "0.3rem",
-                fontSize: "0.9rem",
-                fontWeight: 600,
-              }}
-            >
-              {hybrid.headline}
-            </div>
+            <div style={{ marginTop: "0.3rem", fontSize: "0.9rem", fontWeight: 600 }}>{hybrid.headline}</div>
             <ul
               style={{
                 marginTop: "0.5rem",
@@ -2016,65 +1765,25 @@ const SiteView: React.FC = () => {
       {/* Opportunities + baseline insights */}
       <section>
         <div className="cei-card">
-          <div
-            style={{
-              marginBottom: "0.6rem",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "0.9rem",
-                fontWeight: 600,
-              }}
-            >
-              Efficiency opportunities & baseline insights
-            </div>
-            <div
-              style={{
-                marginTop: "0.2rem",
-                fontSize: "0.8rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              Targeted ideas based on the last 24 hours of energy at this site.
-              Use this to brief local operations on where to focus next.
+          <div style={{ marginBottom: "0.6rem" }}>
+            <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>Efficiency opportunities & baseline insights</div>
+            <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              Targeted ideas based on the last 24 hours of energy at this site. Use this to brief local operations on
+              where to focus next.
             </div>
 
             {insightsLoading && (
-              <div
-                style={{
-                  marginTop: "0.35rem",
-                  fontSize: "0.78rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
+              <div style={{ marginTop: "0.35rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
                 Loading baseline profile for this site…
               </div>
             )}
 
             {!insightsLoading && baselineProfile && (
-              <div
-                style={{
-                  marginTop: "0.35rem",
-                  fontSize: "0.78rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
-                Baseline (last{" "}
-                <strong>{insightLookbackDays.toFixed(0)} days</strong>): global
-                mean around{" "}
-                <strong>
-                  {baselineProfile.global_mean_kwh.toFixed(1)} kWh/hour
-                </strong>
-                , median hour about{" "}
-                <strong>
-                  {baselineProfile.global_p50_kwh.toFixed(1)} kWh
-                </strong>
-                , and a high-load {`p90`} near{" "}
-                <strong>
-                  {baselineProfile.global_p90_kwh.toFixed(1)} kWh
-                </strong>
-                . The last{" "}
+              <div style={{ marginTop: "0.35rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+                Baseline (last <strong>{insightLookbackDays.toFixed(0)} days</strong>): global mean around{" "}
+                <strong>{baselineProfile.global_mean_kwh.toFixed(1)} kWh/hour</strong>, median hour about{" "}
+                <strong>{baselineProfile.global_p50_kwh.toFixed(1)} kWh</strong>, and a high-load p90 near{" "}
+                <strong>{baselineProfile.global_p90_kwh.toFixed(1)} kWh</strong>. The last{" "}
                 <strong>{insightWindowHours.toFixed(0)} hours</strong> ran{" "}
                 {deviationPct !== null ? (
                   <strong>
@@ -2088,106 +1797,50 @@ const SiteView: React.FC = () => {
               </div>
             )}
 
-            <div
-              style={{
-                marginTop: "0.35rem",
-                fontSize: "0.78rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              Under the hood, CEI compares this site&apos;s{" "}
-              <strong>night vs day baseline</strong>,{" "}
-              <strong>weekend vs weekday levels</strong>, and{" "}
-              <strong>short-lived spikes vs typical hourly load</strong> — the
-              same logic powering the Alerts page. Use both views together to
-              separate day-to-day noise from structural waste.
+            <div style={{ marginTop: "0.35rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+              Under the hood, CEI compares this site&apos;s <strong>night vs day baseline</strong>,{" "}
+              <strong>weekend vs weekday levels</strong>, and <strong>short-lived spikes vs typical hourly load</strong>{" "}
+              — the same logic powering the Alerts page. Use both views together to separate day-to-day noise from
+              structural waste.
             </div>
 
             {oppsLoading && (
-              <div
-                style={{
-                  marginTop: "0.4rem",
-                  fontSize: "0.78rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
-                Scanning this site&apos;s KPIs for concrete opportunity
-                measures…
+              <div style={{ marginTop: "0.4rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+                Scanning this site&apos;s KPIs for concrete opportunity measures…
               </div>
             )}
 
             {!oppsLoading && oppsError && (
-              <div
-                style={{
-                  marginTop: "0.4rem",
-                  fontSize: "0.78rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
+              <div style={{ marginTop: "0.4rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
                 {oppsError} Falling back to generic guidance below.
               </div>
             )}
 
             {!oppsLoading && opportunities.length > 0 && (
-              <div
-                style={{
-                  marginTop: "0.5rem",
-                  fontSize: "0.8rem",
-                  color: "var(--cei-text-main)",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "0.8rem",
-                    fontWeight: 500,
-                    marginBottom: "0.25rem",
-                  }}
-                >
+              <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "var(--cei-text-main)" }}>
+                <div style={{ fontSize: "0.8rem", fontWeight: 500, marginBottom: "0.25rem" }}>
                   Modelled measures for this site
                 </div>
-                <ul
-                  style={{
-                    margin: 0,
-                    paddingLeft: "1.1rem",
-                    fontSize: "0.8rem",
-                    lineHeight: 1.5,
-                  }}
-                >
+                <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.8rem", lineHeight: 1.5 }}>
                   {opportunities.map((o, idx) => {
-                    const roiYears =
-                      typeof o.simple_roi_years === "number"
-                        ? o.simple_roi_years
-                        : null;
-                    const savings =
-                      typeof o.est_annual_kwh_saved === "number"
-                        ? o.est_annual_kwh_saved
-                        : null;
+                    const roiYears = typeof o.simple_roi_years === "number" ? o.simple_roi_years : null;
+                    const savings = typeof o.est_annual_kwh_saved === "number" ? o.est_annual_kwh_saved : null;
                     const co2 =
-                      typeof o.est_co2_tons_saved_per_year === "number"
-                        ? o.est_co2_tons_saved_per_year
-                        : null;
+                      typeof o.est_co2_tons_saved_per_year === "number" ? o.est_co2_tons_saved_per_year : null;
 
                     return (
-                      <li
-                        key={`${o.source || "auto"}-${o.id}-${idx}`}
-                        style={{ marginBottom: "0.25rem" }}
-                      >
+                      <li key={`${o.source || "auto"}-${o.id}-${idx}`} style={{ marginBottom: "0.25rem" }}>
                         <strong>
                           {o.source === "manual" ? "[Manual] " : ""}
                           {o.name}
                         </strong>
                         {o.description ? ` – ${o.description}` : ""}
-                        <span
-                          style={{ display: "block", fontSize: "0.78rem" }}
-                        >
+                        <span style={{ display: "block", fontSize: "0.78rem" }}>
                           {savings != null && (
                             <>
                               ≈{" "}
                               <strong>
-                                {savings.toLocaleString(undefined, {
-                                  maximumFractionDigits: 0,
-                                })}{" "}
-                                kWh/yr
+                                {savings.toLocaleString(undefined, { maximumFractionDigits: 0 })} kWh/yr
                               </strong>{" "}
                               saved
                             </>
@@ -2195,15 +1848,13 @@ const SiteView: React.FC = () => {
                           {roiYears != null && (
                             <>
                               {" "}
-                              · simple ROI ~{" "}
-                              <strong>{roiYears.toFixed(1)} yrs</strong>
+                              · simple ROI ~ <strong>{roiYears.toFixed(1)} yrs</strong>
                             </>
                           )}
                           {co2 != null && (
                             <>
                               {" "}
-                              · CO₂ cut ~{" "}
-                              <strong>{co2.toFixed(2)} tCO₂/yr</strong>
+                              · CO₂ cut ~ <strong>{co2.toFixed(2)} tCO₂/yr</strong>
                             </>
                           )}
                         </span>
@@ -2223,36 +1874,14 @@ const SiteView: React.FC = () => {
               borderTop: "1px solid rgba(148, 163, 184, 0.4)",
             }}
           >
-            <div
-              style={{
-                fontSize: "0.8rem",
-                fontWeight: 500,
-                marginBottom: "0.35rem",
-              }}
-            >
-              Add manual opportunity
-            </div>
+            <div style={{ fontSize: "0.8rem", fontWeight: 500, marginBottom: "0.35rem" }}>Add manual opportunity</div>
 
             {manualOppError && (
-              <div
-                style={{
-                  marginBottom: "0.4rem",
-                  fontSize: "0.78rem",
-                  color: "#f97373",
-                }}
-              >
-                {manualOppError}
-              </div>
+              <div style={{ marginBottom: "0.4rem", fontSize: "0.78rem", color: "#f97373" }}>{manualOppError}</div>
             )}
 
             <form onSubmit={handleManualOppSubmit}>
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.4rem",
-                }}
-              >
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                 <input
                   type="text"
                   placeholder="Short opportunity name (e.g. 'LED retrofit in warehouse')"
@@ -2294,24 +1923,12 @@ const SiteView: React.FC = () => {
                     resize: "vertical",
                   }}
                 />
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    marginTop: "0.2rem",
-                  }}
-                >
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.2rem" }}>
                   <button
                     type="submit"
                     className="cei-btn"
-                    disabled={
-                      manualOppSaving ||
-                      (!manualOppForm.name && !manualOppForm.description)
-                    }
-                    style={{
-                      fontSize: "0.8rem",
-                      padding: "0.35rem 0.9rem",
-                    }}
+                    disabled={manualOppSaving || (!manualOppForm.name && !manualOppForm.description)}
+                    style={{ fontSize: "0.8rem", padding: "0.35rem 0.9rem" }}
                   >
                     {manualOppSaving ? "Saving…" : "Add opportunity"}
                   </button>
@@ -2321,16 +1938,9 @@ const SiteView: React.FC = () => {
           </div>
 
           {suggestions.length === 0 ? (
-            <div
-              style={{
-                marginTop: "0.7rem",
-                fontSize: "0.82rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              No specific opportunities detected yet. Once this site has a more
-              stable data profile, CEI will surface patterns worth acting on
-              here.
+            <div style={{ marginTop: "0.7rem", fontSize: "0.82rem", color: "var(--cei-text-muted)" }}>
+              No specific opportunities detected yet. Once this site has a more stable data profile, CEI will surface
+              patterns worth acting on here.
             </div>
           ) : (
             <ul
