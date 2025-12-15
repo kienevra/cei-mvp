@@ -1,6 +1,6 @@
 // frontend/src/App.tsx
 import React, { Suspense, lazy } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./hooks/useAuth";
 import TopNav from "./components/TopNav";
 import Sidebar from "./components/Sidebar";
@@ -12,6 +12,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const SitesList = lazy(() => import("./pages/SitesList"));
 const SiteView = lazy(() => import("./pages/SiteView"));
 const Login = lazy(() => import("./pages/Login"));
+const Signup = lazy(() => import("./pages/Signup"));
 const Account = lazy(() => import("./pages/Account"));
 const Settings = lazy(() => import("./pages/Settings"));
 const CSVUpload = lazy(() => import("./pages/CSVUpload"));
@@ -40,8 +41,14 @@ const App: React.FC = () => (
     <AuthProvider>
       <Suspense fallback={<LoadingSpinner />}>
         <Routes>
+          {/* Public routes */}
           <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
 
+          {/* Optional convenience alias */}
+          <Route path="/join" element={<Navigate to="/signup" replace />} />
+
+          {/* Protected app routes */}
           <Route
             path="/"
             element={

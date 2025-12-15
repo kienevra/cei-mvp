@@ -18,14 +18,14 @@ const api = axios.create({
   withCredentials: true,
 });
 
-// Attach access token on every request except auth login/signup/refresh
+// Attach access token on every request except auth login/signup/refresh/invite-accept
 api.interceptors.request.use((cfg) => {
   const token = localStorage.getItem("cei_token");
   if (!token) return cfg;
 
   const url = cfg.url || "";
 
-  // Do NOT send stale tokens to login/signup/refresh.
+  // Do NOT send stale tokens to login/signup/refresh/invite-accept.
   // All other /auth/* endpoints (like /auth/integration-tokens, /auth/invites) stay authenticated.
   if (isAuthPath(url)) return cfg;
 
@@ -42,7 +42,8 @@ function isAuthPath(url: string | undefined): boolean {
   return (
     url.includes("/auth/login") ||
     url.includes("/auth/signup") ||
-    url.includes("/auth/refresh")
+    url.includes("/auth/refresh") ||
+    url.includes("/auth/invites/accept")
   );
 }
 
@@ -60,7 +61,7 @@ api.interceptors.response.use(
 
     const url = originalRequest.url || "";
 
-    // Do NOT attempt refresh for login/signup/refresh – just fail clearly
+    // Do NOT attempt refresh for login/signup/refresh/invite-accept – just fail clearly
     if (isAuthPath(url)) {
       return Promise.reject(error);
     }
@@ -151,7 +152,8 @@ function getApiErrorMessage(err: unknown, fallback: string): string {
       return msg || fallback;
     }
 
-    const axMsg = typeof (err as any)?.message === "string" ? (err as any).message : "";
+    const axMsg =
+      typeof (err as any)?.message === "string" ? (err as any).message : "";
     return axMsg || fallback;
   }
   if (err instanceof Error) return err.message || fallback;
@@ -305,9 +307,13 @@ export interface OpportunityMeasure {
   est_co2_tons_saved_per_year: number;
 }
 
-export async function getSiteOpportunities(siteId: string | number): Promise<OpportunityMeasure[]> {
+export async function getSiteOpportunities(
+  siteId: string | number
+): Promise<OpportunityMeasure[]> {
   const idStr = String(siteId);
-  const resp = await api.get<{ opportunities: OpportunityMeasure[] }>(`/sites/${idStr}/opportunities`);
+  const resp = await api.get<{ opportunities: OpportunityMeasure[] }>(
+    `/sites/${idStr}/opportunities`
+  );
   const list = (resp.data as any)?.opportunities;
   return Array.isArray(list) ? list : [];
 }
@@ -329,7 +335,9 @@ export interface IngestHealthResponse {
   meters: IngestHealthMeter[];
 }
 
-export async function getIngestHealth(windowHours: number = 24): Promise<IngestHealthResponse> {
+export async function getIngestHealth(
+  windowHours: number = 24
+): Promise<IngestHealthResponse> {
   const res = await api.get<IngestHealthResponse>("/timeseries/ingest_health", {
     params: { window_hours: windowHours },
   });
@@ -425,7 +433,9 @@ export async function getAccountMe(): Promise<AccountMe> {
   return resp.data;
 }
 
-export async function updateOrgSettings(payload: OrgSettingsUpdateRequest): Promise<AccountMe> {
+export async function updateOrgSettings(
+  payload: OrgSettingsUpdateRequest
+): Promise<AccountMe> {
   try {
     const response = await api.patch<AccountMe>("/account/org-settings", payload);
     return response.data;
@@ -490,9 +500,13 @@ export async function listIntegrationTokens(): Promise<IntegrationTokenOut[]> {
   }
 }
 
-export async function createIntegrationToken(name: string): Promise<IntegrationTokenWithSecret> {
+export async function createIntegrationToken(
+  name: string
+): Promise<IntegrationTokenWithSecret> {
   try {
-    const resp = await api.post<IntegrationTokenWithSecret>("/auth/integration-tokens", { name });
+    const resp = await api.post<IntegrationTokenWithSecret>("/auth/integration-tokens", {
+      name,
+    });
     return resp.data;
   } catch (err: any) {
     if (axios.isAxiosError(err) && err.response?.status === 403) {
@@ -513,11 +527,20 @@ export async function revokeIntegrationToken(tokenId: number): Promise<void> {
   }
 }
 
-/* ===== Org invites (owner-only for create/list/revoke; public accept is separate) ===== */
+/* ===== Org invites (owner-only for create/list/revoke; public accept is separate) =====
+   Backend returns OrgInviteWithSecret directly from POST /auth/invites:
+   { id, organization_id, email, role, is_active, expires_at, created_at, ..., token, invite_link? }
+*/
 
 export interface OrgInviteOut {
   id: number;
-  org_id: number;
+
+  // canonical
+  organization_id: number;
+
+  // optional legacy alias (some older code might use org_id)
+  org_id?: number;
+
   email?: string | null;
   role: "owner" | "member" | string;
   is_active: boolean;
@@ -528,15 +551,15 @@ export interface OrgInviteOut {
   created_at: string;
 }
 
+export interface OrgInviteWithSecret extends OrgInviteOut {
+  token: string;
+  invite_link?: string | null;
+}
+
 export interface OrgInviteCreateRequest {
   email?: string;
   role?: "owner" | "member";
-  expires_in_days?: number; // backend may accept this (recommended)
-}
-
-export interface OrgInviteCreateResponse {
-  token: string; // one-time secret
-  invite?: OrgInviteOut;
+  expires_in_days?: number; // backend accepts this
 }
 
 export async function listOrgInvites(): Promise<OrgInviteOut[]> {
@@ -551,9 +574,9 @@ export async function listOrgInvites(): Promise<OrgInviteOut[]> {
 
 export async function createOrgInvite(
   payload: OrgInviteCreateRequest
-): Promise<OrgInviteCreateResponse> {
+): Promise<OrgInviteWithSecret> {
   try {
-    const resp = await api.post<OrgInviteCreateResponse>("/auth/invites", payload);
+    const resp = await api.post<OrgInviteWithSecret>("/auth/invites", payload);
     return resp.data;
   } catch (err: any) {
     if (axios.isAxiosError(err) && err.response?.status === 403) {
@@ -576,12 +599,8 @@ export async function revokeOrgInvite(inviteId: number): Promise<void> {
 
 /**
  * Accept an invite token during signup.
- * This is meant to be called by the Login/Signup screen *without* being authenticated.
- *
- * Expected backend: POST /auth/invites/accept { token, email, password, full_name? }
- * returning Token shape { access_token, token_type } or similar.
- *
- * If you choose a different contract on the backend, adjust this wrapper.
+ * POST /auth/invites/accept { token, email, password, full_name? }
+ * returns { access_token, token_type }.
  */
 export async function acceptInvite(payload: {
   token: string;
@@ -589,8 +608,6 @@ export async function acceptInvite(payload: {
   password: string;
   full_name?: string;
 }) {
-  // Must NOT attach bearer access token here (and we don’t, because request interceptor
-  // only adds Authorization if cei_token exists; on new users it won’t exist).
   const resp = await api.post("/auth/invites/accept", payload);
   return resp.data as { access_token: string; token_type: string };
 }
@@ -647,9 +664,13 @@ export interface ManualOpportunity {
   description: string | null;
 }
 
-export async function getManualOpportunities(siteId: number | string): Promise<ManualOpportunity[]> {
+export async function getManualOpportunities(
+  siteId: number | string
+): Promise<ManualOpportunity[]> {
   const idStr = String(siteId);
-  const resp = await api.get<ManualOpportunity[]>(`/sites/${idStr}/opportunities/manual`);
+  const resp = await api.get<ManualOpportunity[]>(
+    `/sites/${idStr}/opportunities/manual`
+  );
   return resp.data;
 }
 
@@ -658,7 +679,10 @@ export async function createManualOpportunity(
   payload: { name: string; description?: string }
 ): Promise<ManualOpportunity> {
   const idStr = String(siteId);
-  const resp = await api.post<ManualOpportunity>(`/sites/${idStr}/opportunities/manual`, payload);
+  const resp = await api.post<ManualOpportunity>(
+    `/sites/${idStr}/opportunities/manual`,
+    payload
+  );
   return resp.data;
 }
 

@@ -4,6 +4,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import useAuth from "../hooks/useAuth";
 import ErrorBanner from "../components/ErrorBanner";
 import api from "../services/api";
+import { Link } from "react-router-dom";
+
 
 type AuthMode = "login" | "signup";
 
@@ -17,6 +19,11 @@ function pickInviteToken(search: string): string | null {
   }
   return null;
 }
+
+<Link to="/signup" style={{ fontSize: "0.8rem" }}>
+  Have an invite? Join an existing organization
+</Link>
+
 
 const Login: React.FC = () => {
   const { login, isAuthenticated } = useAuth();
