@@ -1,9 +1,9 @@
+# backend/app/api/v1/auth.py
 from __future__ import annotations
 
 import hashlib
 import logging
 import secrets
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional, List
 
@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.rate_limit import login_rate_limit, refresh_rate_limit
-from app.core.security import get_current_user, get_org_context  # ✅ moved
+from app.core.security import get_current_user, get_org_context  # noqa: F401 (kept for compatibility)
 from app.db.models import IntegrationToken  # integration tokens live here (shim)
 from app.db.session import get_db
 from app.models import Organization, OrgInvite, User
@@ -145,18 +145,24 @@ class OrgInviteCreate(BaseModel):
     """
     Owner-minted org invite.
     - email optional (restrict to one address)
-    - role defaults to "member"
+    - role is accepted for backward compatibility but invites will only create members
     - expires_in_days optional
     """
+    # NOTE: for requests, leaving this optional is correct.
     email: Optional[str] = None
     role: str = Field(default="member")
     expires_in_days: Optional[int] = Field(default=14, ge=1, le=90)
 
 
 class OrgInviteOut(BaseModel):
+    """
+    IMPORTANT: `email` is REQUIRED in responses (but nullable).
+    This guarantees the backend always returns `"email": null` instead of omitting it,
+    so frontend types become `email: string | null` (no `undefined`).
+    """
     id: int
     organization_id: int
-    email: Optional[str] = None
+    email: Optional[str]  # ✅ required-but-nullable (no default)
     role: str
     is_active: bool
     expires_at: Optional[datetime] = None
@@ -171,7 +177,7 @@ class OrgInviteOut(BaseModel):
 
 class OrgInviteWithSecret(OrgInviteOut):
     token: str
-    invite_link: Optional[str] = None  # best-effort (frontend_url if configured)
+    invite_link: str  # deterministic (_frontend_url)
 
 
 class AcceptInviteRequest(BaseModel):
@@ -236,19 +242,15 @@ def _normalize_currency_code(code: Optional[str]) -> Optional[str]:
     return c or None
 
 
-def _best_effort_frontend_url() -> Optional[str]:
+def _frontend_url() -> str:
     """
-    Best-effort frontend URL for invite links.
-    If you add FRONTEND_URL to Settings later, plug it in here.
+    Deterministic frontend URL for invite links.
+
+    Prefer `settings.frontend_url` if it exists, otherwise accept `settings.FRONTEND_URL`.
+    Fallback is localhost for dev.
     """
-    for attr in ("frontend_url", "FRONTEND_URL", "ui_url", "web_url"):
-        try:
-            v = getattr(settings, attr, None)
-            if v:
-                return str(v).rstrip("/")
-        except Exception:
-            pass
-    return None
+    v = getattr(settings, "frontend_url", None) or getattr(settings, "FRONTEND_URL", None)
+    return str(v or "http://localhost:5173").rstrip("/")
 
 
 def _org_fk_field_name_for_invites() -> str:
@@ -686,7 +688,6 @@ def revoke_integration_token(
 
 
 # === Org invite management endpoints ===
-# (unchanged from your version below this line)
 
 @router.post("/invites", response_model=OrgInviteWithSecret)
 def create_org_invite(
@@ -699,9 +700,14 @@ def create_org_invite(
 
     require_owner(current_user, message="Only the organization owner can create invites.")
 
-    role = (payload.role or "member").strip().lower()
-    if role not in ("member", "owner"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role. Use 'member' or 'owner'.")
+    # Governance hard rule: invites can only create members
+    requested_role = (payload.role or "member").strip().lower()
+    if requested_role != "member":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invites can only create 'member' users. Owner role is assigned separately.",
+        )
+    role = "member"
 
     expires_at = None
     if payload.expires_in_days:
@@ -734,20 +740,23 @@ def create_org_invite(
         org_id=current_user.organization_id,
         user_id=getattr(current_user, "id", None),
         title="Org invite created",
-        description=f"invite_id={getattr(inv, 'id', None)}; role={role}; email={getattr(inv, 'email', None)}; expires_at={getattr(inv, 'expires_at', None)}",
+        description=(
+            f"invite_id={getattr(inv, 'id', None)}; role={role}; "
+            f"email={getattr(inv, 'email', None)}; expires_at={getattr(inv, 'expires_at', None)}"
+        ),
     )
 
-    base = _best_effort_frontend_url()
-    link = f"{base}/signup?invite={raw}" if base else None
+    link = f"{_frontend_url()}/signup?invite={raw}"
 
     inv_org_id = getattr(inv, "organization_id", None)
     if inv_org_id is None:
         inv_org_id = getattr(inv, "org_id", None)
 
+    # IMPORTANT: pass `email` explicitly (None becomes JSON null)
     return OrgInviteWithSecret(
         id=inv.id,
         organization_id=int(inv_org_id) if inv_org_id is not None else int(current_user.organization_id),
-        email=inv.email,
+        email=(inv.email if inv.email is not None else None),
         role=inv.role,
         is_active=inv.is_active,
         expires_at=inv.expires_at,
@@ -787,7 +796,7 @@ def list_org_invites(
             OrgInviteOut(
                 id=inv.id,
                 organization_id=int(inv_org_id) if inv_org_id is not None else int(current_user.organization_id),
-                email=inv.email,
+                email=(inv.email if inv.email is not None else None),  # ✅ always present, nullable
                 role=inv.role,
                 is_active=inv.is_active,
                 expires_at=inv.expires_at,
@@ -891,9 +900,8 @@ def accept_org_invite(
         logger.exception("Password hashing failed")
         raise HTTPException(status_code=400, detail=f"Password hashing failed: {e}")
 
-    role = (getattr(inv, "role", None) or "member").strip().lower()
-    if role not in ("member", "owner"):
-        role = "member"
+    # Governance hard rule: invite accept always creates member users
+    role = "member"
 
     db_user = User(
         email=email_norm,

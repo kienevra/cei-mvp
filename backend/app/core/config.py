@@ -83,6 +83,13 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ✅ Deterministic frontend base URL used for invite links
+    frontend_url: str = Field(
+        default="http://localhost:5173",
+        env="FRONTEND_URL",
+        description="Base URL for the CEI frontend (used to generate invite links).",
+    )
+
     # API docs toggle
     enable_docs: bool = Field(
         default=False,

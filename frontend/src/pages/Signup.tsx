@@ -1,4 +1,3 @@
-// frontend/src/pages/Signup.tsx
 import React, { useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { acceptInvite } from "../services/api";
@@ -61,19 +60,32 @@ const Signup: React.FC = () => {
       return;
     }
 
+    const emailNorm = email.trim().toLowerCase();
+    if (!emailNorm) {
+      setError("Email is required.");
+      return;
+    }
+
+    if (password.trim().length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
 
     try {
       const resp = await acceptInvite({
         token: inviteToken,
-        email: email.trim().toLowerCase(),
+        email: emailNorm,
         password,
-        full_name: fullName.trim() ? fullName.trim() : undefined, // ✅ fix: never send null
+        full_name: fullName.trim() ? fullName.trim() : undefined, // never send null
       });
 
       // Reuse existing auth storage convention (cei_token)
       localStorage.setItem("cei_token", resp.access_token);
+
+      // This ensures refresh-cookie flow continues to work via axios withCredentials.
       navigate("/", { replace: true });
     } catch (err: any) {
       setError(toUiMessage(err, "Failed to accept invite."));
@@ -86,9 +98,7 @@ const Signup: React.FC = () => {
     <div className="login-page">
       <div className="login-card">
         <div style={{ marginBottom: "0.75rem" }}>
-          <h1 style={{ margin: 0, fontSize: "1.25rem" }}>
-            Join organization
-          </h1>
+          <h1 style={{ margin: 0, fontSize: "1.25rem" }}>Join organization</h1>
           <p
             style={{
               marginTop: "0.35rem",
@@ -127,6 +137,7 @@ const Signup: React.FC = () => {
             autoComplete="email"
             onChange={(e) => setEmail(e.target.value)}
             required
+            disabled={submitting}
           />
 
           <input
@@ -135,6 +146,7 @@ const Signup: React.FC = () => {
             value={fullName}
             autoComplete="name"
             onChange={(e) => setFullName(e.target.value)}
+            disabled={submitting}
           />
 
           <input
@@ -144,6 +156,7 @@ const Signup: React.FC = () => {
             autoComplete="new-password"
             onChange={(e) => setPassword(e.target.value)}
             required
+            disabled={submitting}
           />
 
           <button className="cei-btn" type="submit" disabled={!canSubmit}>

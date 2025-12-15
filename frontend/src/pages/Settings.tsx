@@ -1,4 +1,3 @@
-// frontend/src/pages/Settings.tsx
 import React, { useState, useEffect } from "react";
 import {
   getAccountMe,
@@ -6,6 +5,10 @@ import {
   listIntegrationTokens,
   createIntegrationToken,
   revokeIntegrationToken,
+  // invites
+  createOrgInvite,
+  listOrgInvites,
+  revokeOrgInvite,
 } from "../services/api";
 import type {
   AccountMe,
@@ -19,6 +22,24 @@ type IntegrationToken = {
   is_active: boolean;
   created_at: string;
   last_used_at: string | null;
+};
+
+// ✅ Align with api.ts reality: email may be undefined in responses
+type OrgInvite = {
+  id: number;
+  organization_id: number;
+  email?: string | null;
+  role: string;
+  is_active: boolean;
+  expires_at: string | null;
+  used_at: string | null;
+  created_at: string;
+};
+
+// ✅ invite_link may be optional depending on backend config; keep it flexible
+type OrgInviteWithSecret = OrgInvite & {
+  token: string;
+  invite_link?: string | null;
 };
 
 function safeStringify(val: unknown): string {
@@ -97,9 +118,23 @@ const Settings: React.FC = () => {
   const [copiedTokenSecret, setCopiedTokenSecret] = useState(false);
   const [revokingId, setRevokingId] = useState<number | null>(null);
 
+  // Invites state (owner-only)
+  const [invites, setInvites] = useState<OrgInvite[]>([]);
+  const [invitesLoading, setInvitesLoading] = useState(false);
+  const [invitesError, setInvitesError] = useState<string | null>(null);
+
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteExpiryDays, setInviteExpiryDays] = useState<string>("14");
+  const [creatingInvite, setCreatingInvite] = useState(false);
+
+  const [createdInviteLink, setCreatedInviteLink] = useState<string | null>(
+    null
+  );
+  const [copiedInviteLink, setCopiedInviteLink] = useState(false);
+  const [revokingInviteId, setRevokingInviteId] = useState<number | null>(null);
+
   useEffect(() => {
     loadAccount();
-    // Tokens are owner-only: we only load once we know role.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -189,13 +224,15 @@ const Settings: React.FC = () => {
         setCurrencyCodeInput("");
       }
 
-      // Now that we know role, load tokens only for owner/admin.
+      // Now that we know role, load tokens + invites only for owner/admin.
       const role = String((data as any)?.role || "").toLowerCase();
       const canManage = role === "owner" || role === "admin";
       if (canManage) {
         await loadIntegrationTokens();
+        await loadInvites();
       } else {
-        setTokens([]); // keep it clean; no “403 -> []” magic
+        setTokens([]);
+        setInvites([]);
       }
     } catch (err: any) {
       console.error("Failed to load account for settings", err);
@@ -274,6 +311,96 @@ const Settings: React.FC = () => {
       window.setTimeout(() => setCopiedTokenSecret(false), 1500);
     } catch (e) {
       console.warn("Clipboard copy failed", e);
+    }
+  };
+
+  // Invites
+  const loadInvites = async () => {
+    setInvitesLoading(true);
+    setInvitesError(null);
+    try {
+      const list = await listOrgInvites();
+      setInvites(Array.isArray(list) ? (list as any) : []);
+    } catch (err: any) {
+      console.error("Failed to load invites", err);
+      setInvitesError(toUiMessage(err, "Failed to load invites."));
+    } finally {
+      setInvitesLoading(false);
+    }
+  };
+
+  const handleCreateInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!canManageOrgSensitiveSettings) {
+      setInvitesError("Owner-only. Ask your org owner to create invites.");
+      return;
+    }
+
+    const daysRaw = inviteExpiryDays.trim();
+    const days = daysRaw === "" ? 14 : Number(daysRaw);
+    if (!Number.isFinite(days) || days < 1 || days > 90) {
+      setInvitesError("Expiry must be between 1 and 90 days.");
+      return;
+    }
+
+    setCreatingInvite(true);
+    setInvitesError(null);
+    setCreatedInviteLink(null);
+    setCopiedInviteLink(false);
+
+    try {
+      // ✅ api.ts expects email?: string (NOT nullable). Never send null.
+      const emailOpt = inviteEmail.trim()
+        ? inviteEmail.trim().toLowerCase()
+        : undefined;
+
+      const created = (await createOrgInvite({
+        email: emailOpt,
+        expires_in_days: days,
+        role: "member",
+      })) as any as OrgInviteWithSecret;
+
+      // ✅ invite_link might be null/undefined if FRONTEND_URL isn't configured.
+      const link = created?.invite_link ?? null;
+      setCreatedInviteLink(link);
+
+      setInviteEmail("");
+      setInviteExpiryDays(String(days));
+      await loadInvites();
+    } catch (err: any) {
+      console.error("Failed to create invite", err);
+      setInvitesError(toUiMessage(err, "Failed to create invite."));
+    } finally {
+      setCreatingInvite(false);
+    }
+  };
+
+  const handleCopyInviteLink = async () => {
+    if (!createdInviteLink) return;
+    try {
+      await navigator.clipboard.writeText(createdInviteLink);
+      setCopiedInviteLink(true);
+      window.setTimeout(() => setCopiedInviteLink(false), 1500);
+    } catch (e) {
+      console.warn("Clipboard copy failed", e);
+    }
+  };
+
+  const handleRevokeInvite = async (id: number) => {
+    if (!canManageOrgSensitiveSettings) return;
+
+    setRevokingInviteId(id);
+    setInvitesError(null);
+
+    try {
+      await revokeOrgInvite(id);
+      await loadInvites();
+    } catch (err: any) {
+      console.error("Failed to revoke invite", err);
+      setInvitesError(toUiMessage(err, "Failed to revoke invite."));
+    } finally {
+      setRevokingInviteId(null);
     }
   };
 
@@ -779,6 +906,282 @@ const Settings: React.FC = () => {
         </div>
       </section>
 
+      {/* Organization invites */}
+      {account && org && (
+        <section className="dashboard-row">
+          <div className="cei-card" style={{ width: "100%" }}>
+            <div
+              style={{
+                fontSize: "0.9rem",
+                fontWeight: 600,
+                marginBottom: "0.5rem",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "0.75rem",
+                flexWrap: "wrap",
+              }}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <span>Organization invites</span>
+                <span className="cei-pill-muted" style={{ fontSize: "0.75rem" }}>
+                  Owner-only
+                </span>
+              </span>
+            </div>
+
+            <p
+              style={{
+                fontSize: "0.8rem",
+                color: "var(--cei-text-muted)",
+                marginBottom: "0.75rem",
+              }}
+            >
+              Create invite links for teammates to join your organization as{" "}
+              <strong>members</strong>.
+            </p>
+
+            {!canManageOrgSensitiveSettings ? (
+              <div className="cei-pill-muted" style={{ fontSize: "0.8rem" }}>
+                You don’t have permission to view or manage invites. Ask your org owner.
+              </div>
+            ) : (
+              <>
+                {invitesError && (
+                  <div
+                    className="cei-pill-danger"
+                    style={{ marginBottom: "0.6rem", fontSize: "0.8rem" }}
+                  >
+                    {invitesError}
+                  </div>
+                )}
+
+                <form
+                  onSubmit={handleCreateInvite}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: "0.6rem",
+                    marginBottom: "0.75rem",
+                    alignItems: "end",
+                  }}
+                >
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: "0.75rem",
+                        fontWeight: 500,
+                        marginBottom: "0.2rem",
+                      }}
+                    >
+                      Restrict to email (optional)
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="teammate@company.com"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "0.4rem 0.6rem",
+                        borderRadius: "0.375rem",
+                        border: "1px solid rgba(156, 163, 175, 0.4)",
+                        backgroundColor: "rgba(15, 23, 42, 0.8)",
+                        color: "var(--cei-text)",
+                        fontSize: "0.85rem",
+                      }}
+                    />
+                    <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginTop: "0.2rem" }}>
+                      Leave blank for a generic invite link.
+                    </div>
+                  </div>
+
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: "0.75rem",
+                        fontWeight: 500,
+                        marginBottom: "0.2rem",
+                      }}
+                    >
+                      Expiry (days)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={90}
+                      step={1}
+                      placeholder="14"
+                      value={inviteExpiryDays}
+                      onChange={(e) => setInviteExpiryDays(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "0.4rem 0.6rem",
+                        borderRadius: "0.375rem",
+                        border: "1px solid rgba(156, 163, 175, 0.4)",
+                        backgroundColor: "rgba(15, 23, 42, 0.8)",
+                        color: "var(--cei-text)",
+                        fontSize: "0.85rem",
+                      }}
+                    />
+                    <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginTop: "0.2rem" }}>
+                      1–90 days.
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button
+                      type="submit"
+                      className="cei-btn"
+                      disabled={creatingInvite}
+                      style={{
+                        whiteSpace: "nowrap",
+                        opacity: creatingInvite ? 0.7 : 1,
+                        width: "100%",
+                      }}
+                    >
+                      {creatingInvite ? "Creating..." : "Create invite link"}
+                    </button>
+                  </div>
+                </form>
+
+                {createdInviteLink ? (
+                  <div
+                    className="cei-card-subtle"
+                    style={{
+                      border: "1px dashed rgba(34, 197, 94, 0.5)",
+                      padding: "0.6rem 0.75rem",
+                      borderRadius: "0.5rem",
+                      marginBottom: "0.75rem",
+                      background: "rgba(15, 23, 42, 0.7)",
+                    }}
+                  >
+                    <div style={{ fontSize: "0.8rem", fontWeight: 500, marginBottom: "0.4rem" }}>
+                      Invite link (copy/paste)
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "monospace",
+                        fontSize: "0.8rem",
+                        wordBreak: "break-all",
+                        marginBottom: "0.4rem",
+                      }}
+                    >
+                      {createdInviteLink}
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "0.4rem",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
+                        Send this to the teammate you want to onboard.
+                      </span>
+                      <button
+                        type="button"
+                        className="cei-btn"
+                        onClick={handleCopyInviteLink}
+                        style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }}
+                        title="Copy invite link to clipboard"
+                      >
+                        {copiedInviteLink ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      fontSize: "0.75rem",
+                      color: "var(--cei-text-muted)",
+                      marginBottom: "0.75rem",
+                    }}
+                  >
+                    Tip: set <code>FRONTEND_URL</code> on the backend to generate clickable invite links.
+                    Without it, CEI will still create invites, but the link field may be empty.
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    marginTop: "0.25rem",
+                    borderTop: "1px solid rgba(31, 41, 55, 0.9)",
+                    paddingTop: "0.6rem",
+                  }}
+                >
+                  {invitesLoading ? (
+                    <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+                      Loading invites...
+                    </div>
+                  ) : invites.length === 0 ? (
+                    <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+                      No invites yet. Create one above to onboard teammates.
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", fontSize: "0.8rem" }}>
+                      {invites.map((inv) => (
+                        <div
+                          key={inv.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "0.75rem",
+                            padding: "0.4rem 0.3rem",
+                            borderRadius: "0.375rem",
+                            backgroundColor: "rgba(15, 23, 42, 0.7)",
+                          }}
+                        >
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+                            <span style={{ fontWeight: 500 }}>
+                              {inv.email ? inv.email : "Generic invite"}
+                            </span>
+                            <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
+                              Created: {fmtIsoOrRaw(inv.created_at)}
+                              {inv.expires_at ? ` • Expires: ${fmtIsoOrRaw(inv.expires_at)}` : ""}
+                              {inv.used_at ? ` • Used: ${fmtIsoOrRaw(inv.used_at)}` : ""}
+                            </span>
+                          </div>
+
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            <span
+                              className={inv.is_active ? "cei-pill-success" : "cei-pill-muted"}
+                              style={{ fontSize: "0.7rem" }}
+                            >
+                              {inv.is_active ? "Active" : "Revoked"}
+                            </span>
+
+                            <button
+                              type="button"
+                              className="cei-btn"
+                              disabled={!inv.is_active || revokingInviteId === inv.id}
+                              onClick={() => handleRevokeInvite(inv.id)}
+                              style={{
+                                fontSize: "0.75rem",
+                                padding: "0.25rem 0.6rem",
+                                opacity: !inv.is_active || revokingInviteId === inv.id ? 0.6 : 1,
+                              }}
+                              title={!inv.is_active ? "Invite already revoked." : "Revoke this invite"}
+                            >
+                              {revokingInviteId === inv.id ? "Revoking..." : "Revoke"}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+      )}
+
       {/* Integration tokens: show card for everyone (no 403 UX), but only owners can view/manage. */}
       {account && org && (
         <section className="dashboard-row">
@@ -998,11 +1401,7 @@ const Settings: React.FC = () => {
                                 padding: "0.25rem 0.6rem",
                                 opacity: !t.is_active || revokingId === t.id ? 0.6 : 1,
                               }}
-                              title={
-                                !t.is_active
-                                  ? "Token already revoked."
-                                  : "Revoke this token"
-                              }
+                              title={!t.is_active ? "Token already revoked." : "Revoke this token"}
                             >
                               {revokingId === t.id ? "Revoking..." : "Revoke"}
                             </button>

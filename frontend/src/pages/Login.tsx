@@ -72,7 +72,7 @@ const Login: React.FC = () => {
       setNotice("You’re joining an organization via invite. Create your account to continue.");
     }
     // NOTE: do not include `mode` here; we intentionally force signup when invite exists.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    
   }, [inviteToken]);
 
   function toErrorString(err: any): string {
