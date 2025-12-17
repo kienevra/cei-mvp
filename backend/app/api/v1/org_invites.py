@@ -15,7 +15,6 @@ from app.api.v1.auth import (
     create_access_token,
     create_refresh_token,
     _set_refresh_cookie,
-    _require_owner,
 )
 from app.services.invites import generate_invite_token, hash_invite_token, normalize_email
 
@@ -116,6 +115,28 @@ def _validate_email_for_env(email: str) -> None:
             )
 
 
+def _require_owner_for_invites(current_user: User) -> None:
+    """
+    Owner-only guard for org invite operations.
+
+    - Allows legacy superusers
+    - Otherwise requires current_user.role == "owner"
+    """
+    is_super = bool(getattr(current_user, "is_superuser", 0))
+    if is_super:
+        return
+
+    role = (getattr(current_user, "role", None) or "").strip().lower()
+    if role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "FORBIDDEN_OWNER_ONLY",
+                "message": "Only the organization owner can create invites.",
+            },
+        )
+
+
 def _invite_is_already_accepted(inv: OrgInvite) -> bool:
     # Defensive: treat any accepted marker as "already accepted"
     try:
@@ -152,7 +173,7 @@ def create_invite(
     if not current_user.organization_id:
         raise HTTPException(status_code=400, detail="User is not attached to an organization")
 
-    _require_owner(current_user)
+    _require_owner_for_invites(current_user)
 
     _validate_email_for_env(payload.email)
     invited_email = normalize_email(payload.email)
@@ -291,7 +312,6 @@ def accept_and_signup(
 
     # Already accepted / inactive
     if _invite_is_already_accepted(inv):
-        # Use a clearer code if it was accepted (optional but useful)
         if getattr(inv, "accepted_user_id", None) is not None or getattr(inv, "accepted_at", None) is not None:
             raise HTTPException(
                 status_code=status.HTTP_410_GONE,
@@ -320,14 +340,12 @@ def accept_and_signup(
         organization_id=inv.organization_id,
     )
 
-    # full_name (best-effort, column may or may not exist)
     if payload.full_name:
         try:
             user.full_name = payload.full_name
         except Exception:
             pass
 
-    # Role from invite (best-effort)
     try:
         user.role = (getattr(inv, "role", None) or "member").strip().lower()
     except Exception:
@@ -338,7 +356,6 @@ def accept_and_signup(
     try:
         db.commit()
     except IntegrityError:
-        # Race safety: if another request created the same email in between
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

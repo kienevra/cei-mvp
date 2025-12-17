@@ -102,65 +102,7 @@ class User(Base):
     )
 
 
-class OrgInvite(Base):
-    """
-    Owner-generated invite for a SPECIFIC email address.
 
-    Path B (accept + signup):
-    - owner creates invite -> returns raw token once (cei_inv_...)
-    - invitee uses token to signup and join org
-    """
-    __tablename__ = "org_invites"
-
-    id = Column(Integer, primary_key=True, index=True)
-
-    # Underlying DB column is "org_id"
-    organization_id = Column(
-        "org_id",
-        Integer,
-        ForeignKey("organization.id"),
-        nullable=False,
-        index=True,
-    )
-
-    # Invited email (normalize lowercase in API layer)
-    email = Column(String(255), nullable=False, index=True)
-
-    # Store only SHA-256 hex hash of the raw token (64 chars)
-    token_hash = Column(String(64), nullable=False, unique=True, index=True)
-
-    # Invite role (owner picks member/owner; default member)
-    role = Column(String(32), nullable=False, server_default=text("'member'"))
-
-    # Lifecycle
-    is_active = Column(Boolean, nullable=False, default=True, server_default=text("1"))
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-
-    revoked_at = Column(DateTime(timezone=True), nullable=True)
-    accepted_at = Column(DateTime(timezone=True), nullable=True)
-
-    # Audit / linkage
-    created_by_user_id = Column(Integer, ForeignKey("user.id"), nullable=True, index=True)
-    accepted_user_id = Column(Integer, ForeignKey("user.id"), nullable=True, index=True)
-
-    organization = relationship("Organization", back_populates="invites")
-
-    created_by_user = relationship(
-        "User",
-        back_populates="created_invites",
-        foreign_keys=[created_by_user_id],
-    )
-    accepted_user = relationship(
-        "User",
-        back_populates="accepted_invites",
-        foreign_keys=[accepted_user_id],
-    )
-
-    __table_args__ = (
-        sa.UniqueConstraint("org_id", "email", name="uq_org_invites_org_email"),
-        Index("ix_org_invites_org_active", "org_id", "is_active"),
-    )
 
 
 class BillingPlan(Base):

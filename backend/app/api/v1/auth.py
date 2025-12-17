@@ -5,7 +5,7 @@ import hashlib
 import logging
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from fastapi import (
     APIRouter,
@@ -18,15 +18,15 @@ from fastapi import (
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.rate_limit import login_rate_limit, refresh_rate_limit
-from app.core.security import get_current_user, get_org_context  # noqa: F401 (kept for compatibility)
+from app.core.security import get_current_user
 from app.db.models import IntegrationToken  # integration tokens live here (shim)
 from app.db.session import get_db
-from app.models import Organization, OrgInvite, User
+from app.models import Organization, User
 from app.api.deps import require_owner, create_org_audit_event
 
 logger = logging.getLogger("cei")
@@ -50,7 +50,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 REFRESH_COOKIE_NAME = "cei_refresh_token"
 INTEGRATION_TOKEN_PREFIX = "cei_int_"
-INVITE_TOKEN_PREFIX = "cei_inv_"  # recognizable prefix for org invite tokens
+
+# NOTE: invite tokens are owned by /api/v1/org/invites (org_invites router).
+INVITE_TOKEN_PREFIX = "cei_inv_"  # kept for consistency across the codebase
 
 
 # === Schemas ===
@@ -78,6 +80,8 @@ class Token(BaseModel):
 
 
 class OrgSummaryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     plan_key: Optional[str] = None
@@ -91,11 +95,10 @@ class OrgSummaryOut(BaseModel):
     gas_price_per_kwh: Optional[float] = None
     currency_code: Optional[str] = None
 
-    class Config:
-        orm_mode = True
-
 
 class AccountMeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     email: str
     organization_id: Optional[int] = None
@@ -116,89 +119,37 @@ class AccountMeOut(BaseModel):
     gas_price_per_kwh: Optional[float] = None
     currency_code: Optional[str] = None
 
-    class Config:
-        orm_mode = True
-
 
 class IntegrationTokenCreate(BaseModel):
-    name: str
+    name: str = Field(default="Integration token", min_length=1)
 
 
 class IntegrationTokenOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     is_active: bool
     created_at: datetime
     last_used_at: Optional[datetime] = None
 
-    class Config:
-        orm_mode = True
-
 
 class IntegrationTokenWithSecret(IntegrationTokenOut):
     token: str
 
 
-# === Invites ===
-
-class OrgInviteCreate(BaseModel):
-    """
-    Owner-minted org invite.
-    - email optional (restrict to one address)
-    - role is accepted for backward compatibility but invites will only create members
-    - expires_in_days optional
-    """
-    # NOTE: for requests, leaving this optional is correct.
-    email: Optional[str] = None
-    role: str = Field(default="member")
-    expires_in_days: Optional[int] = Field(default=14, ge=1, le=90)
-
-
-class OrgInviteOut(BaseModel):
-    """
-    IMPORTANT: `email` is REQUIRED in responses (but nullable).
-    This guarantees the backend always returns `"email": null` instead of omitting it,
-    so frontend types become `email: string | null` (no `undefined`).
-    """
-    id: int
-    organization_id: int
-    email: Optional[str]  # ✅ required-but-nullable (no default)
-    role: str
-    is_active: bool
-    expires_at: Optional[datetime] = None
-    created_by_user_id: Optional[int] = None
-    used_by_user_id: Optional[int] = None
-    used_at: Optional[datetime] = None
-    created_at: datetime
-
-    class Config:
-        orm_mode = True
-
-
-class OrgInviteWithSecret(OrgInviteOut):
-    token: str
-    invite_link: str  # deterministic (_frontend_url)
-
-
-class AcceptInviteRequest(BaseModel):
-    token: str
-    email: str
-    password: str
-    full_name: Optional[str] = None
-
-
 # === Token helpers ===
 
-def create_access_token(data: dict) -> str:
-    to_encode = data.copy()
+def create_access_token(data: Dict[str, Any]) -> str:
+    to_encode = dict(data)
     to_encode.setdefault("type", "access")
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def create_refresh_token(data: dict) -> str:
-    to_encode = data.copy()
+def create_refresh_token(data: Dict[str, Any]) -> str:
+    to_encode = dict(data)
     to_encode["type"] = "refresh"
     expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire})
@@ -231,10 +182,6 @@ def _generate_integration_token_string() -> str:
     return INTEGRATION_TOKEN_PREFIX + secrets.token_urlsafe(32)
 
 
-def _generate_invite_token_string() -> str:
-    return INVITE_TOKEN_PREFIX + secrets.token_urlsafe(32)
-
-
 def _normalize_currency_code(code: Optional[str]) -> Optional[str]:
     if not code:
         return None
@@ -242,26 +189,16 @@ def _normalize_currency_code(code: Optional[str]) -> Optional[str]:
     return c or None
 
 
-def _frontend_url() -> str:
+# === Compatibility shim for /api/v1/org/invites ===
+def _require_owner(user: User) -> None:
     """
-    Deterministic frontend URL for invite links.
+    Backward-compatible guard used by org_invites router.
 
-    Prefer `settings.frontend_url` if it exists, otherwise accept `settings.FRONTEND_URL`.
-    Fallback is localhost for dev.
+    NOTE:
+    - org_invites.py imports `_require_owner` from here.
+    - We delegate to the canonical guard in app.api.deps.require_owner.
     """
-    v = getattr(settings, "frontend_url", None) or getattr(settings, "FRONTEND_URL", None)
-    return str(v or "http://localhost:5173").rstrip("/")
-
-
-def _org_fk_field_name_for_invites() -> str:
-    """
-    Keep compatibility with whichever attribute your SQLAlchemy model uses:
-    - org_id
-    - organization_id
-    """
-    if hasattr(OrgInvite, "organization_id"):
-        return "organization_id"
-    return "org_id"
+    require_owner(user, message="Only the organization owner can manage organization invites.")
 
 
 # === Routes ===
@@ -274,7 +211,7 @@ def _org_fk_field_name_for_invites() -> str:
 def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) -> Token:
     """
     Self-serve signup (no invites).
-    Joining an existing org should be done via invite accept flow.
+    Joining an existing org should be done via /api/v1/org/invites/accept-and-signup.
     """
     email_norm = (user.email or "").strip().lower()
     if not email_norm:
@@ -685,260 +622,3 @@ def revoke_integration_token(
     )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-# === Org invite management endpoints ===
-
-@router.post("/invites", response_model=OrgInviteWithSecret)
-def create_org_invite(
-    payload: OrgInviteCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> OrgInviteWithSecret:
-    if not current_user.organization_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User is not attached to an organization")
-
-    require_owner(current_user, message="Only the organization owner can create invites.")
-
-    # Governance hard rule: invites can only create members
-    requested_role = (payload.role or "member").strip().lower()
-    if requested_role != "member":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invites can only create 'member' users. Owner role is assigned separately.",
-        )
-    role = "member"
-
-    expires_at = None
-    if payload.expires_in_days:
-        expires_at = datetime.utcnow() + timedelta(days=int(payload.expires_in_days))
-
-    raw = _generate_invite_token_string()
-    token_hash = _hash_token(raw)
-
-    fk_name = _org_fk_field_name_for_invites()
-    inv_kwargs = {
-        fk_name: current_user.organization_id,
-        "email": (payload.email.strip().lower() if payload.email and payload.email.strip() else None),
-        "role": role,
-        "token_hash": token_hash,
-        "is_active": True,
-        "expires_at": expires_at,
-        "created_by_user_id": getattr(current_user, "id", None),
-        "used_by_user_id": None,
-        "used_at": None,
-    }
-
-    inv = OrgInvite(**inv_kwargs)
-
-    db.add(inv)
-    db.commit()
-    db.refresh(inv)
-
-    create_org_audit_event(
-        db,
-        org_id=current_user.organization_id,
-        user_id=getattr(current_user, "id", None),
-        title="Org invite created",
-        description=(
-            f"invite_id={getattr(inv, 'id', None)}; role={role}; "
-            f"email={getattr(inv, 'email', None)}; expires_at={getattr(inv, 'expires_at', None)}"
-        ),
-    )
-
-    link = f"{_frontend_url()}/signup?invite={raw}"
-
-    inv_org_id = getattr(inv, "organization_id", None)
-    if inv_org_id is None:
-        inv_org_id = getattr(inv, "org_id", None)
-
-    # IMPORTANT: pass `email` explicitly (None becomes JSON null)
-    return OrgInviteWithSecret(
-        id=inv.id,
-        organization_id=int(inv_org_id) if inv_org_id is not None else int(current_user.organization_id),
-        email=(inv.email if inv.email is not None else None),
-        role=inv.role,
-        is_active=inv.is_active,
-        expires_at=inv.expires_at,
-        created_by_user_id=inv.created_by_user_id,
-        used_by_user_id=inv.used_by_user_id,
-        used_at=inv.used_at,
-        created_at=inv.created_at,
-        token=raw,
-        invite_link=link,
-    )
-
-
-@router.get("/invites", response_model=List[OrgInviteOut])
-def list_org_invites(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> List[OrgInviteOut]:
-    if not current_user.organization_id:
-        return []
-
-    require_owner(current_user, message="Only the organization owner can view invites.")
-
-    fk_name = _org_fk_field_name_for_invites()
-    invites = (
-        db.query(OrgInvite)
-        .filter(getattr(OrgInvite, fk_name) == current_user.organization_id)
-        .order_by(OrgInvite.created_at.desc())
-        .all()
-    )
-
-    out: List[OrgInviteOut] = []
-    for inv in invites:
-        inv_org_id = getattr(inv, "organization_id", None)
-        if inv_org_id is None:
-            inv_org_id = getattr(inv, "org_id", None)
-        out.append(
-            OrgInviteOut(
-                id=inv.id,
-                organization_id=int(inv_org_id) if inv_org_id is not None else int(current_user.organization_id),
-                email=(inv.email if inv.email is not None else None),  # ✅ always present, nullable
-                role=inv.role,
-                is_active=inv.is_active,
-                expires_at=inv.expires_at,
-                created_by_user_id=inv.created_by_user_id,
-                used_by_user_id=inv.used_by_user_id,
-                used_at=inv.used_at,
-                created_at=inv.created_at,
-            )
-        )
-    return out
-
-
-@router.delete("/invites/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
-def revoke_org_invite(
-    invite_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> Response:
-    if not current_user.organization_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User is not attached to an organization")
-
-    require_owner(current_user, message="Only the organization owner can revoke invites.")
-
-    fk_name = _org_fk_field_name_for_invites()
-    inv = (
-        db.query(OrgInvite)
-        .filter(
-            OrgInvite.id == invite_id,
-            getattr(OrgInvite, fk_name) == current_user.organization_id,
-        )
-        .first()
-    )
-    if not inv:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
-
-    if not bool(getattr(inv, "is_active", True)):
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-    inv.is_active = False
-    db.add(inv)
-    db.commit()
-
-    create_org_audit_event(
-        db,
-        org_id=current_user.organization_id,
-        user_id=getattr(current_user, "id", None),
-        title="Org invite revoked",
-        description=f"invite_id={invite_id}",
-    )
-
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.post("/invites/accept", response_model=Token, dependencies=[Depends(login_rate_limit)])
-def accept_org_invite(
-    payload: AcceptInviteRequest,
-    response: Response,
-    db: Session = Depends(get_db),
-) -> Token:
-    email_norm = (payload.email or "").strip().lower()
-    if not email_norm:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required")
-
-    existing_user = db.query(User).filter(User.email == email_norm).first()
-    if existing_user:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-
-    raw = (payload.token or "").strip()
-    if not raw:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite token is required")
-
-    token_hash = _hash_token(raw)
-
-    inv = db.query(OrgInvite).filter(OrgInvite.token_hash == token_hash).first()
-    if not inv:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite token")
-
-    if not bool(getattr(inv, "is_active", True)):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite is not active")
-
-    if getattr(inv, "used_at", None) is not None or getattr(inv, "used_by_user_id", None) is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite has already been used")
-
-    exp = getattr(inv, "expires_at", None)
-    if exp is not None and isinstance(exp, datetime) and datetime.utcnow() > exp:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite has expired")
-
-    restricted_email = getattr(inv, "email", None)
-    if restricted_email and restricted_email.strip().lower() != email_norm:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invite is restricted to a different email")
-
-    inv_org_id = getattr(inv, "organization_id", None)
-    if inv_org_id is None:
-        inv_org_id = getattr(inv, "org_id", None)
-    if not inv_org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite is misconfigured (missing org).")
-
-    try:
-        hashed_password = pwd_context.hash(str(payload.password))
-    except Exception as e:
-        logger.exception("Password hashing failed")
-        raise HTTPException(status_code=400, detail=f"Password hashing failed: {e}")
-
-    # Governance hard rule: invite accept always creates member users
-    role = "member"
-
-    db_user = User(
-        email=email_norm,
-        hashed_password=hashed_password,
-        organization_id=int(inv_org_id),
-    )
-
-    if payload.full_name:
-        try:
-            db_user.full_name = payload.full_name
-        except Exception:
-            pass
-
-    try:
-        db_user.role = role
-    except Exception:
-        pass
-
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-
-    inv.used_by_user_id = getattr(db_user, "id", None)
-    inv.used_at = datetime.utcnow()
-    inv.is_active = False
-    db.add(inv)
-    db.commit()
-
-    create_org_audit_event(
-        db,
-        org_id=int(inv_org_id),
-        user_id=getattr(db_user, "id", None),
-        title="Org invite accepted",
-        description=f"invite_id={inv.id}; email={db_user.email}; role={role}",
-    )
-
-    access = create_access_token({"sub": db_user.email})
-    refresh = create_refresh_token({"sub": db_user.email})
-    _set_refresh_cookie(response, refresh)
-    return Token(access_token=access, token_type="bearer")
