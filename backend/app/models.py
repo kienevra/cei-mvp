@@ -32,6 +32,9 @@ class Organization(Base):
     sites = relationship("Site", back_populates="organization", cascade="all, delete-orphan")
     users = relationship("User", back_populates="organization", cascade="all, delete-orphan")
 
+    # ✅ Invite links (owner-generated; per-email invites)
+    invites = relationship("OrgInvite", back_populates="organization", cascade="all, delete-orphan")
+
     # -------- SaaS / billing fields --------
     plan_key = Column(String(64), nullable=True)                 # e.g. "free", "cei-starter"
     subscription_plan_key = Column(String(64), nullable=True)    # logical/Stripe plan key
@@ -67,18 +70,97 @@ class User(Base):
     organization_id = Column(Integer, ForeignKey("organization.id"), nullable=True, index=True)
     email = Column(String, unique=True, nullable=False, index=True)
     hashed_password = Column(String, nullable=False)
+
+    # NOTE:
+    # You already use int flags. Keep them for backwards compatibility.
+    # If you later migrate to Boolean, do it in a dedicated migration.
     is_active = Column(Integer, default=1, nullable=False)
     is_superuser = Column(Integer, default=0, nullable=False)
 
     # ✅ Cross-DB default
     created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
 
-    # NEW: roles & permissions (Step 4)
+    # Roles & permissions
     # Stored in DB as "owner" | "member". Default is "member".
     role = Column(String, nullable=False, server_default=text("'member'"))
 
     organization = relationship("Organization", back_populates="users")
     subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")
+
+    # Invites accepted by this user (usually 0 or 1)
+    accepted_invites = relationship(
+        "OrgInvite",
+        back_populates="accepted_user",
+        foreign_keys="OrgInvite.accepted_user_id",
+    )
+
+    # Invites created by this user (owner actions)
+    created_invites = relationship(
+        "OrgInvite",
+        back_populates="created_by_user",
+        foreign_keys="OrgInvite.created_by_user_id",
+    )
+
+
+class OrgInvite(Base):
+    """
+    Owner-generated invite for a SPECIFIC email address.
+
+    Path B (accept + signup):
+    - owner creates invite -> returns raw token once (cei_inv_...)
+    - invitee uses token to signup and join org
+    """
+    __tablename__ = "org_invites"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Underlying DB column is "org_id"
+    organization_id = Column(
+        "org_id",
+        Integer,
+        ForeignKey("organization.id"),
+        nullable=False,
+        index=True,
+    )
+
+    # Invited email (normalize lowercase in API layer)
+    email = Column(String(255), nullable=False, index=True)
+
+    # Store only SHA-256 hex hash of the raw token (64 chars)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+
+    # Invite role (owner picks member/owner; default member)
+    role = Column(String(32), nullable=False, server_default=text("'member'"))
+
+    # Lifecycle
+    is_active = Column(Boolean, nullable=False, default=True, server_default=text("1"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Audit / linkage
+    created_by_user_id = Column(Integer, ForeignKey("user.id"), nullable=True, index=True)
+    accepted_user_id = Column(Integer, ForeignKey("user.id"), nullable=True, index=True)
+
+    organization = relationship("Organization", back_populates="invites")
+
+    created_by_user = relationship(
+        "User",
+        back_populates="created_invites",
+        foreign_keys=[created_by_user_id],
+    )
+    accepted_user = relationship(
+        "User",
+        back_populates="accepted_invites",
+        foreign_keys=[accepted_user_id],
+    )
+
+    __table_args__ = (
+        sa.UniqueConstraint("org_id", "email", name="uq_org_invites_org_email"),
+        Index("ix_org_invites_org_active", "org_id", "is_active"),
+    )
 
 
 class BillingPlan(Base):
