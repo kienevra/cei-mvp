@@ -320,22 +320,46 @@ class OrgInvite(Base):
     id = Column(Integer, primary_key=True, index=True)
 
     # Underlying DB column is "org_id"
-    organization_id = Column("org_id", Integer, index=True, nullable=False)
+    organization_id = Column("org_id", Integer, ForeignKey("organization.id"), index=True, nullable=False)
 
     # optional: restrict invite to a specific email
-    email = Column(String(255), nullable=True)
+    email = Column(String(255), nullable=False)
 
     # role granted on acceptance
     role = Column(String(32), nullable=False, server_default=text("'member'"))
 
-    token_hash = Column(String(255), nullable=False, unique=True, index=True)
+    # sha256 hex = 64 chars
+    token_hash = Column(String(64), nullable=False, index=True)
 
     is_active = Column(Boolean, nullable=False, default=True, server_default=sa.true())
 
-    expires_at = Column(DateTime(timezone=True), nullable=True)
-
-    created_by_user_id = Column(Integer, nullable=True)
-    used_by_user_id = Column(Integer, nullable=True)
-    used_at = Column(DateTime(timezone=True), nullable=True)
-
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    accepted_user_id = Column(Integer, ForeignKey("user.id"), nullable=True)
+
+    created_by_user_id = Column(Integer, ForeignKey("user.id"), nullable=True)
+
+    # Relationships (match your Organization/User back_populates)
+    organization = relationship("Organization", back_populates="invites")
+
+    accepted_user = relationship(
+        "User",
+        foreign_keys=[accepted_user_id],
+        back_populates="accepted_invites",
+    )
+
+    created_by_user = relationship(
+        "User",
+        foreign_keys=[created_by_user_id],
+        back_populates="created_invites",
+    )
+
+    __table_args__ = (
+        sa.UniqueConstraint("org_id", "email", name="uq_org_invites_org_email"),
+        Index("ix_org_invites_org_active", "org_id", "is_active"),
+        Index("ix_org_invites_token_hash", "token_hash"),
+    )

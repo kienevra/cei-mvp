@@ -194,9 +194,7 @@ def _require_owner(user: User) -> None:
     """
     Backward-compatible guard used by org_invites router.
 
-    NOTE:
-    - org_invites.py imports `_require_owner` from here.
-    - We delegate to the canonical guard in app.api.deps.require_owner.
+    org_invites.py imports `_require_owner` from here.
     """
     require_owner(user, message="Only the organization owner can manage organization invites.")
 
@@ -380,6 +378,10 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ) -> Token:
+    """
+    Canonical login endpoint.
+    Expects application/x-www-form-urlencoded with fields: username, password.
+    """
     email_norm = (form_data.username or "").strip().lower()
     user = db.query(User).filter(User.email == email_norm).first()
     if not user or not pwd_context.verify(form_data.password, user.hashed_password):
