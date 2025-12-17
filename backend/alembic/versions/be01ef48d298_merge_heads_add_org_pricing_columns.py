@@ -1,15 +1,11 @@
-"""
-merge heads (alerts workflow + integration tokens)
+"""merge heads: integration tokens + alerts workflow
 
 Revision ID: be01ef48d298
 Revises: 0d504a6c33ac, add_alert_workflow_fields_002
-Create Date: 2025-xx-xx
+Create Date: 2025-XX-XX
 
-This is a MERGE revision to reconcile two parallel heads:
-- 0d504a6c33ac (integration tokens / related branch)
-- add_alert_workflow_fields_002 (alerts workflow branch)
-
-No schema changes here — this revision only fixes the Alembic graph.
+This is a merge revision to unify multiple heads.
+No schema changes happen here.
 """
 
 from alembic import op  # noqa: F401
