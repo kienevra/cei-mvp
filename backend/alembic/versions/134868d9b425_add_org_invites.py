@@ -1,33 +1,28 @@
-"""add org_invites
+"""add org_invites (NO-OP graph fix)
 
 Revision ID: 134868d9b425
-Revises: 2b541387ade1
-
+Revises: 7a2f3c1d9b10
 Create Date: 2025-12-16 11:57:43.681559
 
 NOTE:
-This revision was auto-generated incorrectly and included unrelated schema changes
-(create tables / drop columns / alter types) that would cause regressions and/or
-fail on existing databases.
+This revision was intentionally converted into a NO-OP to avoid regressions.
+It exists only to preserve a stable revision chain.
 
-We intentionally make this migration a NO-OP to preserve the revision chain.
-Actual invite onboarding changes are implemented in a follow-up migration.
+The REAL org_invites creation happens in 7a2f3c1d9b10_add_org_invites.py.
 """
 
 from alembic import op  # noqa: F401
 import sqlalchemy as sa  # noqa: F401
 
 revision = "134868d9b425"
-down_revision = "2b541387ade1"
+down_revision = "7a2f3c1d9b10"
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
-    # Intentionally empty (NO-OP). See NOTE in header docstring.
     pass
 
 
 def downgrade():
-    # Intentionally empty (NO-OP). See NOTE in header docstring.
     pass
