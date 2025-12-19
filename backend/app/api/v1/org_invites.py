@@ -1,5 +1,5 @@
 # backend/app/api/v1/org_invites.py
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -53,6 +53,20 @@ class TokenResponse(BaseModel):
 
 # ---------- Helpers ----------
 
+def _as_utc_aware(dt: datetime | None) -> datetime | None:
+    """
+    Return dt as timezone-aware UTC.
+
+    If dt is naive (no tzinfo), we assume it's already UTC (common when historical rows
+    were inserted with naive datetimes) and attach UTC tzinfo.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _audit(
     db: Session,
     *,
@@ -78,7 +92,9 @@ def _audit(
 
 
 def _now_utc() -> datetime:
-    return datetime.utcnow()
+    # Keep this return signature stable, but make it timezone-aware to prevent
+    # naive/aware comparison issues elsewhere.
+    return datetime.now(timezone.utc)
 
 
 def _clean_role(role: Optional[str]) -> str:
@@ -303,8 +319,10 @@ def accept_and_signup(
             detail={"code": "INVITE_EMAIL_MISMATCH", "message": "Invite is not valid for this email."},
         )
 
-    # Expiry
-    if getattr(inv, "expires_at", None) is not None and inv.expires_at < now:
+    # Expiry (normalize naive/aware before comparison)
+    expires_at = _as_utc_aware(getattr(inv, "expires_at", None))
+    now_aware = _as_utc_aware(now) or datetime.now(timezone.utc)
+    if expires_at is not None and expires_at < now_aware:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail={"code": "INVITE_EXPIRED", "message": "Invite has expired."},
