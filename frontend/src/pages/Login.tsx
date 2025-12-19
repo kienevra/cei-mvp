@@ -3,9 +3,7 @@ import React, { useEffect, useMemo, useState, FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import useAuth from "../hooks/useAuth";
 import ErrorBanner from "../components/ErrorBanner";
-import api from "../services/api";
-import { Link } from "react-router-dom";
-
+import api, { acceptInvite } from "../services/api";
 
 type AuthMode = "login" | "signup";
 
@@ -20,11 +18,6 @@ function pickInviteToken(search: string): string | null {
   return null;
 }
 
-<Link to="/signup" style={{ fontSize: "0.8rem" }}>
-  Have an invite? Join an existing organization
-</Link>
-
-
 const Login: React.FC = () => {
   const { login, isAuthenticated } = useAuth();
   const location = useLocation();
@@ -38,6 +31,7 @@ const Login: React.FC = () => {
   const [mode, setMode] = useState<AuthMode>("login");
 
   const [email, setEmail] = useState("");
+  const [fullName, setFullName] = useState(""); // invite onboarding (optional)
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [organizationName, setOrganizationName] = useState("");
@@ -53,7 +47,7 @@ const Login: React.FC = () => {
     }
   }, [isAuthenticated, navigate]);
 
-  // Handle ?reason=session_expired etc.
+  // Handle ?reason=session_expired etc. (do not regress)
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const reason = params.get("reason");
@@ -72,7 +66,6 @@ const Login: React.FC = () => {
       setNotice("You’re joining an organization via invite. Create your account to continue.");
     }
     // NOTE: do not include `mode` here; we intentionally force signup when invite exists.
-    
   }, [inviteToken]);
 
   function toErrorString(err: any): string {
@@ -84,10 +77,18 @@ const Login: React.FC = () => {
     if (typeof backendDetail === "string") return backendDetail;
 
     if (backendDetail && typeof backendDetail === "object") {
+      // Support your structured errors: { code, message }
+      if (typeof backendDetail.code === "string" || typeof backendDetail.message === "string") {
+        const code = backendDetail.code ? String(backendDetail.code) : "";
+        const msg = backendDetail.message ? String(backendDetail.message) : "";
+        return code && msg ? `${code}: ${msg}` : msg || code || "Authentication failed. Please try again.";
+      }
+
       const msg =
         (backendDetail.message && String(backendDetail.message)) ||
         (backendDetail.detail && String(backendDetail.detail));
       if (msg) return msg;
+
       try {
         return JSON.stringify(backendDetail);
       } catch {
@@ -123,27 +124,30 @@ const Login: React.FC = () => {
 
         if (inviteToken) {
           // ---------- INVITE JOIN FLOW ----------
-          // This assumes backend implements:
-          //   POST /api/v1/auth/invites/accept  { token, email, password }
+          // Canonical backend route is now:
+          //   POST /api/v1/org/invites/accept-and-signup  { token, email, password, full_name? }
           //
-          // If the endpoint isn't deployed yet, we fail with a clear error.
+          // We use the typed helper from services/api.ts which should already be aligned,
+          // and includes better error messaging + consistent baseURL.
           try {
-            await api.post("/auth/invites/accept", {
+            await acceptInvite({
               token: inviteToken,
               email,
               password,
+              full_name: fullName.trim() || undefined,
             });
           } catch (err: any) {
             const status = err?.response?.status;
             if (status === 404) {
               throw new Error(
-                "Invite join isn’t live on this backend yet (missing /auth/invites/accept). Deploy the invite endpoints, then retry."
+                "Invite join isn’t live on this backend yet (missing /org/invites/accept-and-signup). Deploy the invites router, then retry."
               );
             }
             throw err;
           }
 
-          // Login normally to wire Auth context (token storage, redirects)
+          // Important: accept-and-signup already returns an access token and sets refresh cookie.
+          // We still call login() to reuse your existing auth wiring + UX (token storage, redirects).
           await login({ username: email, password });
         } else {
           // ---------- SELF-SERVE ORG CREATION FLOW ----------
@@ -179,6 +183,8 @@ const Login: React.FC = () => {
     setPassword("");
     setPasswordConfirm("");
     setOrganizationName("");
+    // Keep full name if user typed it; but clear when switching to login
+    if (nextMode === "login") setFullName("");
   };
 
   const isSignup = mode === "signup";
@@ -318,6 +324,30 @@ const Login: React.FC = () => {
 
         {/* Auth form */}
         <form className="auth-form" onSubmit={handleSubmit}>
+          {/* Invite onboarding: full name (optional) */}
+          {isSignup && inviteToken && (
+            <div>
+              <label htmlFor="fullName">Full name (optional)</label>
+              <input
+                id="fullName"
+                type="text"
+                autoComplete="name"
+                placeholder="e.g. Taylor Smith"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+              />
+              <div
+                style={{
+                  fontSize: "0.75rem",
+                  color: "var(--cei-text-muted)",
+                  marginTop: "0.25rem",
+                }}
+              >
+                This is stored on your profile and used in audit logs.
+              </div>
+            </div>
+          )}
+
           {isSignup && !inviteToken && (
             <div>
               <label htmlFor="organizationName">Organization name</label>

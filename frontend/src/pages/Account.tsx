@@ -5,8 +5,10 @@ import {
   deleteAccount,
   startCheckout,
   openBillingPortal,
+  listOrgInvites,
+  createOrgInvite,
+  revokeOrgInvite,
 } from "../services/api";
-import api from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import type { AccountMe, OrganizationSummary } from "../types/auth";
@@ -82,21 +84,43 @@ type UiAccount = AccountMe & {
 // Backend contract is intentionally flexible: we parse whatever fields exist.
 type OrgInvite = {
   id: number;
+
+  // canonical or legacy org id fields (we don't rely on these for UI)
+  organization_id?: number | null;
   org_id?: number | null;
+
   email?: string | null;
   role?: string | null;
+
   is_active?: boolean | null;
-  expires_at?: string | null;
-  created_at?: string | null;
+
+  // canonical acceptance markers
+  accepted_at?: string | null;
+  accepted_user_id?: number | null;
+
+  // legacy acceptance markers (older schema)
   used_at?: string | null;
-  created_by_user_id?: number | null;
   used_by_user_id?: number | null;
+
+  revoked_at?: string | null;
+  created_at?: string | null;
+  created_by_user_id?: number | null;
+
+  expires_at?: string | null;
 };
 
 function safeString(v: any): string | null {
   if (v === null || v === undefined) return null;
   const s = String(v);
   return s.trim().length ? s : null;
+}
+
+function parseMaybeDate(v?: string | null): Date | null {
+  const s = safeString(v);
+  if (!s) return null;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
 }
 
 function formatMaybeIso(ts?: string | null): string {
@@ -108,9 +132,40 @@ function formatMaybeIso(ts?: string | null): string {
 }
 
 function buildInviteLink(token: string): string {
-  // Frontend flow: user lands on /login?invite=...
+  // Keep existing frontend behavior to avoid regressions:
+  // user lands on /login?invite=...
   const origin = window.location.origin;
   return `${origin}/login?invite=${encodeURIComponent(token)}`;
+}
+
+function inviteStatus(inv: OrgInvite): "Accepted" | "Expired" | "Revoked" | "Active" | "Inactive" {
+  const isActive = typeof inv.is_active === "boolean" ? inv.is_active : true;
+
+  const acceptedAt = safeString(inv.accepted_at) || safeString(inv.used_at);
+  const acceptedUserId =
+    typeof inv.accepted_user_id === "number"
+      ? inv.accepted_user_id
+      : typeof inv.used_by_user_id === "number"
+      ? inv.used_by_user_id
+      : null;
+
+  if (acceptedAt || acceptedUserId != null) return "Accepted";
+
+  const revokedAt = safeString(inv.revoked_at);
+  if (revokedAt) return "Revoked";
+
+  const expiresAtDate = parseMaybeDate(inv.expires_at);
+  if (expiresAtDate && expiresAtDate.getTime() < Date.now()) return "Expired";
+
+  if (isActive) return "Active";
+  return "Inactive";
+}
+
+function statusPillClass(status: string): string {
+  if (status === "Active") return "cei-pill cei-pill-good";
+  if (status === "Accepted") return "cei-pill cei-pill-neutral";
+  if (status === "Expired") return "cei-pill cei-pill-warn";
+  return "cei-pill cei-pill-muted";
 }
 
 const Account: React.FC = () => {
@@ -331,22 +386,14 @@ const Account: React.FC = () => {
     setInvitesError(null);
     setInvitesLoading(true);
     try {
-      // Expected backend:
-      //   GET /api/v1/auth/invites  -> list of org_invites (metadata only)
-      const res = await api.get("/auth/invites");
-      const list = Array.isArray(res.data) ? res.data : [];
-      setInvites(list as OrgInvite[]);
+      const list = await listOrgInvites();
+      setInvites(list as any as OrgInvite[]);
     } catch (e: any) {
-      const status = e?.response?.status;
-      if (status === 404) {
-        setInvitesError(
-          "Invite management isn’t live on this backend yet (missing /auth/invites). Deploy the invites endpoints, then refresh."
-        );
-      } else if (status === 403) {
-        setInvitesError("Owner-only. Switch to an owner account to manage invites.");
-      } else {
-        setInvitesError(e?.response?.data?.detail || e?.message || "Failed to load invites.");
-      }
+      const msg =
+        typeof e?.message === "string"
+          ? e.message
+          : e?.response?.data?.detail || e?.message || "Failed to load invites.";
+      setInvitesError(msg);
       setInvites([]);
     } finally {
       setInvitesLoading(false);
@@ -369,24 +416,22 @@ const Account: React.FC = () => {
       return;
     }
 
-    const days = Number.isFinite(inviteDays) ? Math.max(1, Math.min(90, inviteDays)) : 7;
+    // Backend enforces 1..30 today; UI allows up to 90 but we clamp to 30 to avoid server errors.
+    const daysRaw = Number.isFinite(inviteDays) ? inviteDays : 7;
+    const days = Math.max(1, Math.min(30, Math.floor(daysRaw)));
 
     setCreatingInvite(true);
     try {
-      // Expected backend:
-      //   POST /api/v1/auth/invites  { email?, role, expires_in_days }
-      // Returns either:
-      //   { token, invite: {...} }  OR  { token, id, expires_at } etc.
-      const res = await api.post("/auth/invites", {
+      const res = await createOrgInvite({
         email: email.length ? email : undefined,
         role: inviteRole,
         expires_in_days: days,
       });
 
-      const token = safeString(res?.data?.token) || safeString(res?.data?.invite_token);
+      const token = safeString((res as any)?.token);
       if (!token) {
         setCreatedInviteNote(
-          "Invite created, but backend did not return a token. Make sure the create endpoint returns the one-time token."
+          "Invite created, but backend did not return a token. Ensure the create endpoint returns the one-time token."
         );
       } else {
         const link = buildInviteLink(token);
@@ -394,18 +439,14 @@ const Account: React.FC = () => {
         setCreatedInviteNote("Invite link generated. Copy it and send it to the user.");
       }
 
-      // Refresh list so we see it
       await loadInvites();
       setInviteEmail("");
     } catch (e: any) {
-      const status = e?.response?.status;
-      if (status === 404) {
-        setInvitesError(
-          "Invite management isn’t live on this backend yet (missing POST /auth/invites). Deploy the invites endpoints, then retry."
-        );
-      } else {
-        setInvitesError(e?.response?.data?.detail || e?.message || "Failed to create invite.");
-      }
+      const msg =
+        typeof e?.message === "string"
+          ? e.message
+          : e?.response?.data?.detail || e?.message || "Failed to create invite.";
+      setInvitesError(msg);
     } finally {
       setCreatingInvite(false);
     }
@@ -421,19 +462,14 @@ const Account: React.FC = () => {
     if (!window.confirm("Revoke this invite? Anyone holding the link will be blocked.")) return;
 
     try {
-      // Expected backend:
-      //   DELETE /api/v1/auth/invites/{id}
-      await api.delete(`/auth/invites/${inviteId}`);
+      await revokeOrgInvite(inviteId);
       await loadInvites();
     } catch (e: any) {
-      const status = e?.response?.status;
-      if (status === 404) {
-        setInvitesError(
-          "Invite revoke isn’t live on this backend yet (missing DELETE /auth/invites/{id})."
-        );
-      } else {
-        setInvitesError(e?.response?.data?.detail || e?.message || "Failed to revoke invite.");
-      }
+      const msg =
+        typeof e?.message === "string"
+          ? e.message
+          : e?.response?.data?.detail || e?.message || "Failed to revoke invite.";
+      setInvitesError(msg);
     }
   };
 
@@ -441,7 +477,10 @@ const Account: React.FC = () => {
     try {
       await navigator.clipboard.writeText(textToCopy);
       setCreatedInviteNote("Copied to clipboard.");
-      setTimeout(() => setCreatedInviteNote("Invite link generated. Copy it and send it to the user."), 1500);
+      setTimeout(
+        () => setCreatedInviteNote("Invite link generated. Copy it and send it to the user."),
+        1500
+      );
     } catch {
       // fallback: no-op (user can manually copy)
       setCreatedInviteNote("Copy failed in this browser. Select the link and copy manually.");
@@ -712,7 +751,7 @@ const Account: React.FC = () => {
                   <input
                     type="number"
                     min={1}
-                    max={90}
+                    max={30}
                     value={inviteDays}
                     onChange={(e) => setInviteDays(parseInt(e.target.value || "7", 10))}
                     style={{ width: "100%" }}
@@ -757,7 +796,13 @@ const Account: React.FC = () => {
                     </div>
                   )}
                   {createdInviteNote && (
-                    <div style={{ marginTop: createdInviteLink ? "0.35rem" : 0, fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+                    <div
+                      style={{
+                        marginTop: createdInviteLink ? "0.35rem" : 0,
+                        fontSize: "0.78rem",
+                        color: "var(--cei-text-muted)",
+                      }}
+                    >
                       {createdInviteNote}
                     </div>
                   )}
@@ -799,17 +844,19 @@ const Account: React.FC = () => {
                           <th>Status</th>
                           <th>Expires</th>
                           <th>Created</th>
-                          <th>Used</th>
+                          <th>Accepted</th>
                           <th style={{ textAlign: "right" }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {invites.map((inv) => {
-                          const isActive =
-                            typeof inv.is_active === "boolean" ? inv.is_active : true;
-                          const usedAt = safeString(inv.used_at);
-                          const status =
-                            usedAt ? "Used" : isActive ? "Active" : "Revoked";
+                          const status = inviteStatus(inv);
+                          const isActionable = status === "Active";
+
+                          const acceptedTs =
+                            safeString(inv.accepted_at) ||
+                            safeString(inv.used_at) ||
+                            null;
 
                           return (
                             <tr key={inv.id}>
@@ -817,20 +864,24 @@ const Account: React.FC = () => {
                               <td>{safeString(inv.email) || <span style={{ color: "var(--cei-text-muted)" }}>—</span>}</td>
                               <td>{safeString(inv.role) || "member"}</td>
                               <td>
-                                <span className={status === "Active" ? "cei-pill cei-pill-good" : "cei-pill cei-pill-muted"}>
+                                <span className={statusPillClass(status)}>
                                   {status}
                                 </span>
                               </td>
                               <td>{formatMaybeIso(inv.expires_at)}</td>
                               <td>{formatMaybeIso(inv.created_at)}</td>
-                              <td>{formatMaybeIso(inv.used_at)}</td>
+                              <td>{formatMaybeIso(acceptedTs)}</td>
                               <td style={{ textAlign: "right" }}>
                                 <button
                                   type="button"
                                   className="cei-btn cei-btn-ghost"
                                   onClick={() => handleRevokeInvite(inv.id)}
-                                  disabled={!isActive || !!usedAt}
-                                  title={!isActive ? "Already revoked" : usedAt ? "Already used" : "Revoke invite"}
+                                  disabled={!isActionable}
+                                  title={
+                                    status !== "Active"
+                                      ? "Invite is not active"
+                                      : "Revoke invite"
+                                  }
                                 >
                                   Revoke
                                 </button>
