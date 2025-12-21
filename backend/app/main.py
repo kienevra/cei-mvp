@@ -1,8 +1,7 @@
-# backend/app/main.py
+﻿# backend/app/main.py
 
 import logging
 import traceback
-from typing import List
 
 from fastapi import FastAPI, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +23,6 @@ try:
     db_backend = (settings.database_url or "").split(":", 1)[0]
 except Exception:  # extremely defensive
     db_backend = "unknown"
-
 logger.info("DB backend detected: %s", db_backend)
 
 # --- App setup ---
@@ -36,23 +34,19 @@ app = FastAPI(
 )
 
 # --- CORS setup ---
-# In dev, we remove all origin-matching ambiguity:
-# - allow any origin via regex
-# - still keep an explicit list for logging / future tightening
-dev_origins: List[str] = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "https://cei-frontend.herokuapp.com",
-    "https://cei-mvp.onrender.com",
-]
+# IMPORTANT:
+# - We do NOT use allow_origin_regex=".*" because you are using credentials/cookies.
+# - We explicitly allow the origins from settings.ALLOWED_ORIGINS.
+try:
+    allowed = settings.origins_list()
+except Exception:
+    allowed = []
 
-logger.info(f"CORS dev allow_origins={dev_origins} (regex='.*')")
+logger.info("CORS allow_origins=%s", allowed)
 
 app.add_middleware(
     CORSMiddleware,
-    # Regex allows *any* origin in dev
-    allow_origin_regex=".*",
+    allow_origins=allowed,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,23 +55,21 @@ app.add_middleware(
 # --- Error logging middleware ---
 @app.middleware("http")
 async def log_exceptions(request: Request, call_next):
-  try:
-      response = await call_next(request)
-      return response
-  except Exception as e:
-      logger.error(f"Unhandled error at {request.url.path}: {e}")
-      logger.error(traceback.format_exc())
-      # Return safe, short payload to clients but include last lines for debugging
-      tb_lines = traceback.format_exc().splitlines()
-      return JSONResponse(
-          status_code=500,
-          content={
-              "detail": "Internal Server Error",
-              "error": str(e),
-              "traceback_last_lines": tb_lines[-10:],
-          },
-      )
-
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        logger.error(f"Unhandled error at {request.url.path}: {e}")
+        logger.error(traceback.format_exc())
+        tb_lines = traceback.format_exc().splitlines()
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Internal Server Error",
+                "error": str(e),
+                "traceback_last_lines": tb_lines[-10:],
+            },
+        )
 
 # --- Include routers (after app creation) ---
 # Keep these imports below to avoid circular imports during startup
@@ -93,7 +85,7 @@ from app.api.v1 import (  # noqa: E402
     account,
     site_events,    # site events / timeline
     opportunities,  # opportunities (auto + manual)
-    org_invites,    # ✅ org invite tokens + accept/signup
+    org_invites,    # org invite tokens + accept/signup
 )
 
 app.include_router(auth.router, prefix="/api/v1")
@@ -108,45 +100,25 @@ app.include_router(stripe_webhook.router, prefix="/api/v1")
 app.include_router(account.router, prefix="/api/v1")
 app.include_router(site_events.router, prefix="/api/v1")
 app.include_router(opportunities.router, prefix="/api/v1")
-app.include_router(org_invites.router, prefix="/api/v1")  # ✅ NEW
-
+app.include_router(org_invites.router, prefix="/api/v1")  # org invites
 
 # --- Legacy auth shims for pytest-only tests ---
-# tests/test_auth.py still calls /auth/signup and /auth/login (non-versioned).
-# These endpoints DO NOT wire into the real auth system; they just satisfy legacy tests.
-
 @app.post("/auth/signup", include_in_schema=False)
 def legacy_auth_signup_for_tests(payload: dict):
-    """
-    Legacy test shim: accept any JSON body and return a fake access token.
-
-    Real clients must use /api/v1/auth/signup.
-    """
     return {
         "access_token": "test-access-token",
         "token_type": "bearer",
     }
-
 
 @app.post("/auth/login", include_in_schema=False)
 def legacy_auth_login_for_tests(
     username: str = Form(...),
     password: str = Form(...),
 ):
-    """
-    Legacy test shim: accept form-encoded credentials and return a fake access token.
-
-    This matches tests/test_auth.py which posts:
-      data={"username": ..., "password": ...}
-
-    Real clients must use /api/v1/auth/login.
-    """
-    # We ignore username/password values; this is purely a test harness.
     return {
         "access_token": "test-access-token",
         "token_type": "bearer",
     }
-
 
 # --- Root + debug endpoints ---
 @app.get("/", include_in_schema=False)
@@ -155,7 +127,8 @@ def root():
         return RedirectResponse(url="/api/v1/docs")
     return {"status": "CEI API is running. See /api/v1/health."}
 
-
 @app.get("/debug/docs-enabled", include_in_schema=False)
 def debug_docs_enabled():
     return {"enable_docs": enable_docs}
+
+

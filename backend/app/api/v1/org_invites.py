@@ -1,6 +1,7 @@
-# backend/app/api/v1/org_invites.py
+﻿# backend/app/api/v1/org_invites.py
+
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
@@ -24,8 +25,6 @@ router = APIRouter(prefix="/org/invites", tags=["org-invites"])
 # ---------- Schemas ----------
 
 class InviteCreateRequest(BaseModel):
-    # NOTE: keep as str so dev can use reserved domains like *.local.
-    # In prod, we enforce stricter validation in _validate_email_for_env().
     email: str
     role: Optional[str] = "member"         # "member" | "owner"
     expires_in_days: Optional[int] = 7     # default 7 days
@@ -35,8 +34,34 @@ class InviteCreateResponse(BaseModel):
     id: int
     email: str
     role: str
+    is_active: bool
     expires_at: datetime
-    token: str  # returned ONCE
+    status: Literal["active", "revoked", "expired", "accepted"]
+    is_accepted: bool
+    is_expired: bool
+    can_accept: bool
+    token: Optional[str] = None  # returned ONLY when usable (not accepted)
+
+
+class InviteExtendRequest(BaseModel):
+    expires_in_days: Optional[int] = 7
+    role: Optional[str] = None
+
+
+class InviteExtendResponse(BaseModel):
+    id: int
+    email: str
+    role: str
+    is_active: bool
+    expires_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+    accepted_at: Optional[datetime] = None
+    accepted_user_id: Optional[int] = None
+    status: Literal["active", "revoked", "expired", "accepted"]
+    is_accepted: bool
+    is_expired: bool
+    can_accept: bool
+    token: Optional[str] = None  # ONLY when not accepted
 
 
 class InviteAcceptSignupRequest(BaseModel):
@@ -51,15 +76,30 @@ class TokenResponse(BaseModel):
     token_type: str
 
 
+class InviteListItem(BaseModel):
+    id: int
+    email: str
+    role: str
+    is_active: bool
+    created_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    accepted_at: Optional[datetime] = None
+    accepted_user_id: Optional[int] = None
+    revoked_at: Optional[datetime] = None
+    created_by_user_id: Optional[int] = None
+
+    # ✅ canonical server-side state so UI does not guess
+    status: Literal["active", "revoked", "expired", "accepted"]
+    is_accepted: bool
+    is_expired: bool
+    can_accept: bool
+    can_revoke: bool
+    can_extend: bool
+
+
 # ---------- Helpers ----------
 
 def _as_utc_aware(dt: datetime | None) -> datetime | None:
-    """
-    Return dt as timezone-aware UTC.
-
-    If dt is naive (no tzinfo), we assume it's already UTC (common when historical rows
-    were inserted with naive datetimes) and attach UTC tzinfo.
-    """
     if dt is None:
         return None
     if dt.tzinfo is None:
@@ -92,8 +132,6 @@ def _audit(
 
 
 def _now_utc() -> datetime:
-    # Keep this return signature stable, but make it timezone-aware to prevent
-    # naive/aware comparison issues elsewhere.
     return datetime.now(timezone.utc)
 
 
@@ -108,10 +146,6 @@ def _clean_role(role: Optional[str]) -> str:
 
 
 def _validate_email_for_env(email: str) -> None:
-    """
-    Dev/Test: allow reserved/special-use domains (e.g. *.local) so you can use local emails.
-    Prod: enforce proper email validation.
-    """
     e = (email or "").strip()
     if not e or "@" not in e:
         raise HTTPException(
@@ -120,9 +154,8 @@ def _validate_email_for_env(email: str) -> None:
         )
 
     if settings.is_prod:
-        # Strict validation in prod using Pydantic's EmailStr (v2 compatible).
         try:
-            from pydantic import EmailStr, TypeAdapter  # pydantic v2
+            from pydantic import EmailStr, TypeAdapter
             TypeAdapter(EmailStr).validate_python(e)
         except Exception:
             raise HTTPException(
@@ -132,12 +165,6 @@ def _validate_email_for_env(email: str) -> None:
 
 
 def _require_owner_for_invites(current_user: User) -> None:
-    """
-    Owner-only guard for org invite operations.
-
-    - Allows legacy superusers
-    - Otherwise requires current_user.role == "owner"
-    """
     is_super = bool(getattr(current_user, "is_superuser", 0))
     if is_super:
         return
@@ -148,30 +175,128 @@ def _require_owner_for_invites(current_user: User) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "code": "FORBIDDEN_OWNER_ONLY",
-                "message": "Only the organization owner can create invites.",
+                "message": "Only the organization owner can manage invites.",
             },
         )
 
 
-def _invite_is_already_accepted(inv: OrgInvite) -> bool:
-    # Defensive: treat any accepted marker as "already accepted"
+def _invite_is_accepted(inv: OrgInvite) -> bool:
+    return bool(getattr(inv, "accepted_user_id", None) is not None or getattr(inv, "accepted_at", None) is not None)
+
+
+def _coerce_expiry_days(v: Optional[int]) -> int:
+    expires_days = v if v is not None else 7
     try:
-        if getattr(inv, "accepted_user_id", None) is not None:
-            return True
+        expires_days = int(expires_days)
     except Exception:
-        pass
-    try:
-        if getattr(inv, "accepted_at", None) is not None:
-            return True
-    except Exception:
-        pass
-    # Some flows might only flip is_active; keep that meaning too
-    try:
-        if not bool(getattr(inv, "is_active", True)):
-            return True
-    except Exception:
-        pass
-    return False
+        expires_days = 7
+    if expires_days < 1 or expires_days > 30:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVITE_BAD_EXPIRY", "message": "expires_in_days must be between 1 and 30."},
+        )
+    return expires_days
+
+
+def _set_user_access_by_user_id(
+    db: Session,
+    *,
+    org_id: int,
+    user_id: int,
+    enable: bool,
+) -> Optional[str]:
+    user = (
+        db.query(User)
+        .filter(User.organization_id == org_id, User.id == user_id)
+        .first()
+    )
+    if not user:
+        return None
+    return _set_user_access_obj(db, user=user, enable=enable)
+
+
+def _set_user_access_by_email(
+    db: Session,
+    *,
+    org_id: int,
+    email_norm: str,
+    enable: bool,
+) -> Optional[str]:
+    user = (
+        db.query(User)
+        .filter(User.organization_id == org_id, User.email == email_norm)
+        .first()
+    )
+    if not user:
+        return None
+    return _set_user_access_obj(db, user=user, enable=enable)
+
+
+def _set_user_access_obj(db: Session, *, user: User, enable: bool) -> Optional[str]:
+    now = _now_utc()
+
+    if hasattr(user, "is_active"):
+        try:
+            setattr(user, "is_active", 1 if enable else 0)
+            db.add(user)
+            return f"user.is_active={1 if enable else 0}"
+        except Exception:
+            db.rollback()
+
+    if hasattr(user, "disabled_at"):
+        try:
+            setattr(user, "disabled_at", None if enable else now)
+            db.add(user)
+            return f"user.disabled_at={'null' if enable else 'now'}"
+        except Exception:
+            db.rollback()
+
+    return "user.toggle_unsupported"
+
+
+def _compute_invite_state(inv: OrgInvite, now: datetime) -> dict:
+    """
+    Canonical state computation so UI never guesses.
+    """
+    revoked_at = _as_utc_aware(getattr(inv, "revoked_at", None))
+    expires_at = _as_utc_aware(getattr(inv, "expires_at", None))
+    accepted = _invite_is_accepted(inv)
+
+    expired = False
+    if expires_at is not None and expires_at < now:
+        expired = True
+
+    # Stored flag, but we harden it with timestamps.
+    stored_active = bool(getattr(inv, "is_active", True))
+
+    if revoked_at is not None:
+        status_key = "revoked"
+        is_active = False
+    elif expired:
+        status_key = "expired"
+        is_active = False
+    elif accepted:
+        # Accepted invite is a membership artifact; it can still be "active"
+        # but it is NOT accept-able anymore.
+        status_key = "accepted"
+        is_active = True if stored_active else True
+    else:
+        status_key = "active" if stored_active else "revoked"
+        is_active = True if stored_active else False
+
+    can_accept = (status_key == "active") and (not accepted) and (not expired) and (revoked_at is None)
+    can_revoke = (status_key == "active")
+    can_extend = True  # owner can always extend/reactivate
+
+    return {
+        "status": status_key,
+        "is_active": is_active,
+        "is_accepted": accepted,
+        "is_expired": expired,
+        "can_accept": can_accept,
+        "can_revoke": can_revoke,
+        "can_extend": can_extend,
+    }
 
 
 # ---------- Routes ----------
@@ -182,31 +307,25 @@ def create_invite(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Owner-only: create a one-time invite token for a specific email.
-    Returns the raw token ONCE.
-    """
     if not current_user.organization_id:
         raise HTTPException(status_code=400, detail="User is not attached to an organization")
 
     _require_owner_for_invites(current_user)
 
-    _validate_email_for_env(payload.email)
-    invited_email = normalize_email(payload.email)
-    role = _clean_role(payload.role)
-
-    expires_days = payload.expires_in_days if payload.expires_in_days is not None else 7
-    try:
-        expires_days = int(expires_days)
-    except Exception:
-        expires_days = 7
-    if expires_days < 1 or expires_days > 30:
+    email_raw = (payload.email or "").strip()
+    if not email_raw:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": "INVITE_BAD_EXPIRY", "message": "expires_in_days must be between 1 and 30."},
+            detail={"code": "INVITE_BAD_EMAIL", "message": "Email is required to create an invite."},
         )
 
-    # If invite exists for (org,email), rotate token by updating the same row (keeps uq constraint happy)
+    _validate_email_for_env(email_raw)
+    invited_email = normalize_email(email_raw)
+    role = _clean_role(payload.role)
+
+    expires_days = _coerce_expiry_days(payload.expires_in_days)
+    expires_at = _now_utc() + timedelta(days=expires_days)
+
     existing = (
         db.query(OrgInvite)
         .filter(
@@ -216,38 +335,58 @@ def create_invite(
         .first()
     )
 
-    raw_token = generate_invite_token()
-    token_hash = hash_invite_token(raw_token)
-    expires_at = _now_utc() + timedelta(days=expires_days)
+    now = _now_utc()
 
     if existing:
-        existing.token_hash = token_hash
+        accepted = _invite_is_accepted(existing)
+
         existing.role = role
         existing.expires_at = expires_at
+        existing.created_by_user_id = current_user.id
+
+        # Always "reactivate" record for management purposes
         existing.is_active = True
         existing.revoked_at = None
-        existing.accepted_at = None
-        existing.accepted_user_id = None
-        existing.created_by_user_id = current_user.id
+
+        raw_token: Optional[str] = None
+
+        if not accepted:
+            # Only generate token if it can be used to accept
+            raw_token = generate_invite_token()
+            existing.token_hash = hash_invite_token(raw_token)
+
         db.add(existing)
         db.commit()
         db.refresh(existing)
+
+        state = _compute_invite_state(existing, now)
 
         _audit(
             db,
             org_id=current_user.organization_id,
             user_id=current_user.id,
-            title="Invite re-issued",
-            description=f"email={invited_email}; invite_id={existing.id}; role={role}; expires_at={expires_at.isoformat()}",
+            title="Invite created/re-issued",
+            description=(
+                f"email={invited_email}; invite_id={existing.id}; role={role}; "
+                f"expires_at={expires_at.isoformat()}; token_returned={'yes' if raw_token else 'no'}"
+            ),
         )
 
         return InviteCreateResponse(
             id=existing.id,
-            email=payload.email,
+            email=email_raw,
             role=existing.role,
-            expires_at=existing.expires_at,
+            is_active=state["is_active"],
+            expires_at=_as_utc_aware(existing.expires_at) or existing.expires_at,
+            status=state["status"],
+            is_accepted=state["is_accepted"],
+            is_expired=state["is_expired"],
+            can_accept=state["can_accept"],
             token=raw_token,
         )
+
+    raw_token = generate_invite_token()
+    token_hash = hash_invite_token(raw_token)
 
     inv = OrgInvite(
         organization_id=current_user.organization_id,
@@ -262,6 +401,8 @@ def create_invite(
     db.commit()
     db.refresh(inv)
 
+    state = _compute_invite_state(inv, now)
+
     _audit(
         db,
         org_id=current_user.organization_id,
@@ -272,9 +413,217 @@ def create_invite(
 
     return InviteCreateResponse(
         id=inv.id,
-        email=payload.email,
+        email=email_raw,
         role=inv.role,
-        expires_at=inv.expires_at,
+        is_active=state["is_active"],
+        expires_at=_as_utc_aware(inv.expires_at) or inv.expires_at,
+        status=state["status"],
+        is_accepted=state["is_accepted"],
+        is_expired=state["is_expired"],
+        can_accept=state["can_accept"],
+        token=raw_token,
+    )
+
+
+@router.get("", response_model=list[InviteListItem])
+def list_invites(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user.organization_id:
+        raise HTTPException(status_code=400, detail="User is not attached to an organization")
+
+    _require_owner_for_invites(current_user)
+
+    now = _now_utc()
+
+    invites = (
+        db.query(OrgInvite)
+        .filter(OrgInvite.organization_id == current_user.organization_id)
+        .order_by(OrgInvite.created_at.desc())
+        .all()
+    )
+
+    out: list[InviteListItem] = []
+    for inv in invites:
+        state = _compute_invite_state(inv, now)
+
+        out.append(
+            InviteListItem(
+                id=inv.id,
+                email=getattr(inv, "email", None) or "",
+                role=getattr(inv, "role", None) or "member",
+                is_active=state["is_active"],
+                created_at=_as_utc_aware(getattr(inv, "created_at", None)),
+                expires_at=_as_utc_aware(getattr(inv, "expires_at", None)),
+                accepted_at=_as_utc_aware(getattr(inv, "accepted_at", None)),
+                accepted_user_id=getattr(inv, "accepted_user_id", None),
+                revoked_at=_as_utc_aware(getattr(inv, "revoked_at", None)),
+                created_by_user_id=getattr(inv, "created_by_user_id", None),
+
+                status=state["status"],
+                is_accepted=state["is_accepted"],
+                is_expired=state["is_expired"],
+                can_accept=state["can_accept"],
+                can_revoke=state["can_revoke"],
+                can_extend=state["can_extend"],
+            )
+        )
+
+    return out
+
+
+@router.delete("/{invite_id}", status_code=204)
+def revoke_invite(
+    invite_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user.organization_id:
+        raise HTTPException(status_code=400, detail="User is not attached to an organization")
+
+    _require_owner_for_invites(current_user)
+
+    inv = (
+        db.query(OrgInvite)
+        .filter(
+            OrgInvite.id == invite_id,
+            OrgInvite.organization_id == current_user.organization_id,
+        )
+        .first()
+    )
+    if not inv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "INVITE_NOT_FOUND", "message": "Invite not found."},
+        )
+
+    now = _now_utc()
+
+    inv.is_active = False
+    inv.revoked_at = now
+    db.add(inv)
+
+    email_norm = normalize_email(getattr(inv, "email", "") or "")
+    accepted_user_id = getattr(inv, "accepted_user_id", None)
+
+    disabled_detail: Optional[str] = None
+    if accepted_user_id is not None:
+        disabled_detail = _set_user_access_by_user_id(
+            db, org_id=current_user.organization_id, user_id=int(accepted_user_id), enable=False
+        )
+
+    if disabled_detail is None:
+        disabled_detail = _set_user_access_by_email(
+            db, org_id=current_user.organization_id, email_norm=email_norm, enable=False
+        )
+
+    db.commit()
+
+    _audit(
+        db,
+        org_id=current_user.organization_id,
+        user_id=current_user.id,
+        title="Invite revoked",
+        description=f"invite_id={inv.id}; email={email_norm}; invite=revoked; user_action={disabled_detail or 'none'}",
+    )
+
+    return Response(status_code=204)
+
+
+@router.post("/{invite_id}/extend", response_model=InviteExtendResponse)
+def extend_invite(
+    invite_id: int,
+    payload: InviteExtendRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user.organization_id:
+        raise HTTPException(status_code=400, detail="User is not attached to an organization")
+
+    _require_owner_for_invites(current_user)
+
+    inv = (
+        db.query(OrgInvite)
+        .filter(
+            OrgInvite.id == invite_id,
+            OrgInvite.organization_id == current_user.organization_id,
+        )
+        .first()
+    )
+    if not inv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "INVITE_NOT_FOUND", "message": "Invite not found."},
+        )
+
+    expires_days = _coerce_expiry_days(payload.expires_in_days)
+    now = _now_utc()
+    new_expires_at = now + timedelta(days=expires_days)
+
+    if payload.role is not None:
+        inv.role = _clean_role(payload.role)
+
+    # Reactivate management state
+    inv.is_active = True
+    inv.revoked_at = None
+    inv.expires_at = new_expires_at
+    inv.created_by_user_id = current_user.id
+
+    accepted = _invite_is_accepted(inv)
+
+    raw_token: Optional[str] = None
+    if not accepted:
+        # Only mint a token if invite can still be accepted
+        raw_token = generate_invite_token()
+        inv.token_hash = hash_invite_token(raw_token)
+
+    email_norm = normalize_email(getattr(inv, "email", "") or "")
+    accepted_user_id = getattr(inv, "accepted_user_id", None)
+
+    enabled_detail: Optional[str] = None
+    if accepted_user_id is not None:
+        enabled_detail = _set_user_access_by_user_id(
+            db, org_id=current_user.organization_id, user_id=int(accepted_user_id), enable=True
+        )
+
+    if enabled_detail is None:
+        enabled_detail = _set_user_access_by_email(
+            db, org_id=current_user.organization_id, email_norm=email_norm, enable=True
+        )
+
+    db.add(inv)
+    db.commit()
+    db.refresh(inv)
+
+    state = _compute_invite_state(inv, now)
+
+    _audit(
+        db,
+        org_id=current_user.organization_id,
+        user_id=current_user.id,
+        title="Invite extended/reactivated",
+        description=(
+            f"invite_id={inv.id}; email={email_norm}; expires_at={_as_utc_aware(inv.expires_at).isoformat() if inv.expires_at else 'none'}; "
+            f"user_action={enabled_detail or 'none'}; token_returned={'yes' if raw_token else 'no'}"
+        ),
+    )
+
+    return InviteExtendResponse(
+        id=inv.id,
+        email=getattr(inv, "email", "") or "",
+        role=getattr(inv, "role", None) or "member",
+        is_active=state["is_active"],
+        expires_at=_as_utc_aware(getattr(inv, "expires_at", None)),
+        revoked_at=_as_utc_aware(getattr(inv, "revoked_at", None)),
+        accepted_at=_as_utc_aware(getattr(inv, "accepted_at", None)),
+        accepted_user_id=getattr(inv, "accepted_user_id", None),
+
+        status=state["status"],
+        is_accepted=state["is_accepted"],
+        is_expired=state["is_expired"],
+        can_accept=state["can_accept"],
+
         token=raw_token,
     )
 
@@ -285,12 +634,6 @@ def accept_and_signup(
     response: Response,
     db: Session = Depends(get_db),
 ):
-    """
-    Public: accept invite + create user + log them in (sets refresh cookie, returns access token).
-
-    Important: We validate the invite FIRST so replay attempts return INVITE_INACTIVE / INVITE_ALREADY_ACCEPTED
-    instead of EMAIL_ALREADY_REGISTERED.
-    """
     raw_token = (payload.token or "").strip()
     if not raw_token.startswith("cei_inv_"):
         raise HTTPException(
@@ -302,7 +645,6 @@ def accept_and_signup(
     email_norm = normalize_email(payload.email)
     now = _now_utc()
 
-    # 1) Resolve invite by token (even if inactive; we want correct error codes on replay)
     token_hash = hash_invite_token(raw_token)
     inv = db.query(OrgInvite).filter(OrgInvite.token_hash == token_hash).first()
     if not inv:
@@ -311,36 +653,31 @@ def accept_and_signup(
             detail={"code": "INVITE_NOT_FOUND", "message": "Invite not found."},
         )
 
-    # 2) Validate lifecycle BEFORE looking at user existence
-    # Email must match the invite
     if normalize_email(getattr(inv, "email", "") or "") != email_norm:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "INVITE_EMAIL_MISMATCH", "message": "Invite is not valid for this email."},
         )
 
-    # Expiry (normalize naive/aware before comparison)
     expires_at = _as_utc_aware(getattr(inv, "expires_at", None))
-    now_aware = _as_utc_aware(now) or datetime.now(timezone.utc)
-    if expires_at is not None and expires_at < now_aware:
+    if expires_at is not None and expires_at < now:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail={"code": "INVITE_EXPIRED", "message": "Invite has expired."},
         )
 
-    # Already accepted / inactive
-    if _invite_is_already_accepted(inv):
-        if getattr(inv, "accepted_user_id", None) is not None or getattr(inv, "accepted_at", None) is not None:
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail={"code": "INVITE_ALREADY_ACCEPTED", "message": "Invite has already been accepted."},
-            )
+    if _invite_is_accepted(inv):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={"code": "INVITE_ALREADY_ACCEPTED", "message": "Invite has already been accepted."},
+        )
+
+    if not bool(getattr(inv, "is_active", True)) or getattr(inv, "revoked_at", None) is not None:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail={"code": "INVITE_INACTIVE", "message": "Invite is no longer active."},
         )
 
-    # 3) Now check whether the user already exists
     existing_user = db.query(User).filter(User.email == email_norm).first()
     if existing_user:
         raise HTTPException(
@@ -348,8 +685,7 @@ def accept_and_signup(
             detail={"code": "EMAIL_ALREADY_REGISTERED", "message": "Email already registered. Please log in."},
         )
 
-    # 4) Create user (reuse the same hashing context from auth.py)
-    from app.api.v1.auth import pwd_context  # local import to avoid circular startup issues
+    from app.api.v1.auth import pwd_context
     hashed_password = pwd_context.hash(str(payload.password))
 
     user = User(
@@ -369,6 +705,12 @@ def accept_and_signup(
     except Exception:
         pass
 
+    if hasattr(user, "is_active"):
+        try:
+            setattr(user, "is_active", 1)
+        except Exception:
+            pass
+
     db.add(user)
 
     try:
@@ -382,10 +724,10 @@ def accept_and_signup(
 
     db.refresh(user)
 
-    # 5) Mark invite accepted + deactivate
     inv.accepted_at = now
     inv.accepted_user_id = user.id
-    inv.is_active = False
+    inv.is_active = True
+    inv.revoked_at = None
     db.add(inv)
     db.commit()
 
@@ -397,7 +739,6 @@ def accept_and_signup(
         description=f"email={email_norm}; invite_id={inv.id}; user_id={user.id}",
     )
 
-    # 6) Log them in immediately (same as /auth/login)
     access = create_access_token({"sub": user.email})
     refresh = create_refresh_token({"sub": user.email})
     _set_refresh_cookie(response, refresh)
