@@ -1,4 +1,5 @@
 // frontend/src/pages/Account.tsx
+
 import React, { useEffect, useMemo, useState } from "react";
 import {
   getAccountMe,
@@ -8,7 +9,9 @@ import {
   listOrgInvites,
   createOrgInvite,
   revokeOrgInvite,
+  extendOrgInvite,
 } from "../services/api";
+
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import type { AccountMe, OrganizationSummary } from "../types/auth";
@@ -81,11 +84,9 @@ type UiAccount = AccountMe & {
 };
 
 // ---- Invites (owner-only) ----
-// Backend contract is intentionally flexible: we parse whatever fields exist.
 type OrgInvite = {
   id: number;
 
-  // canonical or legacy org id fields (we don't rely on these for UI)
   organization_id?: number | null;
   org_id?: number | null;
 
@@ -94,11 +95,9 @@ type OrgInvite = {
 
   is_active?: boolean | null;
 
-  // canonical acceptance markers
   accepted_at?: string | null;
   accepted_user_id?: number | null;
 
-  // legacy acceptance markers (older schema)
   used_at?: string | null;
   used_by_user_id?: number | null;
 
@@ -132,50 +131,41 @@ function formatMaybeIso(ts?: string | null): string {
 }
 
 function buildInviteLink(token: string): string {
-  // Keep existing frontend behavior to avoid regressions:
-  // user lands on /login?invite=...
   const origin = window.location.origin;
   return `${origin}/login?invite=${encodeURIComponent(token)}`;
 }
 
-function inviteStatus(inv: OrgInvite): "Accepted" | "Expired" | "Revoked" | "Active" | "Inactive" {
-  const isActive = typeof inv.is_active === "boolean" ? inv.is_active : true;
+/**
+ * Status column requirement:
+ * - Show ONLY "Active" (green) or "Revoked" (red)
+ *
+ * Action requirement (mutually exclusive):
+ * - If Active: show ONLY Revoke (red)
+ * - If Revoked: show ONLY Extend (green)
+ */
+type InviteUiStatus = "Active" | "Revoked";
 
-  const acceptedAt = safeString(inv.accepted_at) || safeString(inv.used_at);
-  const acceptedUserId =
-    typeof inv.accepted_user_id === "number"
-      ? inv.accepted_user_id
-      : typeof inv.used_by_user_id === "number"
-      ? inv.used_by_user_id
-      : null;
-
-  if (acceptedAt || acceptedUserId != null) return "Accepted";
-
-  const revokedAt = safeString(inv.revoked_at);
-  if (revokedAt) return "Revoked";
-
-  const expiresAtDate = parseMaybeDate(inv.expires_at);
-  if (expiresAtDate && expiresAtDate.getTime() < Date.now()) return "Expired";
-
-  if (isActive) return "Active";
-  return "Inactive";
+function inviteUiStatus(inv: OrgInvite): InviteUiStatus {
+  // Hardening: do not assume "true" when missing.
+  const isActive = typeof inv.is_active === "boolean" ? inv.is_active : false;
+  return isActive ? "Active" : "Revoked";
 }
 
-function statusPillClass(status: string): string {
-  if (status === "Active") return "cei-pill cei-pill-good";
-  if (status === "Accepted") return "cei-pill cei-pill-neutral";
-  if (status === "Expired") return "cei-pill cei-pill-warn";
-  return "cei-pill cei-pill-muted";
+function statusPillClass(status: InviteUiStatus): string {
+  if (status === "Active") return "cei-pill cei-pill-good"; // green
+  return "cei-pill cei-pill-danger"; // red
+}
+
+function normalizeInviteRole(v: any): "owner" | "member" {
+  const s = typeof v === "string" ? v.toLowerCase().trim() : "";
+  return s === "owner" ? "owner" : "member";
 }
 
 const Account: React.FC = () => {
   const [account, setAccount] = useState<UiAccount | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Hard error (used for destructive actions, billing flows, etc.)
   const [error, setError] = useState<string | null>(null);
-
-  // Non-blocking warning: /account/me failed, but we still render core UI
   const [accountWarning, setAccountWarning] = useState<string | null>(null);
 
   const [billingMessage, setBillingMessage] = useState<string | null>(null);
@@ -193,8 +183,17 @@ const Account: React.FC = () => {
   const [inviteRole, setInviteRole] = useState<"member" | "owner">("member");
   const [inviteDays, setInviteDays] = useState<number>(7);
 
-  const [createdInviteLink, setCreatedInviteLink] = useState<string | null>(null);
-  const [createdInviteNote, setCreatedInviteNote] = useState<string | null>(null);
+  const [createdInviteLink, setCreatedInviteLink] = useState<string | null>(
+    null
+  );
+  const [createdInviteNote, setCreatedInviteNote] = useState<string | null>(
+    null
+  );
+
+  // Track Extend per-row
+  const [extendingInviteId, setExtendingInviteId] = useState<number | null>(
+    null
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -243,10 +242,8 @@ const Account: React.FC = () => {
   const envLabel = getEnvironmentLabel(appEnvironment);
   const envBlurb = getEnvironmentBlurb(appEnvironment);
 
-  // Canonical org object for UI + flags
   const org: OrganizationSummary | null = account?.org ?? null;
 
-  // Flexible view over account/org for plan + tariffs (handles org vs root fields)
   const accountAny: any = account || {};
   const orgLike: any = accountAny.org ?? accountAny.organization ?? null;
 
@@ -268,9 +265,10 @@ const Account: React.FC = () => {
   })();
 
   const subscriptionStatus =
-    orgLike?.subscription_status || accountAny.subscription_status || "Not connected";
+    orgLike?.subscription_status ||
+    accountAny.subscription_status ||
+    "Not connected";
 
-  // Respect explicit false; only default to true when we truly have no signal.
   const alertsEnabled =
     typeof accountAny.enable_alerts === "boolean"
       ? accountAny.enable_alerts
@@ -285,7 +283,10 @@ const Account: React.FC = () => {
       ? (orgLike.enable_reports as boolean)
       : true;
 
-  const isOwner = useMemo(() => normalizeRole(account?.role) === "owner", [account?.role]);
+  const isOwner = useMemo(
+    () => normalizeRole(account?.role) === "owner",
+    [account?.role]
+  );
 
   const handleStartStarterCheckout = async () => {
     setBillingMessage(null);
@@ -303,7 +304,9 @@ const Account: React.FC = () => {
       );
     } catch (err) {
       console.error("Failed to start checkout:", err);
-      setBillingMessage("Could not start checkout. Please retry or contact your CEI admin.");
+      setBillingMessage(
+        "Could not start checkout. Please retry or contact your CEI admin."
+      );
     } finally {
       setStartingCheckout(false);
     }
@@ -325,14 +328,17 @@ const Account: React.FC = () => {
       );
     } catch (err) {
       console.error("Failed to open billing portal:", err);
-      setBillingMessage("Could not open the billing portal. Please retry or contact your CEI admin.");
+      setBillingMessage(
+        "Could not open the billing portal. Please retry or contact your CEI admin."
+      );
     } finally {
       setOpeningPortal(false);
     }
   };
 
   const handleDeleteAccount = async () => {
-    if (!window.confirm("Really delete your account? This cannot be undone.")) return;
+    if (!window.confirm("Really delete your account? This cannot be undone."))
+      return;
 
     setDeleting(true);
     setError(null);
@@ -411,19 +417,18 @@ const Account: React.FC = () => {
     }
 
     const email = inviteEmail.trim();
-    if (email.length > 0 && !email.includes("@")) {
-      setInvitesError("Invite email looks invalid. Either leave it blank or enter a real email.");
+    if (!email || !email.includes("@")) {
+      setInvitesError("Invite email is required and must be a valid email address.");
       return;
     }
 
-    // Backend enforces 1..30 today; UI allows up to 90 but we clamp to 30 to avoid server errors.
     const daysRaw = Number.isFinite(inviteDays) ? inviteDays : 7;
     const days = Math.max(1, Math.min(30, Math.floor(daysRaw)));
 
     setCreatingInvite(true);
     try {
       const res = await createOrgInvite({
-        email: email.length ? email : undefined,
+        email,
         role: inviteRole,
         expires_in_days: days,
       });
@@ -459,7 +464,10 @@ const Account: React.FC = () => {
       return;
     }
 
-    if (!window.confirm("Revoke this invite? Anyone holding the link will be blocked.")) return;
+    const ok = window.confirm(
+      "Revoke this invite?\n\nThis will:\n- Disable the invite link\n- Stop the invited user from logging in again (if already accepted)"
+    );
+    if (!ok) return;
 
     try {
       await revokeOrgInvite(inviteId);
@@ -473,21 +481,73 @@ const Account: React.FC = () => {
     }
   };
 
+  /**
+   * Extend = POST /org/invites/{id}/extend
+   * - If invite is unaccepted: backend may return a fresh one-time token (show link)
+   * - If invite is already accepted: backend typically returns no token (just re-enable access)
+   */
+  const handleExtendInvite = async (inv: OrgInvite) => {
+    setInvitesError(null);
+    setCreatedInviteLink(null);
+    setCreatedInviteNote(null);
+
+    if (!isOwner) {
+      setInvitesError("Owner-only. Only an org owner can extend invites.");
+      return;
+    }
+
+    const daysRaw = Number.isFinite(inviteDays) ? inviteDays : 7;
+    const days = Math.max(1, Math.min(30, Math.floor(daysRaw)));
+
+    // Optional: allow role update on extend (uses existing row role by default)
+    const role = normalizeInviteRole(inv.role);
+
+    setExtendingInviteId(inv.id);
+    try {
+      const res = await extendOrgInvite(inv.id, { expires_in_days: days, role });
+
+      // Token only returned if invite is NOT already accepted
+      const token = safeString((res as any)?.token);
+      if (token) {
+        const link = buildInviteLink(token);
+        setCreatedInviteLink(link);
+        setCreatedInviteNote(
+          "Extended. New invite link generated. Copy it and send it to the user."
+        );
+      } else {
+        setCreatedInviteNote(
+          "Extended. No invite link returned because this invite was already accepted. User access has been re-enabled."
+        );
+      }
+
+      await loadInvites();
+    } catch (e: any) {
+      const msg =
+        typeof e?.message === "string"
+          ? e.message
+          : e?.response?.data?.detail || e?.message || "Failed to extend invite.";
+      setInvitesError(msg);
+    } finally {
+      setExtendingInviteId(null);
+    }
+  };
+
   const handleCopy = async (textToCopy: string) => {
     try {
       await navigator.clipboard.writeText(textToCopy);
       setCreatedInviteNote("Copied to clipboard.");
       setTimeout(
-        () => setCreatedInviteNote("Invite link generated. Copy it and send it to the user."),
+        () =>
+          setCreatedInviteNote(
+            "Invite link generated. Copy it and send it to the user."
+          ),
         1500
       );
     } catch {
-      // fallback: no-op (user can manually copy)
       setCreatedInviteNote("Copy failed in this browser. Select the link and copy manually.");
     }
   };
 
-  // Load invites when account is loaded and user is owner
   useEffect(() => {
     if (!account) return;
     if (!isOwner) return;
@@ -542,7 +602,7 @@ const Account: React.FC = () => {
         </section>
       )}
 
-      {/* Error banner (hard errors like delete/billing actions) */}
+      {/* Error banner */}
       {error && (
         <section style={{ marginTop: "0.75rem" }}>
           <ErrorBanner message={error} onClose={() => setError(null)} />
@@ -619,7 +679,6 @@ const Account: React.FC = () => {
             </div>
           </div>
 
-          {/* Feature flags summary */}
           <div style={{ marginTop: "0.4rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
             <div>
               <strong>Alerts:</strong> {alertsEnabled ? "Enabled" : "Disabled"}
@@ -716,17 +775,17 @@ const Account: React.FC = () => {
               >
                 <div>
                   <label style={{ display: "block", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-                    Invite email (optional)
+                    Invite email
                   </label>
                   <input
                     type="email"
-                    placeholder="optional: user@company.com"
+                    placeholder="user@company.com"
                     value={inviteEmail}
                     onChange={(e) => setInviteEmail(e.target.value)}
                     style={{ width: "100%" }}
                   />
                   <div style={{ marginTop: "0.25rem", fontSize: "0.74rem", color: "var(--cei-text-muted)" }}>
-                    Leave blank for a generic link. Add email to bind the invite to a recipient.
+                    Invites are email-bound. The recipient must sign up using this same email.
                   </div>
                 </div>
 
@@ -850,8 +909,8 @@ const Account: React.FC = () => {
                       </thead>
                       <tbody>
                         {invites.map((inv) => {
-                          const status = inviteStatus(inv);
-                          const isActionable = status === "Active";
+                          const status = inviteUiStatus(inv);
+                          const isActive = status === "Active";
 
                           const acceptedTs =
                             safeString(inv.accepted_at) ||
@@ -861,30 +920,50 @@ const Account: React.FC = () => {
                           return (
                             <tr key={inv.id}>
                               <td>{inv.id}</td>
-                              <td>{safeString(inv.email) || <span style={{ color: "var(--cei-text-muted)" }}>—</span>}</td>
-                              <td>{safeString(inv.role) || "member"}</td>
                               <td>
-                                <span className={statusPillClass(status)}>
-                                  {status}
-                                </span>
+                                {safeString(inv.email) || (
+                                  <span style={{ color: "var(--cei-text-muted)" }}>—</span>
+                                )}
                               </td>
+                              <td>{safeString(inv.role) || "member"}</td>
+
+                              {/* Status: ONLY Active/Revoked */}
+                              <td>
+                                <span className={statusPillClass(status)}>{status}</span>
+                              </td>
+
                               <td>{formatMaybeIso(inv.expires_at)}</td>
                               <td>{formatMaybeIso(inv.created_at)}</td>
                               <td>{formatMaybeIso(acceptedTs)}</td>
+
+                              {/* Actions: STRICTLY MUTUALLY EXCLUSIVE */}
                               <td style={{ textAlign: "right" }}>
-                                <button
-                                  type="button"
-                                  className="cei-btn cei-btn-ghost"
-                                  onClick={() => handleRevokeInvite(inv.id)}
-                                  disabled={!isActionable}
-                                  title={
-                                    status !== "Active"
-                                      ? "Invite is not active"
-                                      : "Revoke invite"
-                                  }
-                                >
-                                  Revoke
-                                </button>
+                                <div style={{ display: "inline-flex", gap: "0.5rem", alignItems: "center" }}>
+                                  {isActive ? (
+                                    // Active => ONLY Revoke (red)
+                                    <button
+                                      type="button"
+                                      className="cei-pill-danger"
+                                      onClick={() => handleRevokeInvite(inv.id)}
+                                      title="Revoke invite and stop logins for the invited user"
+                                      style={{ minWidth: 92 }}
+                                    >
+                                      Revoke
+                                    </button>
+                                  ) : (
+                                    // Revoked => ONLY Extend (green)
+                                    <button
+                                      type="button"
+                                      className="cei-pill cei-pill-good"
+                                      onClick={() => handleExtendInvite(inv)}
+                                      disabled={extendingInviteId === inv.id}
+                                      title="Extend/reactivate this invite and re-enable user access"
+                                      style={{ minWidth: 92 }}
+                                    >
+                                      {extendingInviteId === inv.id ? "Extending…" : "Extend"}
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           );

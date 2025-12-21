@@ -29,6 +29,13 @@ def _http_401(detail: str = "Could not validate credentials") -> HTTPException:
     )
 
 
+def _http_403(detail: str = "Forbidden") -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=detail,
+    )
+
+
 def _hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -42,6 +49,31 @@ def decode_jwt(token: str) -> dict:
         return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     except JWTError:
         raise _http_401("Invalid or expired token")
+
+
+def _is_user_active(user: Optional[User]) -> bool:
+    """
+    Enforce org-owner access revocation.
+    User.is_active is an int 0/1 in this codebase; tolerate bool.
+    Missing field => assume active (back-compat).
+    """
+    if not user:
+        return False
+    if not hasattr(user, "is_active"):
+        return True
+    v = getattr(user, "is_active", 1)
+    try:
+        return bool(int(v))
+    except Exception:
+        return bool(v)
+
+
+def _ensure_user_active(user: User) -> None:
+    if not _is_user_active(user):
+        # 403 (not 401) because credentials are valid but access is revoked
+        raise _http_403(
+            detail={"code": "USER_DISABLED", "message": "User access has been disabled by the organization owner."}
+        )
 
 
 @dataclass
@@ -78,6 +110,9 @@ def get_current_user(
     if not user:
         raise _http_401("User not found")
 
+    # ✅ GLOBAL enforcement: revoked users cannot hit any protected endpoint
+    _ensure_user_active(user)
+
     return user
 
 
@@ -100,6 +135,9 @@ def get_org_context(
             if email:
                 user = db.query(User).filter(User.email == str(email).strip().lower()).first()
                 if user:
+                    # ✅ Enforce revoked access for user-auth ingestion, too
+                    _ensure_user_active(user)
+
                     return OrgContext(
                         organization_id=getattr(user, "organization_id", None),
                         user=user,

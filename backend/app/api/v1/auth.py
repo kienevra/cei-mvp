@@ -138,6 +138,33 @@ class IntegrationTokenWithSecret(IntegrationTokenOut):
     token: str
 
 
+# === Access kill-switch helpers ===
+
+def _is_user_active(user: Optional[User]) -> bool:
+    """
+    Treat user.is_active as int 0/1 (legacy) but tolerate bool.
+    Missing field => assume active (back-compat).
+    """
+    if not user:
+        return False
+    if not hasattr(user, "is_active"):
+        return True
+    v = getattr(user, "is_active", 1)
+    try:
+        # int 0/1 or bool
+        return bool(int(v))
+    except Exception:
+        return bool(v)
+
+
+def _ensure_user_active_or_403(user: User) -> None:
+    if not _is_user_active(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "USER_DISABLED", "message": "User access has been disabled by the organization owner."},
+        )
+
+
 # === Token helpers ===
 
 def create_access_token(data: Dict[str, Any]) -> str:
@@ -349,6 +376,13 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) 
     except Exception:
         pass
 
+    # Ensure active by default (int flag 1/0)
+    if hasattr(db_user, "is_active"):
+        try:
+            db_user.is_active = 1
+        except Exception:
+            pass
+
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
@@ -386,6 +420,9 @@ def login(
     user = db.query(User).filter(User.email == email_norm).first()
     if not user or not pwd_context.verify(form_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    # ✅ Enforce revoked access at login
+    _ensure_user_active_or_403(user)
 
     access = create_access_token({"sub": user.email})
     refresh = create_refresh_token({"sub": user.email})
@@ -426,6 +463,9 @@ def refresh_access_token(
     if user is None:
         raise credentials_exception
 
+    # ✅ Enforce revoked access at refresh
+    _ensure_user_active_or_403(user)
+
     new_access = create_access_token({"sub": user.email})
     new_refresh = create_refresh_token({"sub": user.email})
     _set_refresh_cookie(response, new_refresh)
@@ -443,6 +483,9 @@ def read_me(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AccountMeOut:
+    # ✅ Enforce revoked access for active sessions
+    _ensure_user_active_or_403(current_user)
+
     org: Optional[Organization] = None
     if current_user.organization_id is not None:
         org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
@@ -529,6 +572,9 @@ def create_integration_token(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> IntegrationTokenWithSecret:
+    # ✅ Enforce revoked access
+    _ensure_user_active_or_403(current_user)
+
     if not current_user.organization_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User is not attached to an organization")
 
@@ -572,6 +618,9 @@ def list_integration_tokens(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> List[IntegrationTokenOut]:
+    # ✅ Enforce revoked access
+    _ensure_user_active_or_403(current_user)
+
     if not current_user.organization_id:
         return []
 
@@ -592,6 +641,9 @@ def revoke_integration_token(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
+    # ✅ Enforce revoked access
+    _ensure_user_active_or_403(current_user)
+
     if not current_user.organization_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User is not attached to an organization")
 

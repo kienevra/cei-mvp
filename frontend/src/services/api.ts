@@ -1,4 +1,3 @@
-// frontend/src/services/api.ts
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
 import { SiteForecast } from "../types/api";
 import type { AccountMe, OrgSettingsUpdateRequest } from "../types/auth";
@@ -42,12 +41,10 @@ function isAuthPath(url: string | undefined): boolean {
 
   // NOTE:
   // - /org/invites/accept-and-signup is PUBLIC
-  // - legacy /auth/invites/accept is PUBLIC
   return (
     url.includes("/auth/login") ||
     url.includes("/auth/signup") ||
     url.includes("/auth/refresh") ||
-    url.includes("/auth/invites/accept") ||
     url.includes("/org/invites/accept-and-signup")
   );
 }
@@ -532,23 +529,18 @@ export async function revokeIntegrationToken(tokenId: number): Promise<void> {
   }
 }
 
-/* ===== Org invites =====
-   Canonical backend (current): /org/invites
-     - POST   /org/invites                  (owner-only) -> returns token ONCE
-     - GET    /org/invites                  (owner-only) -> list (no token)
-     - DELETE /org/invites/{invite_id}      (owner-only) -> revoke
-     - POST   /org/invites/accept-and-signup (public) -> returns {access_token, token_type}
-
-   Legacy compatibility (older deployments): /auth/invites and /auth/invites/accept
+/* ===== Org invites (canonical) =====
+   /org/invites
+     - POST    /org/invites                   (owner-only) -> returns token ONCE
+     - GET     /org/invites                   (owner-only) -> list (no token)
+     - DELETE  /org/invites/{invite_id}       (owner-only) -> revoke
+     - POST    /org/invites/accept-and-signup (public) -> returns {access_token, token_type}
 */
 
 export interface OrgInviteOut {
   id: number;
 
-  // canonical
   organization_id?: number;
-
-  // optional legacy alias
   org_id?: number;
 
   email?: string | null;
@@ -558,15 +550,16 @@ export interface OrgInviteOut {
   expires_at?: string | null;
   created_at?: string | null;
 
-  // accepted markers (canonical + legacy)
   accepted_at?: string | null;
   accepted_user_id?: number | null;
-  used_at?: string | null;
-  used_by_user_id?: number | null;
 
   revoked_at?: string | null;
 
   created_by_user_id?: number | null;
+
+  // legacy acceptance markers (kept for UI resilience)
+  used_at?: string | null;
+  used_by_user_id?: number | null;
 }
 
 export interface OrgInviteWithSecret extends OrgInviteOut {
@@ -575,95 +568,48 @@ export interface OrgInviteWithSecret extends OrgInviteOut {
 }
 
 export interface OrgInviteCreateRequest {
-  email?: string;
+  email: string; // REQUIRED (no generic invites)
   role?: "owner" | "member";
   expires_in_days?: number;
 }
 
-function isAxiosNotFound(err: any): boolean {
-  return axios.isAxiosError(err) && err.response?.status === 404;
+export interface OrgInviteExtendRequest {
+  expires_in_days?: number;
+  role?: "owner" | "member";
 }
 
-export async function listOrgInvites(): Promise<OrgInviteOut[]> {
-  // try canonical first
-  try {
-    const resp = await api.get<OrgInviteOut[]>("/org/invites");
-    return Array.isArray(resp.data) ? resp.data : [];
-  } catch (err: any) {
-    // fallback to legacy
-    if (isAxiosNotFound(err)) {
-      try {
-        const resp2 = await api.get<OrgInviteOut[]>("/auth/invites");
-        return Array.isArray(resp2.data) ? resp2.data : [];
-      } catch (err2: any) {
-        if (axios.isAxiosError(err2) && err2.response?.status === 403) return [];
-        throw new Error(getApiErrorMessage(err2, "Failed to load invites."));
-      }
-    }
+export interface OrgInviteExtendedOut extends OrgInviteOut {
+  token?: string | null; // only for NOT-yet-accepted invites
+}
 
-    if (axios.isAxiosError(err) && err.response?.status === 403) return [];
-    throw new Error(getApiErrorMessage(err, "Failed to load invites."));
-  }
+export async function extendOrgInvite(
+  inviteId: number,
+  payload: OrgInviteExtendRequest
+): Promise<OrgInviteExtendedOut> {
+  const resp = await api.post<OrgInviteExtendedOut>(`/org/invites/${inviteId}/extend`, payload);
+  return resp.data;
+}
+
+
+export async function listOrgInvites(): Promise<OrgInviteOut[]> {
+  const resp = await api.get<OrgInviteOut[]>("/org/invites");
+  return Array.isArray(resp.data) ? resp.data : [];
 }
 
 export async function createOrgInvite(
   payload: OrgInviteCreateRequest
 ): Promise<OrgInviteWithSecret> {
-  // try canonical first
-  try {
-    const resp = await api.post<OrgInviteWithSecret>("/org/invites", payload);
-    return resp.data;
-  } catch (err: any) {
-    // fallback to legacy
-    if (isAxiosNotFound(err)) {
-      try {
-        const resp2 = await api.post<OrgInviteWithSecret>("/auth/invites", payload);
-        return resp2.data;
-      } catch (err2: any) {
-        if (axios.isAxiosError(err2) && err2.response?.status === 403) {
-          throw new Error("Only the org owner can generate invites.");
-        }
-        throw new Error(getApiErrorMessage(err2, "Failed to create invite."));
-      }
-    }
-
-    if (axios.isAxiosError(err) && err.response?.status === 403) {
-      throw new Error("Only the org owner can generate invites.");
-    }
-    throw new Error(getApiErrorMessage(err, "Failed to create invite."));
-  }
+  const resp = await api.post<OrgInviteWithSecret>("/org/invites", payload);
+  return resp.data;
 }
 
 export async function revokeOrgInvite(inviteId: number): Promise<void> {
-  // try canonical first
-  try {
-    await api.delete(`/org/invites/${inviteId}`);
-    return;
-  } catch (err: any) {
-    // fallback to legacy
-    if (isAxiosNotFound(err)) {
-      try {
-        await api.delete(`/auth/invites/${inviteId}`);
-        return;
-      } catch (err2: any) {
-        if (axios.isAxiosError(err2) && err2.response?.status === 403) {
-          throw new Error("Only the org owner can revoke invites.");
-        }
-        throw new Error(getApiErrorMessage(err2, "Failed to revoke invite."));
-      }
-    }
-
-    if (axios.isAxiosError(err) && err.response?.status === 403) {
-      throw new Error("Only the org owner can revoke invites.");
-    }
-    throw new Error(getApiErrorMessage(err, "Failed to revoke invite."));
-  }
+  await api.delete(`/org/invites/${inviteId}`);
 }
 
 /**
  * Accept an invite token during signup.
- * Canonical: POST /org/invites/accept-and-signup { token, email, password, full_name? }
- * Legacy:    POST /auth/invites/accept          { token, email, password, full_name? }
+ * POST /org/invites/accept-and-signup { token, email, password, full_name? }
  */
 export async function acceptInvite(payload: {
   token: string;
@@ -671,16 +617,8 @@ export async function acceptInvite(payload: {
   password: string;
   full_name?: string;
 }) {
-  try {
-    const resp = await api.post("/org/invites/accept-and-signup", payload);
-    return resp.data as { access_token: string; token_type: string };
-  } catch (err: any) {
-    if (isAxiosNotFound(err)) {
-      const resp2 = await api.post("/auth/invites/accept", payload);
-      return resp2.data as { access_token: string; token_type: string };
-    }
-    throw err;
-  }
+  const resp = await api.post("/org/invites/accept-and-signup", payload);
+  return resp.data as { access_token: string; token_type: string };
 }
 
 /* ===== Site events (timeline + operator notes) ===== */
