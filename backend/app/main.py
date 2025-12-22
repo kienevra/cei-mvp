@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from app.core.config import settings
 from app.api.v1 import sites as sites_api
 
+
 # --- Logging setup ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cei")
@@ -86,6 +87,10 @@ from app.api.v1 import (  # noqa: E402
     site_events,    # site events / timeline
     opportunities,  # opportunities (auto + manual)
     org_invites,    # org invite tokens + accept/signup
+    org_members,    # ✅ org members + transfer ownership
+    org_offboard,   # ✅ NEW: org offboarding (soft/nuke)
+    org,
+     org_leave,
 )
 
 app.include_router(auth.router, prefix="/api/v1")
@@ -101,6 +106,13 @@ app.include_router(account.router, prefix="/api/v1")
 app.include_router(site_events.router, prefix="/api/v1")
 app.include_router(opportunities.router, prefix="/api/v1")
 app.include_router(org_invites.router, prefix="/api/v1")  # org invites
+app.include_router(org.router, prefix="/api/v1")  # ✅ NEW: create org + attach owner
+app.include_router(org_members.router, prefix="/api/v1")
+app.include_router(org_leave.router, prefix="/api/v1")
+
+
+# ✅ NEW: org offboarding (soft/nuke)
+app.include_router(org_offboard.router, prefix="/api/v1")
 
 # --- Legacy auth shims for pytest-only tests ---
 @app.post("/auth/signup", include_in_schema=False)
@@ -130,5 +142,3 @@ def root():
 @app.get("/debug/docs-enabled", include_in_schema=False)
 def debug_docs_enabled():
     return {"enable_docs": enable_docs}
-
-

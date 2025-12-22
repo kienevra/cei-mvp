@@ -1,5 +1,4 @@
 // frontend/src/pages/Account.tsx
-
 import React, { useEffect, useMemo, useState } from "react";
 import {
   getAccountMe,
@@ -10,6 +9,9 @@ import {
   createOrgInvite,
   revokeOrgInvite,
   extendOrgInvite,
+  // ✅ NEW (required for Offboard + Leave UI wiring)
+  offboardOrg,
+  leaveOrg,
 } from "../services/api";
 
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -106,20 +108,20 @@ type OrgInvite = {
   created_by_user_id?: number | null;
 
   expires_at?: string | null;
+
+  // backend convenience flags (optional)
+  status?: string | null;
+  is_accepted?: boolean | null;
+  is_expired?: boolean | null;
+  can_accept?: boolean | null;
+  can_revoke?: boolean | null;
+  can_extend?: boolean | null;
 };
 
 function safeString(v: any): string | null {
   if (v === null || v === undefined) return null;
   const s = String(v);
   return s.trim().length ? s : null;
-}
-
-function parseMaybeDate(v?: string | null): Date | null {
-  const s = safeString(v);
-  if (!s) return null;
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return null;
-  return d;
 }
 
 function formatMaybeIso(ts?: string | null): string {
@@ -131,6 +133,7 @@ function formatMaybeIso(ts?: string | null): string {
 }
 
 function buildInviteLink(token: string): string {
+  // Your login page already expects invite=... and handles the accept/signup flow.
   const origin = window.location.origin;
   return `${origin}/login?invite=${encodeURIComponent(token)}`;
 }
@@ -146,7 +149,14 @@ function buildInviteLink(token: string): string {
 type InviteUiStatus = "Active" | "Revoked";
 
 function inviteUiStatus(inv: OrgInvite): InviteUiStatus {
-  // Hardening: do not assume "true" when missing.
+  const status = safeString(inv.status)?.toLowerCase();
+
+  // ✅ Treat "active" and "accepted" as Active, only "revoked" as Revoked
+  // (UI requirement remains: ONLY Active / Revoked)
+  if (status === "revoked") return "Revoked";
+  if (status === "active" || status === "accepted") return "Active";
+
+  // fallback: if status missing, infer from is_active
   const isActive = typeof inv.is_active === "boolean" ? inv.is_active : false;
   return isActive ? "Active" : "Revoked";
 }
@@ -174,6 +184,12 @@ const Account: React.FC = () => {
   const [deleting, setDeleting] = useState(false);
   const [deleteSuccess, setDeleteSuccess] = useState(false);
 
+  // ✅ NEW: Org actions state (Offboard + Leave)
+  const [orgActionMessage, setOrgActionMessage] = useState<string | null>(null);
+  const [offboardingSoft, setOffboardingSoft] = useState(false);
+  const [offboardingNuke, setOffboardingNuke] = useState(false);
+  const [leavingOrg, setLeavingOrg] = useState(false);
+
   // Invites UI state
   const [invites, setInvites] = useState<OrgInvite[]>([]);
   const [invitesLoading, setInvitesLoading] = useState(false);
@@ -183,17 +199,55 @@ const Account: React.FC = () => {
   const [inviteRole, setInviteRole] = useState<"member" | "owner">("member");
   const [inviteDays, setInviteDays] = useState<number>(7);
 
-  const [createdInviteLink, setCreatedInviteLink] = useState<string | null>(
-    null
-  );
-  const [createdInviteNote, setCreatedInviteNote] = useState<string | null>(
-    null
-  );
+  const [createdInviteLink, setCreatedInviteLink] = useState<string | null>(null);
+  const [createdInviteNote, setCreatedInviteNote] = useState<string | null>(null);
 
   // Track Extend per-row
-  const [extendingInviteId, setExtendingInviteId] = useState<number | null>(
-    null
-  );
+  const [extendingInviteId, setExtendingInviteId] = useState<number | null>(null);
+
+  const refreshAccount = async () => {
+    setLoading(true);
+    setError(null);
+    setAccountWarning(null);
+    try {
+      const data = await getAccountMe();
+
+      const org: OrganizationSummary | null =
+        (data as any)?.org ?? (data as any)?.organization ?? null;
+
+      const roleRaw = (data as any)?.role ?? (data as any)?.user_role ?? null;
+
+      setAccount({
+        ...(data as UiAccount),
+        org,
+        role: normalizeRole(roleRaw) ?? roleRaw,
+      });
+    } catch (e: any) {
+      setAccount(null);
+      setAccountWarning(
+        e?.response?.data?.detail ||
+          e?.message ||
+          "Pricing and plan details are temporarily unavailable. Core kWh analytics will still work."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ NEW: hard reset owner-only org UI state (invites + messages)
+  const resetOrgScopedUi = () => {
+    setInvites([]);
+    setInvitesError(null);
+    setInvitesLoading(false);
+
+    setCreatedInviteLink(null);
+    setCreatedInviteNote(null);
+    setExtendingInviteId(null);
+
+    setInviteEmail("");
+    setInviteRole("member");
+    setInviteDays(7);
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -265,9 +319,7 @@ const Account: React.FC = () => {
   })();
 
   const subscriptionStatus =
-    orgLike?.subscription_status ||
-    accountAny.subscription_status ||
-    "Not connected";
+    orgLike?.subscription_status || accountAny.subscription_status || "Not connected";
 
   const alertsEnabled =
     typeof accountAny.enable_alerts === "boolean"
@@ -288,8 +340,15 @@ const Account: React.FC = () => {
     [account?.role]
   );
 
+  // ✅ Owner-only: subscription management
   const handleStartStarterCheckout = async () => {
     setBillingMessage(null);
+
+    if (!isOwner) {
+      setBillingMessage("Owner-only. Only an org owner can manage subscriptions.");
+      return;
+    }
+
     setStartingCheckout(true);
     try {
       const { url } = await startCheckout("cei-starter");
@@ -304,16 +363,21 @@ const Account: React.FC = () => {
       );
     } catch (err) {
       console.error("Failed to start checkout:", err);
-      setBillingMessage(
-        "Could not start checkout. Please retry or contact your CEI admin."
-      );
+      setBillingMessage("Could not start checkout. Please retry or contact your CEI admin.");
     } finally {
       setStartingCheckout(false);
     }
   };
 
+  // ✅ Owner-only: subscription management
   const handleOpenPortal = async () => {
     setBillingMessage(null);
+
+    if (!isOwner) {
+      setBillingMessage("Owner-only. Only an org owner can manage subscriptions.");
+      return;
+    }
+
     setOpeningPortal(true);
     try {
       const { url } = await openBillingPortal();
@@ -328,17 +392,20 @@ const Account: React.FC = () => {
       );
     } catch (err) {
       console.error("Failed to open billing portal:", err);
-      setBillingMessage(
-        "Could not open the billing portal. Please retry or contact your CEI admin."
-      );
+      setBillingMessage("Could not open the billing portal. Please retry or contact your CEI admin.");
     } finally {
       setOpeningPortal(false);
     }
   };
 
+  // ✅ Owner-only: delete account
   const handleDeleteAccount = async () => {
-    if (!window.confirm("Really delete your account? This cannot be undone."))
+    if (!isOwner) {
+      setError("Owner-only. Only an org owner can delete the account in this deployment.");
       return;
+    }
+
+    if (!window.confirm("Really delete your account? This cannot be undone.")) return;
 
     setDeleting(true);
     setError(null);
@@ -349,6 +416,136 @@ const Account: React.FC = () => {
       setError(e?.response?.data?.detail || e?.message || "Failed to delete account.");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  // ✅ NEW: Leave org (detaches only YOU)
+  const handleLeaveOrg = async () => {
+    setOrgActionMessage(null);
+    setError(null);
+
+    if (!orgLike?.id) {
+      setOrgActionMessage("You are not attached to an organization.");
+      return;
+    }
+
+    const ok = window.confirm(
+      "Leave this organization?\n\nThis detaches ONLY your user from the org.\nIf you are the last owner, the server will block this."
+    );
+    if (!ok) return;
+
+    setLeavingOrg(true);
+    try {
+      await leaveOrg();
+
+      // Keep UI consistent: refresh account + clear owner-only panels state
+      resetOrgScopedUi();
+      await refreshAccount();
+
+      // Optional: if detached, clean break (prevents weird auth state)
+      const afterOrgId = (account as any)?.organization_id ?? (orgLike?.id ?? null);
+      // We can't rely on stale `account` here; check localStorage token presence and just keep UX stable
+      setOrgActionMessage("Left organization. Your account is now detached.");
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      const msg =
+        (typeof detail === "string" ? detail : detail?.message) ||
+        e?.message ||
+        "Failed to leave organization.";
+      setOrgActionMessage(msg);
+    } finally {
+      setLeavingOrg(false);
+    }
+  };
+
+  // ✅ NEW: Soft offboard (company wants out, keep org record)
+  const handleSoftOffboard = async () => {
+    setOrgActionMessage(null);
+    setError(null);
+
+    if (!isOwner) {
+      setOrgActionMessage("Owner-only. Only an org owner can offboard the organization.");
+      return;
+    }
+    if (!orgLike?.id) {
+      setOrgActionMessage("You are not attached to an organization.");
+      return;
+    }
+
+    const ok = window.confirm(
+      "Soft offboard this organization?\n\nThis will:\n- Revoke invites\n- Deactivate integration tokens\n- Detach ALL users (including you)\n- Clear org billing fields\n- KEEP the org record\n\nUse this when a company wants out."
+    );
+    if (!ok) return;
+
+    setOffboardingSoft(true);
+    try {
+      await offboardOrg({ mode: "soft" });
+
+      resetOrgScopedUi();
+      await refreshAccount();
+
+      setOrgActionMessage("Soft offboard complete. Users detached; org record retained.");
+
+      // Clean break: you are likely detached; avoid zombie UI
+      localStorage.removeItem("cei_token");
+      window.location.href = "/login?reason=org_offboarded";
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      const msg =
+        (typeof detail === "string" ? detail : detail?.message) ||
+        e?.message ||
+        "Soft offboard failed.";
+      setOrgActionMessage(msg);
+    } finally {
+      setOffboardingSoft(false);
+    }
+  };
+
+  // ✅ NEW: Nuke offboard (delete org + org-scoped data)
+  const handleNukeOffboard = async () => {
+    setOrgActionMessage(null);
+    setError(null);
+
+    if (!isOwner) {
+      setOrgActionMessage("Owner-only. Only an org owner can nuke the organization.");
+      return;
+    }
+    const orgId = orgLike?.id;
+    const orgName = safeString(orgLike?.name) || "this org";
+    if (!orgId) {
+      setOrgActionMessage("You are not attached to an organization.");
+      return;
+    }
+
+    const typed = window.prompt(
+      `NUKE MODE.\n\nThis permanently deletes the org and org-scoped data.\n\nType the org name EXACTLY to confirm:\n${orgName}`
+    );
+    if ((typed || "").trim() !== orgName) {
+      setOrgActionMessage("Nuke cancelled (org name confirmation did not match).");
+      return;
+    }
+
+    setOffboardingNuke(true);
+    try {
+      await offboardOrg({ mode: "nuke", org_id: Number(orgId) });
+
+      resetOrgScopedUi();
+      await refreshAccount();
+
+      setOrgActionMessage("Nuke complete. Org deleted.");
+
+      // Clean break: token is not meaningful after destructive delete
+      localStorage.removeItem("cei_token");
+      window.location.href = "/login?reason=org_offboarded";
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      const msg =
+        (typeof detail === "string" ? detail : detail?.message) ||
+        e?.message ||
+        "Nuke failed.";
+      setOrgActionMessage(msg);
+    } finally {
+      setOffboardingNuke(false);
     }
   };
 
@@ -392,8 +589,14 @@ const Account: React.FC = () => {
     setInvitesError(null);
     setInvitesLoading(true);
     try {
-      const list = await listOrgInvites();
-      setInvites(list as any as OrgInvite[]);
+      const res = await listOrgInvites();
+
+      // ✅ support both:
+      // - backend returns array
+      // - backend returns { value: [...], Count: n } (as seen in PS output)
+      const list = Array.isArray(res) ? res : (res as any)?.value;
+
+      setInvites(Array.isArray(list) ? (list as any as OrgInvite[]) : []);
     } catch (e: any) {
       const msg =
         typeof e?.message === "string"
@@ -436,7 +639,7 @@ const Account: React.FC = () => {
       const token = safeString((res as any)?.token);
       if (!token) {
         setCreatedInviteNote(
-          "Invite created, but backend did not return a token. Ensure the create endpoint returns the one-time token."
+          "Invite created, but backend did not return a token. (Expected: token returned ONCE when invite is usable.)"
         );
       } else {
         const link = buildInviteLink(token);
@@ -483,8 +686,8 @@ const Account: React.FC = () => {
 
   /**
    * Extend = POST /org/invites/{id}/extend
-   * - If invite is unaccepted: backend may return a fresh one-time token (show link)
-   * - If invite is already accepted: backend typically returns no token (just re-enable access)
+   * - If invite is unaccepted: backend returns fresh one-time token (show link)
+   * - If invite is already accepted: backend returns no token (just re-enable access)
    */
   const handleExtendInvite = async (inv: OrgInvite) => {
     setInvitesError(null);
@@ -499,14 +702,13 @@ const Account: React.FC = () => {
     const daysRaw = Number.isFinite(inviteDays) ? inviteDays : 7;
     const days = Math.max(1, Math.min(30, Math.floor(daysRaw)));
 
-    // Optional: allow role update on extend (uses existing row role by default)
+    // Optional role update on extend: keep whatever role the row currently has
     const role = normalizeInviteRole(inv.role);
 
     setExtendingInviteId(inv.id);
     try {
       const res = await extendOrgInvite(inv.id, { expires_in_days: days, role });
 
-      // Token only returned if invite is NOT already accepted
       const token = safeString((res as any)?.token);
       if (token) {
         const link = buildInviteLink(token);
@@ -538,9 +740,7 @@ const Account: React.FC = () => {
       setCreatedInviteNote("Copied to clipboard.");
       setTimeout(
         () =>
-          setCreatedInviteNote(
-            "Invite link generated. Copy it and send it to the user."
-          ),
+          setCreatedInviteNote("Invite link generated. Copy it and send it to the user."),
         1500
       );
     } catch {
@@ -609,6 +809,24 @@ const Account: React.FC = () => {
         </section>
       )}
 
+      {/* ✅ NEW: Org actions message */}
+      {orgActionMessage && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <div
+            style={{
+              padding: "0.55rem 0.75rem",
+              borderRadius: "0.6rem",
+              border: "1px solid rgba(148, 163, 184, 0.25)",
+              background: "rgba(15, 23, 42, 0.55)",
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            {orgActionMessage}
+          </div>
+        </section>
+      )}
+
       {/* Top row: Profile + Subscription */}
       <section className="dashboard-row">
         {/* Profile card */}
@@ -651,14 +869,23 @@ const Account: React.FC = () => {
                   For now this is read-only. In a production deployment, this is where you’d manage
                   passwords, SSO, and org membership.
                 </div>
-                <button
-                  type="button"
-                  className="cei-pill-danger"
-                  onClick={handleDeleteAccount}
-                  disabled={deleting || deleteSuccess}
-                >
-                  {deleting ? "Deleting…" : "Delete account"}
-                </button>
+
+                {/* ✅ Owner-only delete */}
+                {isOwner ? (
+                  <button
+                    type="button"
+                    className="cei-pill-danger"
+                    onClick={handleDeleteAccount}
+                    disabled={deleting || deleteSuccess}
+                    title="Owner-only"
+                  >
+                    {deleting ? "Deleting…" : "Delete account"}
+                  </button>
+                ) : (
+                  <span className="cei-pill cei-pill-neutral" title="Owner-only">
+                    Owner-only
+                  </span>
+                )}
               </div>
             </>
           )}
@@ -695,12 +922,35 @@ const Account: React.FC = () => {
             </ul>
           </div>
 
+          {/* ✅ Owner-only subscription management */}
+          {!isOwner && (
+            <div
+              style={{
+                marginTop: "0.75rem",
+                padding: "0.5rem 0.75rem",
+                borderRadius: "0.6rem",
+                border: "1px solid rgba(148, 163, 184, 0.25)",
+                background: "rgba(15, 23, 42, 0.55)",
+                fontSize: "0.78rem",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              <strong style={{ color: "var(--cei-text-main)" }}>Owner-only:</strong> Ask your org owner to
+              upgrade or manage billing.
+            </div>
+          )}
+
           <div style={{ marginTop: "0.9rem", display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
             <button
               type="button"
               className="cei-btn cei-btn-primary"
               onClick={handleStartStarterCheckout}
-              disabled={startingCheckout}
+              disabled={!isOwner || startingCheckout}
+              title={!isOwner ? "Owner-only" : undefined}
+              style={{
+                cursor: !isOwner ? "not-allowed" : "pointer",
+                opacity: !isOwner ? 0.55 : 1,
+              }}
             >
               {startingCheckout ? "Redirecting…" : "Upgrade to CEI Starter"}
             </button>
@@ -708,7 +958,12 @@ const Account: React.FC = () => {
               type="button"
               className="cei-btn cei-btn-ghost"
               onClick={handleOpenPortal}
-              disabled={openingPortal}
+              disabled={!isOwner || openingPortal}
+              title={!isOwner ? "Owner-only" : undefined}
+              style={{
+                cursor: !isOwner ? "not-allowed" : "pointer",
+                opacity: !isOwner ? 0.55 : 1,
+              }}
             >
               {openingPortal ? "Opening…" : "Manage subscription"}
             </button>
@@ -729,6 +984,95 @@ const Account: React.FC = () => {
               {billingMessage}
             </div>
           )}
+        </div>
+      </section>
+
+      {/* ✅ NEW: Organization controls (Offboard + Leave) */}
+      <section>
+        <div className="cei-card">
+          <div
+            style={{
+              fontSize: "0.9rem",
+              fontWeight: 600,
+              marginBottom: "0.4rem",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "0.75rem",
+            }}
+          >
+            <span>Organization controls</span>
+            <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
+              Leave your org or offboard a customer.
+            </span>
+          </div>
+
+          <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", lineHeight: 1.6 }}>
+            <div>
+              <strong>Current org:</strong>{" "}
+              {safeString(orgLike?.name) ? (
+                <span>
+                  {String(orgLike.name)} (id={String(orgLike.id)})
+                </span>
+              ) : (
+                <span>—</span>
+              )}
+            </div>
+            <div style={{ marginTop: "0.2rem" }}>
+              <strong>Role:</strong> {roleLabel(account?.role)}
+            </div>
+          </div>
+
+          <div style={{ marginTop: "0.85rem", display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
+            <button
+              type="button"
+              className="cei-btn cei-btn-ghost"
+              onClick={handleLeaveOrg}
+              disabled={leavingOrg || !orgLike?.id}
+              title={!orgLike?.id ? "No organization attached" : undefined}
+              style={{
+                cursor: leavingOrg || !orgLike?.id ? "not-allowed" : "pointer",
+                opacity: leavingOrg || !orgLike?.id ? 0.55 : 1,
+              }}
+            >
+              {leavingOrg ? "Leaving…" : "Leave Organization"}
+            </button>
+
+            {/* Keep your Offboard button color as-is (cei-pill-danger) */}
+            <button
+              type="button"
+              className="cei-pill-danger"
+              onClick={handleSoftOffboard}
+              disabled={!isOwner || offboardingSoft || !orgLike?.id}
+              title={!isOwner ? "Owner-only" : undefined}
+              style={{
+                cursor: !isOwner || offboardingSoft || !orgLike?.id ? "not-allowed" : "pointer",
+                opacity: !isOwner || offboardingSoft || !orgLike?.id ? 0.55 : 1,
+              }}
+            >
+              {offboardingSoft ? "Offboarding…" : "Offboard Organization"}
+            </button>
+
+            <button
+              type="button"
+              className="cei-pill-danger"
+              onClick={handleNukeOffboard}
+              disabled={!isOwner || offboardingNuke || !orgLike?.id}
+              title={!isOwner ? "Owner-only" : "Danger: permanent delete"}
+              style={{
+                cursor: !isOwner || offboardingNuke || !orgLike?.id ? "not-allowed" : "pointer",
+                opacity: !isOwner || offboardingNuke || !orgLike?.id ? 0.55 : 1,
+              }}
+            >
+              {offboardingNuke ? "Nuking…" : "Permanently Delete"}
+            </button>
+          </div>
+
+          <div style={{ marginTop: "0.65rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+            Offboard Organization detaches users and revokes invites/tokens, but keeps the org row.
+            Permanently Delete deletes the org and org-scoped data. Leave Organization detaches only
+            you (blocked if you’re the last owner).
+          </div>
         </div>
       </section>
 
@@ -770,7 +1114,7 @@ const Account: React.FC = () => {
                   display: "grid",
                   gridTemplateColumns: "1.3fr 0.7fr 0.5fr auto",
                   gap: "0.6rem",
-                  alignItems: "end",
+                  alignItems: "start",
                 }}
               >
                 <div>
@@ -784,9 +1128,6 @@ const Account: React.FC = () => {
                     onChange={(e) => setInviteEmail(e.target.value)}
                     style={{ width: "100%" }}
                   />
-                  <div style={{ marginTop: "0.25rem", fontSize: "0.74rem", color: "var(--cei-text-muted)" }}>
-                    Invites are email-bound. The recipient must sign up using this same email.
-                  </div>
                 </div>
 
                 <div>
@@ -817,15 +1158,28 @@ const Account: React.FC = () => {
                   />
                 </div>
 
-                <button
-                  type="button"
-                  className="cei-btn cei-btn-primary"
-                  onClick={handleCreateInvite}
-                  disabled={creatingInvite}
-                  style={{ height: "2.35rem" }}
+                <div style={{ paddingTop: "1.35rem" }}>
+                  <button
+                    type="button"
+                    className="cei-btn cei-btn-primary"
+                    onClick={handleCreateInvite}
+                    disabled={creatingInvite}
+                    style={{ height: "2.35rem" }}
+                  >
+                    {creatingInvite ? "Creating…" : "Generate invite link"}
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    gridColumn: "1 / -1",
+                    marginTop: "0.25rem",
+                    fontSize: "0.74rem",
+                    color: "var(--cei-text-muted)",
+                  }}
                 >
-                  {creatingInvite ? "Creating…" : "Generate invite link"}
-                </button>
+                  Invites are email-bound. The recipient must sign up using this same email.
+                </div>
               </div>
 
               {/* Created link */}
@@ -842,7 +1196,7 @@ const Account: React.FC = () => {
                   {createdInviteLink && (
                     <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
                       <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-                        <strong style={{ color: "var(--cei-text)" }}>Invite link:</strong>{" "}
+                        <strong style={{ color: "var(--cei-text-main)" }}>Invite link:</strong>{" "}
                         <span style={{ wordBreak: "break-all" }}>{createdInviteLink}</span>
                       </div>
                       <button
@@ -910,7 +1264,7 @@ const Account: React.FC = () => {
                       <tbody>
                         {invites.map((inv) => {
                           const status = inviteUiStatus(inv);
-                          const isActive = status === "Active";
+                          const canRevoke = inv.can_revoke === true;
 
                           const acceptedTs =
                             safeString(inv.accepted_at) ||
@@ -929,7 +1283,12 @@ const Account: React.FC = () => {
 
                               {/* Status: ONLY Active/Revoked */}
                               <td>
-                                <span className={statusPillClass(status)}>{status}</span>
+                                <span
+                                  className={statusPillClass(status)}
+                                  style={{ cursor: "default" }}
+                                >
+                                  {status}
+                                </span>
                               </td>
 
                               <td>{formatMaybeIso(inv.expires_at)}</td>
@@ -939,8 +1298,8 @@ const Account: React.FC = () => {
                               {/* Actions: STRICTLY MUTUALLY EXCLUSIVE */}
                               <td style={{ textAlign: "right" }}>
                                 <div style={{ display: "inline-flex", gap: "0.5rem", alignItems: "center" }}>
-                                  {isActive ? (
-                                    // Active => ONLY Revoke (red)
+                                  {canRevoke ? (
+                                    // ✅ ONLY if backend says can_revoke
                                     <button
                                       type="button"
                                       className="cei-pill-danger"
@@ -951,14 +1310,17 @@ const Account: React.FC = () => {
                                       Revoke
                                     </button>
                                   ) : (
-                                    // Revoked => ONLY Extend (green)
+                                    // ✅ otherwise, extend/reactivate (works for revoked AND accepted)
                                     <button
                                       type="button"
                                       className="cei-pill cei-pill-good"
                                       onClick={() => handleExtendInvite(inv)}
                                       disabled={extendingInviteId === inv.id}
                                       title="Extend/reactivate this invite and re-enable user access"
-                                      style={{ minWidth: 92 }}
+                                      style={{
+                                        minWidth: 92,
+                                        cursor: extendingInviteId === inv.id ? "not-allowed" : "pointer",
+                                      }}
                                     >
                                       {extendingInviteId === inv.id ? "Extending…" : "Extend"}
                                     </button>

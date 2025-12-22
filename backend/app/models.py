@@ -102,9 +102,6 @@ class User(Base):
     )
 
 
-
-
-
 class BillingPlan(Base):
     __tablename__ = "billing_plan"
 

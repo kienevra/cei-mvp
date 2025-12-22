@@ -1,3 +1,4 @@
+// frontend/src/services/api.ts
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
 import { SiteForecast } from "../types/api";
 import type { AccountMe, OrgSettingsUpdateRequest } from "../types/auth";
@@ -531,9 +532,10 @@ export async function revokeIntegrationToken(tokenId: number): Promise<void> {
 
 /* ===== Org invites (canonical) =====
    /org/invites
-     - POST    /org/invites                   (owner-only) -> returns token ONCE
+     - POST    /org/invites                   (owner-only) -> returns token ONCE (if usable)
      - GET     /org/invites                   (owner-only) -> list (no token)
-     - DELETE  /org/invites/{invite_id}       (owner-only) -> revoke
+     - DELETE  /org/invites/{invite_id}       (owner-only) -> revoke (and disable user if accepted)
+     - POST    /org/invites/{invite_id}/extend (owner-only) -> re-activate + extend, token only if not accepted
      - POST    /org/invites/accept-and-signup (public) -> returns {access_token, token_type}
 */
 
@@ -557,13 +559,21 @@ export interface OrgInviteOut {
 
   created_by_user_id?: number | null;
 
+  // Backend list includes these; keep optional to avoid UI fragility
+  status?: string;
+  is_accepted?: boolean;
+  is_expired?: boolean;
+  can_accept?: boolean;
+  can_revoke?: boolean;
+  can_extend?: boolean;
+
   // legacy acceptance markers (kept for UI resilience)
   used_at?: string | null;
   used_by_user_id?: number | null;
 }
 
 export interface OrgInviteWithSecret extends OrgInviteOut {
-  token: string;
+  token: string | null;
   invite_link?: string | null;
 }
 
@@ -582,29 +592,58 @@ export interface OrgInviteExtendedOut extends OrgInviteOut {
   token?: string | null; // only for NOT-yet-accepted invites
 }
 
-export async function extendOrgInvite(
-  inviteId: number,
-  payload: OrgInviteExtendRequest
-): Promise<OrgInviteExtendedOut> {
-  const resp = await api.post<OrgInviteExtendedOut>(`/org/invites/${inviteId}/extend`, payload);
-  return resp.data;
-}
-
-
 export async function listOrgInvites(): Promise<OrgInviteOut[]> {
-  const resp = await api.get<OrgInviteOut[]>("/org/invites");
-  return Array.isArray(resp.data) ? resp.data : [];
+  try {
+    const resp = await api.get<OrgInviteOut[]>("/org/invites");
+    return Array.isArray(resp.data) ? resp.data : [];
+  } catch (err: any) {
+    // Non-owner / forbidden: treat as "no access" not a crash
+    if (axios.isAxiosError(err) && err.response?.status === 403) return [];
+    throw new Error(getApiErrorMessage(err, "Failed to load invites."));
+  }
 }
 
 export async function createOrgInvite(
   payload: OrgInviteCreateRequest
 ): Promise<OrgInviteWithSecret> {
-  const resp = await api.post<OrgInviteWithSecret>("/org/invites", payload);
-  return resp.data;
+  try {
+    const resp = await api.post<OrgInviteWithSecret>("/org/invites", payload);
+    return resp.data;
+  } catch (err: any) {
+    if (axios.isAxiosError(err) && err.response?.status === 403) {
+      throw new Error("Owner-only. Only an org owner can generate invites.");
+    }
+    throw new Error(getApiErrorMessage(err, "Failed to create invite."));
+  }
 }
 
 export async function revokeOrgInvite(inviteId: number): Promise<void> {
-  await api.delete(`/org/invites/${inviteId}`);
+  try {
+    await api.delete(`/org/invites/${inviteId}`);
+  } catch (err: any) {
+    if (axios.isAxiosError(err) && err.response?.status === 403) {
+      throw new Error("Owner-only. Only an org owner can revoke invites.");
+    }
+    throw new Error(getApiErrorMessage(err, "Failed to revoke invite."));
+  }
+}
+
+export async function extendOrgInvite(
+  inviteId: number,
+  payload: OrgInviteExtendRequest
+): Promise<OrgInviteExtendedOut> {
+  try {
+    const resp = await api.post<OrgInviteExtendedOut>(
+      `/org/invites/${inviteId}/extend`,
+      payload
+    );
+    return resp.data;
+  } catch (err: any) {
+    if (axios.isAxiosError(err) && err.response?.status === 403) {
+      throw new Error("Owner-only. Only an org owner can extend invites.");
+    }
+    throw new Error(getApiErrorMessage(err, "Failed to extend invite."));
+  }
 }
 
 /**
@@ -619,6 +658,47 @@ export async function acceptInvite(payload: {
 }) {
   const resp = await api.post("/org/invites/accept-and-signup", payload);
   return resp.data as { access_token: string; token_type: string };
+}
+
+/* ===== Org lifecycle (Leave + Offboard) =====
+   - POST   /org/leave
+   - DELETE /org/offboard?mode=soft|nuke&org_id=...
+*/
+
+export type OffboardMode = "soft" | "nuke";
+
+export async function leaveOrg(): Promise<{
+  detached: boolean;
+  user_id?: number;
+  email?: string;
+  previous_org_id?: number;
+}> {
+  try {
+    const resp = await api.post("/org/leave");
+    return resp.data as any;
+  } catch (err: any) {
+    throw new Error(getApiErrorMessage(err, "Failed to leave organization."));
+  }
+}
+
+export async function offboardOrg(params: {
+  mode: OffboardMode;
+  org_id?: number;
+}): Promise<any> {
+  const { mode, org_id } = params || ({} as any);
+
+  const query: Record<string, string | number> = { mode };
+  if (typeof org_id === "number" && Number.isFinite(org_id)) query["org_id"] = org_id;
+
+  try {
+    const resp = await api.delete("/org/offboard", { params: query });
+    return resp.data;
+  } catch (err: any) {
+    if (axios.isAxiosError(err) && err.response?.status === 403) {
+      throw new Error("Owner-only. Only an org owner can offboard the organization.");
+    }
+    throw new Error(getApiErrorMessage(err, "Failed to offboard organization."));
+  }
 }
 
 /* ===== Site events (timeline + operator notes) ===== */

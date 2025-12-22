@@ -244,8 +244,37 @@ def delete_account_me(
     """
     Delete the current user, optionally cascade deleting an empty org,
     and clear the refresh cookie.
+
+    Rules:
+      - If user belongs to an org: owner-only.
+      - Block ONLY if user is the last remaining owner.
+      - Do NOT block just because other members exist (that prevents normal churn/offboarding).
     """
     org_id = getattr(current_user, "organization_id", None)
+
+    if org_id:
+        require_owner(current_user, message="Owner-only. Only an org owner can delete this account.")
+
+        # ✅ KEY FIX (#1):
+        # Allow owner to delete their own user even if org still has members,
+        # as long as there is at least one OTHER owner remaining.
+        other_owner_count = (
+            db.query(User)
+            .filter(
+                User.organization_id == org_id,
+                User.id != current_user.id,
+                User.role == "owner",
+            )
+            .count()
+        )
+        if other_owner_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "LAST_OWNER_CANNOT_DELETE",
+                    "message": "You are the last org owner. Transfer ownership before deleting your account.",
+                },
+            )
 
     # Best-effort audit (before deleting user)
     if org_id:
@@ -261,7 +290,7 @@ def delete_account_me(
     db.delete(current_user)
     db.commit()
 
-    # Cascade delete org if last user
+    # Cascade delete org if last user (rare now, but still correct)
     if org_id:
         remaining = db.query(User).filter(User.organization_id == org_id).count()
         if remaining == 0:

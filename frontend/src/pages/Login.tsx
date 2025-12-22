@@ -63,7 +63,9 @@ const Login: React.FC = () => {
     if (inviteToken) {
       setMode("signup");
       setOrganizationName(""); // invite flow joins an existing org
-      setNotice("You’re joining an organization via invite. Create your account to continue.");
+      setNotice(
+        "You’re joining an organization via invite. Create your account to continue."
+      );
     }
     // NOTE: do not include `mode` here; we intentionally force signup when invite exists.
   }, [inviteToken]);
@@ -78,15 +80,25 @@ const Login: React.FC = () => {
 
     if (backendDetail && typeof backendDetail === "object") {
       // Support your structured errors: { code, message }
-      if (typeof backendDetail.code === "string" || typeof backendDetail.message === "string") {
-        const code = backendDetail.code ? String(backendDetail.code) : "";
-        const msg = backendDetail.message ? String(backendDetail.message) : "";
-        return code && msg ? `${code}: ${msg}` : msg || code || "Authentication failed. Please try again.";
+      if (
+        typeof (backendDetail as any).code === "string" ||
+        typeof (backendDetail as any).message === "string"
+      ) {
+        const code = (backendDetail as any).code
+          ? String((backendDetail as any).code)
+          : "";
+        const msg = (backendDetail as any).message
+          ? String((backendDetail as any).message)
+          : "";
+        return code && msg
+          ? `${code}: ${msg}`
+          : msg || code || "Authentication failed. Please try again.";
       }
 
       const msg =
-        (backendDetail.message && String(backendDetail.message)) ||
-        (backendDetail.detail && String(backendDetail.detail));
+        ((backendDetail as any).message &&
+          String((backendDetail as any).message)) ||
+        ((backendDetail as any).detail && String((backendDetail as any).detail));
       if (msg) return msg;
 
       try {
@@ -124,13 +136,11 @@ const Login: React.FC = () => {
 
         if (inviteToken) {
           // ---------- INVITE JOIN FLOW ----------
-          // Canonical backend route is now:
-          //   POST /api/v1/org/invites/accept-and-signup  { token, email, password, full_name? }
-          //
-          // We use the typed helper from services/api.ts which should already be aligned,
-          // and includes better error messaging + consistent baseURL.
+          // POST /api/v1/org/invites/accept-and-signup  { token, email, password, full_name? }
+          let res: { access_token: string; token_type: string };
+
           try {
-            await acceptInvite({
+            res = await acceptInvite({
               token: inviteToken,
               email,
               password,
@@ -146,11 +156,19 @@ const Login: React.FC = () => {
             throw err;
           }
 
-          // Important: accept-and-signup already returns an access token and sets refresh cookie.
-          // We still call login() to reuse your existing auth wiring + UX (token storage, redirects).
-          await login({ username: email, password });
+          const accessToken = (res as any)?.access_token;
+          if (!accessToken) {
+            throw new Error(
+              "Invite signup succeeded but response missing access_token."
+            );
+          }
+
+          // Store token and hard-reload so AuthProvider boots from localStorage cleanly.
+          localStorage.setItem("cei_token", accessToken);
+          window.location.href = "/";
+          return;
         } else {
-          // ---------- SELF-SERVE ORG CREATION FLOW ----------
+          // ---------- SELF-SERVE ORG CREATION FLOW (preserve existing behavior) ----------
           await api.post("/auth/signup", {
             email,
             password,
@@ -214,7 +232,9 @@ const Login: React.FC = () => {
             }}
           />
 
-          <div className="auth-title">We use A.I to cut manufacturing energy waste.</div>
+          <div className="auth-title">
+            We use A.I to cut manufacturing energy waste.
+          </div>
 
           <div className="auth-subtitle">
             CEI ingests your meter and SCADA data, builds statistical baselines
@@ -236,7 +256,9 @@ const Login: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            <strong style={{ color: "var(--cei-text)" }}>Invite detected.</strong>{" "}
+            <strong style={{ color: "var(--cei-text)" }}>
+              Invite detected.
+            </strong>{" "}
             You’ll join an existing organization after account creation.
           </div>
         )}
@@ -271,7 +293,9 @@ const Login: React.FC = () => {
               fontWeight: mode === "login" ? 600 : 400,
               cursor: inviteToken ? "not-allowed" : "pointer",
             }}
-            title={inviteToken ? "Invite flow requires account creation." : undefined}
+            title={
+              inviteToken ? "Invite flow requires account creation." : undefined
+            }
           >
             Sign in
           </button>
@@ -367,7 +391,8 @@ const Login: React.FC = () => {
                   marginTop: "0.25rem",
                 }}
               >
-                This creates your org. Use an invite link to join an existing org.
+                This creates your org. Use an invite link to join an existing
+                org.
               </div>
             </div>
           )}
@@ -386,7 +411,9 @@ const Login: React.FC = () => {
           </div>
 
           <div>
-            <label htmlFor="password">{isSignup ? "Create a password" : "Password"}</label>
+            <label htmlFor="password">
+              {isSignup ? "Create a password" : "Password"}
+            </label>
             <input
               id="password"
               type="password"

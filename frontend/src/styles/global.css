@@ -67,6 +67,13 @@
   color: #bbf7d0; /* green-200 */
 }
 
+/* ✅ ADD THIS: alias used by Account.tsx (Active badge + Extend button) */
+.cei-pill-good {
+  background: rgba(22, 163, 74, 0.18); /* green-600 */
+  border-color: rgba(22, 163, 74, 0.6);
+  color: #bbf7d0; /* green-200 */
+}
+
 /* Warning: slightly above baseline (amber) */
 .cei-pill-warning {
   background: rgba(245, 158, 11, 0.18); /* amber-500 */

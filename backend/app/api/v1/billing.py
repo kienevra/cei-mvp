@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.auth import get_current_user
 from app.db.session import get_db
 from app.models import Organization  # type: ignore
+from app.api.deps import require_owner
 
 from app.services.stripe_billing import (
     get_stripe_config,
@@ -116,10 +117,7 @@ def _get_org_for_user(db: Session, user) -> Organization:
     if org is not None:
         return org
 
-    org_id = (
-        getattr(user, "organization_id", None)
-        or getattr(user, "org_id", None)
-    )
+    org_id = getattr(user, "organization_id", None) or getattr(user, "org_id", None)
     if not org_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -206,6 +204,8 @@ def create_billing_checkout_session(
     """
     Start a Stripe Checkout session for the current org.
 
+    Owner-only.
+
     Behavior:
       - If Stripe is NOT configured, we return 200 with `url = null`,
         so the frontend can show a friendly "billing not configured" banner.
@@ -213,6 +213,8 @@ def create_billing_checkout_session(
         a clean 4xx/5xx with a useful message.
       - Org scoping is enforced via the current user.
     """
+    require_owner(user, message="Owner-only. Only an org owner can manage subscriptions.")
+
     cfg = get_stripe_config()
     if not cfg.enabled:
         logger.info(
@@ -261,6 +263,8 @@ def create_billing_portal_session(
     """
     Create a Stripe Billing Portal session for the current org.
 
+    Owner-only.
+
     Behavior:
       - If Stripe is NOT configured, we return 200 with `url = null`,
         so the frontend can surface a "portal not configured" message.
@@ -268,6 +272,8 @@ def create_billing_portal_session(
         with a clear explanation.
       - Otherwise we return the hosted portal URL.
     """
+    require_owner(user, message="Owner-only. Only an org owner can manage subscriptions.")
+
     cfg = get_stripe_config()
     if not cfg.enabled:
         logger.info(
@@ -299,6 +305,7 @@ def create_billing_portal_session(
 
     return PortalSessionCreateOut(url=result.url)
 
+
 @router.post(
     "/checkout-session",
     status_code=status.HTTP_200_OK,
@@ -314,8 +321,12 @@ def create_billing_checkout_session_v2(
     Returns shape compatible with frontend expectations:
       { provider: "stripe", checkout_url: <url or null> }
 
+    Owner-only.
+
     Internally reuses the same Stripe config and org scoping logic.
     """
+    require_owner(user, message="Owner-only. Only an org owner can manage subscriptions.")
+
     cfg = get_stripe_config()
     if not cfg.enabled:
         logger.info(
@@ -371,8 +382,12 @@ def create_billing_portal_session_v2(
     Returns shape compatible with frontend expectations:
       { provider: "stripe", portal_url: <url or null> }
 
+    Owner-only.
+
     Internally reuses the same Stripe config and org scoping logic.
     """
+    require_owner(user, message="Owner-only. Only an org owner can manage subscriptions.")
+
     cfg = get_stripe_config()
     if not cfg.enabled:
         logger.info(

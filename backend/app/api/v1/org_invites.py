@@ -279,7 +279,7 @@ def _compute_invite_state(inv: OrgInvite, now: datetime) -> dict:
         # Accepted invite is a membership artifact; it can still be "active"
         # but it is NOT accept-able anymore.
         status_key = "accepted"
-        is_active = True if stored_active else True
+        is_active = bool(stored_active)
     else:
         status_key = "active" if stored_active else "revoked"
         is_active = True if stored_active else False
