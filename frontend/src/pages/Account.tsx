@@ -148,17 +148,22 @@ function buildInviteLink(token: string): string {
  */
 type InviteUiStatus = "Active" | "Revoked";
 
+/**
+ * ✅ Stop using is_active as the “active vs revoked” source of truth.
+ * Server is canonical: use status + can_revoke when present.
+ */
 function inviteUiStatus(inv: OrgInvite): InviteUiStatus {
   const status = safeString(inv.status)?.toLowerCase();
 
-  // ✅ Treat "active" and "accepted" as Active, only "revoked" as Revoked
-  // (UI requirement remains: ONLY Active / Revoked)
+  // UI requirement remains ONLY Active/Revoked.
+  // Treat "active" and "accepted" as "Active", and only "revoked" as "Revoked".
   if (status === "revoked") return "Revoked";
   if (status === "active" || status === "accepted") return "Active";
 
-  // fallback: if status missing, infer from is_active
-  const isActive = typeof inv.is_active === "boolean" ? inv.is_active : false;
-  return isActive ? "Active" : "Revoked";
+  // Fallback: if status missing, infer from can_revoke (server actionability),
+  // not from is_active (which is no longer canonical for UI state).
+  if (inv.can_revoke === true) return "Active";
+  return "Revoked";
 }
 
 function statusPillClass(status: InviteUiStatus): string {
@@ -591,7 +596,7 @@ const Account: React.FC = () => {
     try {
       const res = await listOrgInvites();
 
-      // ✅ support both:
+      // ✅ 1) Make list parsing resilient:
       // - backend returns array
       // - backend returns { value: [...], Count: n } (as seen in PS output)
       const list = Array.isArray(res) ? res : (res as any)?.value;
@@ -1264,6 +1269,8 @@ const Account: React.FC = () => {
                       <tbody>
                         {invites.map((inv) => {
                           const status = inviteUiStatus(inv);
+
+                          // ✅ 3) Make Actions follow can_revoke (not is_active)
                           const canRevoke = inv.can_revoke === true;
 
                           const acceptedTs =
@@ -1299,7 +1306,6 @@ const Account: React.FC = () => {
                               <td style={{ textAlign: "right" }}>
                                 <div style={{ display: "inline-flex", gap: "0.5rem", alignItems: "center" }}>
                                   {canRevoke ? (
-                                    // ✅ ONLY if backend says can_revoke
                                     <button
                                       type="button"
                                       className="cei-pill-danger"
@@ -1310,7 +1316,6 @@ const Account: React.FC = () => {
                                       Revoke
                                     </button>
                                   ) : (
-                                    // ✅ otherwise, extend/reactivate (works for revoked AND accepted)
                                     <button
                                       type="button"
                                       className="cei-pill cei-pill-good"
