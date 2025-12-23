@@ -17,7 +17,7 @@ from pathlib import Path
 
 DAYS = 30                   # <- increased from 5 to 30 days
 FILES_PER_MODE = 5          # 5 with site_id, 5 without
-SITES_WITH_IDS = ["site-1", "site-2", "site-3"]
+SITES_WITH_IDS = ["site-1", "site-2", "site-23"]
 METERS = ["meter-main-1"]   # keep simple; can add more if needed
 UNIT = "kWh"
 
@@ -154,3 +154,8 @@ def main() -> None:
 
 if __name__ == "__main__":
   main()
+
+
+#to generate data, in powershell, run:
+## From your repo root (where generate_test_timeseries_csvs.py lives)
+#python .\generate_test_timeseries_csvs.py

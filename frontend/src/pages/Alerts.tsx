@@ -1,3 +1,4 @@
+// frontend/src/pages/Alerts.tsx
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
@@ -57,6 +58,16 @@ function formatEnergyShort(kwh: number | null | undefined): string {
     return `${(val / 1000).toFixed(1)} MWh`;
   }
   return `${val.toFixed(0)} kWh`;
+}
+
+// MOD #1: helper to coerce number-like fields (e.g., Decimal strings) into numbers
+function asNumber(v: any): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
 }
 
 const Alerts: React.FC = () => {
@@ -130,12 +141,11 @@ const Alerts: React.FC = () => {
               derivedPlanKey === "cei-growth";
 
         // Pricing context: tariffs + energy mix
+        // MOD #2: accept Decimal-as-string from backend and coerce to number
         const tariffElectricity: number | null =
-          typeof org?.electricity_price_per_kwh === "number"
-            ? org.electricity_price_per_kwh
-            : typeof accountAny.electricity_price_per_kwh === "number"
-            ? accountAny.electricity_price_per_kwh
-            : null;
+          asNumber(org?.electricity_price_per_kwh) ??
+          asNumber(accountAny.electricity_price_per_kwh) ??
+          null;
 
         const derivedCurrencyCode: string =
           typeof org?.currency_code === "string"

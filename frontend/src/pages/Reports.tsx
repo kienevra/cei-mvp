@@ -103,6 +103,16 @@ const pickString = (obj: any, keys: string[]): string | null => {
   return null;
 };
 
+// MOD #1: helper to coerce number-like fields (e.g., Decimal strings) into numbers
+const asNumber = (v: any): number | null => {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+};
+
 const formatKwhLabel = (kwh: number | null | undefined): string => {
   if (kwh == null || !Number.isFinite(kwh) || kwh <= 0) return "—";
   if (kwh >= 1000) return `${(kwh / 1000).toFixed(2)} MWh`;
@@ -211,14 +221,11 @@ const Reports: React.FC = () => {
         setEnableReports(effectiveEnableReports);
 
         // Pricing context
+        // MOD #2: accept Decimal-as-string from backend and coerce to number
         const tariffElectricity: number | null =
-          typeof org?.electricity_price_per_kwh === "number" &&
-          Number.isFinite(org.electricity_price_per_kwh)
-            ? org.electricity_price_per_kwh
-            : typeof accountAny.electricity_price_per_kwh === "number" &&
-              Number.isFinite(accountAny.electricity_price_per_kwh)
-            ? accountAny.electricity_price_per_kwh
-            : null;
+          asNumber(org?.electricity_price_per_kwh) ??
+          asNumber(accountAny.electricity_price_per_kwh) ??
+          null;
 
         const derivedCurrencyCode: string =
           typeof org?.currency_code === "string"
@@ -302,7 +309,8 @@ const Reports: React.FC = () => {
           ({ site, summary, insights }) => {
             const idStr = String(site.id);
 
-            const total = typeof summary?.total_value === "number" ? summary.total_value : 0;
+            const total =
+              typeof summary?.total_value === "number" ? summary.total_value : 0;
             const points = typeof summary?.points === "number" ? summary.points : 0;
             const avgPerPoint = points > 0 ? total / points : null;
 
@@ -313,8 +321,10 @@ const Reports: React.FC = () => {
               pickNumber(insights, ["total_expected_kwh", "expected_kwh_total"]) ??
               null;
 
-            const criticalHours7d = pickNumber(insights, ["critical_hours"]) ?? null;
-            const elevatedHours7d = pickNumber(insights, ["elevated_hours"]) ?? null;
+            const criticalHours7d =
+              pickNumber(insights, ["critical_hours"]) ?? null;
+            const elevatedHours7d =
+              pickNumber(insights, ["elevated_hours"]) ?? null;
             const belowBaselineHours7d =
               pickNumber(insights, ["below_baseline_hours"]) ?? null;
 
@@ -628,7 +638,8 @@ const Reports: React.FC = () => {
     const tariff = hasTariff ? electricityPricePerKwh : null;
 
     const rows = siteRows.map((row) => {
-      const hasRowEnergy = Number.isFinite(row.totalKwh7d) && row.totalKwh7d > 0;
+      const hasRowEnergy =
+        Number.isFinite(row.totalKwh7d) && row.totalKwh7d > 0;
 
       const computedTotalCost7d =
         row.totalCost7d !== null && Number.isFinite(row.totalCost7d)
@@ -1015,7 +1026,9 @@ const Reports: React.FC = () => {
               {hasTariff ? (
                 <>
                   Tariff:{" "}
-                  <strong>{formatTariffPerKwh(electricityPricePerKwh, currencyCode)} / kWh</strong>
+                  <strong>
+                    {formatTariffPerKwh(electricityPricePerKwh, currencyCode)} / kWh
+                  </strong>
                   {primaryEnergySources && primaryEnergySources.length > 0 && (
                     <>
                       {" "}
@@ -1024,7 +1037,9 @@ const Reports: React.FC = () => {
                   )}
                 </>
               ) : (
-                <>Configure your electricity price per kWh (and currency) in Account &amp; Settings to get €/MWh anchors.</>
+                <>
+                  Configure your electricity price per kWh (and currency) in Account &amp; Settings to get €/MWh anchors.
+                </>
               )}
             </div>
           </div>
