@@ -285,8 +285,13 @@ def _compute_invite_state(inv: OrgInvite, now: datetime) -> dict:
         is_active = True if stored_active else False
 
     can_accept = (status_key == "active") and (not accepted) and (not expired) and (revoked_at is None)
-    can_revoke = (status_key == "active")
-    can_extend = True  # owner can always extend/reactivate
+
+    # ✅ TARGET RULE:
+    # - If status is Active (including accepted), show Revoke.
+    # - If status is Revoked, show Extend.
+    # Note: UI still shows only Active/Revoked, but we keep canonical status values for correctness.
+    can_revoke = status_key in {"active", "accepted"}
+    can_extend = status_key == "revoked"
 
     return {
         "status": status_key,

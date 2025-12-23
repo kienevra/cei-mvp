@@ -34,25 +34,6 @@ app = FastAPI(
     redoc_url="/api/v1/redoc" if enable_docs else None,
 )
 
-# --- CORS setup ---
-# IMPORTANT:
-# - We do NOT use allow_origin_regex=".*" because you are using credentials/cookies.
-# - We explicitly allow the origins from settings.ALLOWED_ORIGINS.
-try:
-    allowed = settings.origins_list()
-except Exception:
-    allowed = []
-
-logger.info("CORS allow_origins=%s", allowed)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # --- Error logging middleware ---
 @app.middleware("http")
 async def log_exceptions(request: Request, call_next):
@@ -71,6 +52,28 @@ async def log_exceptions(request: Request, call_next):
                 "traceback_last_lines": tb_lines[-10:],
             },
         )
+
+# --- CORS setup ---
+# IMPORTANT:
+# - We do NOT use allow_origin_regex=".*" because you are using credentials/cookies.
+# - We explicitly allow the origins from settings.ALLOWED_ORIGINS.
+# NOTE:
+# - CORSMiddleware MUST wrap the whole app, including error middleware,
+#   otherwise 500s won't include CORS headers and the browser will show "Network Error".
+try:
+    allowed = settings.origins_list()
+except Exception:
+    allowed = []
+
+logger.info("CORS allow_origins=%s", allowed)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --- Include routers (after app creation) ---
 # Keep these imports below to avoid circular imports during startup
