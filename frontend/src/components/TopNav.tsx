@@ -1,6 +1,6 @@
 // frontend/src/components/TopNav.tsx
 import React, { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
 // Read environment flag from Vite
@@ -66,12 +66,17 @@ const TopNav: React.FC = () => {
   return (
     <header className="cei-topnav">
       <div className="cei-topnav-inner">
-        <div
+        <Link
+          to="/"
           className="cei-topnav-brand"
+          title="Go to Dashboard"
           style={{
             display: "flex",
             alignItems: "center",
             gap: "0.6rem",
+            textDecoration: "none",
+            color: "inherit",
+            cursor: "pointer",
           }}
         >
           <img
@@ -89,7 +94,7 @@ const TopNav: React.FC = () => {
               Carbon Efficiency Intelligence
             </span>
           </div>
-        </div>
+        </Link>
 
         {/* Desktop user info (hidden on mobile) */}
         <div className="cei-topnav-right hide-on-mobile">
