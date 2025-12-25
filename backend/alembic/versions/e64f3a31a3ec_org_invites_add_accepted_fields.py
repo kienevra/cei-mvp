@@ -1,4 +1,5 @@
-"""org_invites add accepted fields (idempotent)
+"""
+org_invites add accepted fields (idempotent)
 
 Revision ID: e64f3a31a3ec
 Revises: a036124222ce
@@ -28,6 +29,7 @@ def _has_fk(bind, table, fk_name):
 
 def upgrade():
     bind = op.get_bind()
+    is_sqlite = bind.dialect.name == "sqlite"
 
     # accepted_at
     if not _has_col(bind, "org_invites", "accepted_at"):
@@ -43,9 +45,15 @@ def upgrade():
             sa.Column("accepted_user_id", sa.Integer(), nullable=True),
         )
 
-    # FK for accepted_user_id -> user.id (create only if not already present)
+    # FK for accepted_user_id -> user.id
+    # SQLite can't ALTER TABLE to add constraints; keep dev unblocked.
+    # Postgres (Render/Supabase) will get the FK.
     fk_name = "fk_org_invites_accepted_user_id_user"
-    if _has_col(bind, "org_invites", "accepted_user_id") and not _has_fk(bind, "org_invites", fk_name):
+    if (
+        (not is_sqlite)
+        and _has_col(bind, "org_invites", "accepted_user_id")
+        and not _has_fk(bind, "org_invites", fk_name)
+    ):
         op.create_foreign_key(
             fk_name,
             "org_invites",
@@ -81,10 +89,11 @@ def upgrade():
 
 def downgrade():
     bind = op.get_bind()
+    is_sqlite = bind.dialect.name == "sqlite"
     fk_name = "fk_org_invites_accepted_user_id_user"
 
-    # Drop FK if it exists, then the column
-    if _has_fk(bind, "org_invites", fk_name):
+    # Drop FK if it exists (non-sqlite), then the columns
+    if (not is_sqlite) and _has_fk(bind, "org_invites", fk_name):
         op.drop_constraint(fk_name, "org_invites", type_="foreignkey")
 
     if _has_col(bind, "org_invites", "accepted_user_id"):
