@@ -1,5 +1,7 @@
 ﻿# backend/app/api/v1/org_invites.py
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal
 
@@ -9,10 +11,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.security import get_current_user  # ✅ canonical location
 from app.db.session import get_db
 from app.models import User, OrgInvite, SiteEvent
 from app.api.v1.auth import (
-    get_current_user,
     create_access_token,
     create_refresh_token,
     _set_refresh_cookie,
@@ -111,19 +113,24 @@ def _audit(
     db: Session,
     *,
     org_id: int,
-    user_id: Optional[int],
     title: str,
     description: Optional[str],
 ) -> None:
+    """
+    Best-effort audit trail.
+
+    IMPORTANT: Must match your actual SiteEvent columns.
+    Based on your SQLite migration log, site_events has:
+      org_id, site_id, kind, related_alert_id, title, description, created_at
+    """
     try:
         ev = SiteEvent(
-            organization_id=org_id,
+            org_id=org_id,
             site_id=None,
-            type="org_event",
+            kind="org_event",
             related_alert_id=None,
             title=title,
-            body=description,
-            created_by_user_id=user_id,
+            description=description,
         )
         db.add(ev)
         db.commit()
@@ -181,7 +188,10 @@ def _require_owner_for_invites(current_user: User) -> None:
 
 
 def _invite_is_accepted(inv: OrgInvite) -> bool:
-    return bool(getattr(inv, "accepted_user_id", None) is not None or getattr(inv, "accepted_at", None) is not None)
+    return bool(
+        getattr(inv, "accepted_user_id", None) is not None
+        or getattr(inv, "accepted_at", None) is not None
+    )
 
 
 def _coerce_expiry_days(v: Optional[int]) -> int:
@@ -262,36 +272,26 @@ def _compute_invite_state(inv: OrgInvite, now: datetime) -> dict:
     expires_at = _as_utc_aware(getattr(inv, "expires_at", None))
     accepted = _invite_is_accepted(inv)
 
-    expired = False
-    if expires_at is not None and expires_at < now:
-        expired = True
+    expired = bool(expires_at is not None and expires_at < now)
 
-    # Stored flag, but we harden it with timestamps.
     stored_active = bool(getattr(inv, "is_active", True))
 
-    if revoked_at is not None:
+    if revoked_at is not None or not stored_active:
         status_key = "revoked"
         is_active = False
     elif expired:
         status_key = "expired"
         is_active = False
     elif accepted:
-        # Accepted invite is a membership artifact; it can still be "active"
-        # but it is NOT accept-able anymore.
         status_key = "accepted"
-        is_active = bool(stored_active)
+        is_active = True
     else:
-        status_key = "active" if stored_active else "revoked"
-        is_active = True if stored_active else False
+        status_key = "active"
+        is_active = True
 
     can_accept = (status_key == "active") and (not accepted) and (not expired) and (revoked_at is None)
-
-    # ✅ TARGET RULE:
-    # - If status is Active (including accepted), show Revoke.
-    # - If status is Revoked, show Extend.
-    # Note: UI still shows only Active/Revoked, but we keep canonical status values for correctness.
-    can_revoke = status_key in {"active", "accepted"}
-    can_extend = status_key == "revoked"
+    can_revoke = status_key in {"active", "accepted"}          # show revoke for active+accepted
+    can_extend = status_key == "revoked"                      # extend only when revoked
 
     return {
         "status": status_key,
@@ -304,6 +304,19 @@ def _compute_invite_state(inv: OrgInvite, now: datetime) -> dict:
     }
 
 
+def _require_org(current_user: User) -> int:
+    """
+    CEI reality: User has organization_id; OrgInvite uses org_id.
+    """
+    org_id = getattr(current_user, "organization_id", None)
+    if not org_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "NO_ORG", "message": "User is not attached to an organization."},
+        )
+    return int(org_id)
+
+
 # ---------- Routes ----------
 
 @router.post("", response_model=InviteCreateResponse)
@@ -312,9 +325,7 @@ def create_invite(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not current_user.organization_id:
-        raise HTTPException(status_code=400, detail="User is not attached to an organization")
-
+    org_id = _require_org(current_user)
     _require_owner_for_invites(current_user)
 
     email_raw = (payload.email or "").strip()
@@ -329,18 +340,17 @@ def create_invite(
     role = _clean_role(payload.role)
 
     expires_days = _coerce_expiry_days(payload.expires_in_days)
-    expires_at = _now_utc() + timedelta(days=expires_days)
+    now = _now_utc()
+    expires_at = now + timedelta(days=expires_days)
 
     existing = (
         db.query(OrgInvite)
         .filter(
-            OrgInvite.organization_id == current_user.organization_id,
+            OrgInvite.org_id == org_id,     # ✅ org_invites uses org_id
             OrgInvite.email == invited_email,
         )
         .first()
     )
-
-    now = _now_utc()
 
     if existing:
         accepted = _invite_is_accepted(existing)
@@ -349,14 +359,12 @@ def create_invite(
         existing.expires_at = expires_at
         existing.created_by_user_id = current_user.id
 
-        # Always "reactivate" record for management purposes
+        # "reactivate" for management purposes
         existing.is_active = True
         existing.revoked_at = None
 
         raw_token: Optional[str] = None
-
         if not accepted:
-            # Only generate token if it can be used to accept
             raw_token = generate_invite_token()
             existing.token_hash = hash_invite_token(raw_token)
 
@@ -368,8 +376,7 @@ def create_invite(
 
         _audit(
             db,
-            org_id=current_user.organization_id,
-            user_id=current_user.id,
+            org_id=org_id,
             title="Invite created/re-issued",
             description=(
                 f"email={invited_email}; invite_id={existing.id}; role={role}; "
@@ -394,7 +401,7 @@ def create_invite(
     token_hash = hash_invite_token(raw_token)
 
     inv = OrgInvite(
-        organization_id=current_user.organization_id,
+        org_id=org_id,                      # ✅ org_invites uses org_id
         email=invited_email,
         token_hash=token_hash,
         role=role,
@@ -410,8 +417,7 @@ def create_invite(
 
     _audit(
         db,
-        org_id=current_user.organization_id,
-        user_id=current_user.id,
+        org_id=org_id,
         title="Invite created",
         description=f"email={invited_email}; invite_id={inv.id}; role={role}; expires_at={expires_at.isoformat()}",
     )
@@ -435,16 +441,14 @@ def list_invites(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not current_user.organization_id:
-        raise HTTPException(status_code=400, detail="User is not attached to an organization")
-
+    org_id = _require_org(current_user)
     _require_owner_for_invites(current_user)
 
     now = _now_utc()
 
     invites = (
         db.query(OrgInvite)
-        .filter(OrgInvite.organization_id == current_user.organization_id)
+        .filter(OrgInvite.org_id == org_id)     # ✅ org_id
         .order_by(OrgInvite.created_at.desc())
         .all()
     )
@@ -452,7 +456,6 @@ def list_invites(
     out: list[InviteListItem] = []
     for inv in invites:
         state = _compute_invite_state(inv, now)
-
         out.append(
             InviteListItem(
                 id=inv.id,
@@ -465,7 +468,6 @@ def list_invites(
                 accepted_user_id=getattr(inv, "accepted_user_id", None),
                 revoked_at=_as_utc_aware(getattr(inv, "revoked_at", None)),
                 created_by_user_id=getattr(inv, "created_by_user_id", None),
-
                 status=state["status"],
                 is_accepted=state["is_accepted"],
                 is_expired=state["is_expired"],
@@ -484,16 +486,14 @@ def revoke_invite(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not current_user.organization_id:
-        raise HTTPException(status_code=400, detail="User is not attached to an organization")
-
+    org_id = _require_org(current_user)
     _require_owner_for_invites(current_user)
 
     inv = (
         db.query(OrgInvite)
         .filter(
             OrgInvite.id == invite_id,
-            OrgInvite.organization_id == current_user.organization_id,
+            OrgInvite.org_id == org_id,      # ✅ org_id
         )
         .first()
     )
@@ -515,20 +515,19 @@ def revoke_invite(
     disabled_detail: Optional[str] = None
     if accepted_user_id is not None:
         disabled_detail = _set_user_access_by_user_id(
-            db, org_id=current_user.organization_id, user_id=int(accepted_user_id), enable=False
+            db, org_id=org_id, user_id=int(accepted_user_id), enable=False
         )
 
     if disabled_detail is None:
         disabled_detail = _set_user_access_by_email(
-            db, org_id=current_user.organization_id, email_norm=email_norm, enable=False
+            db, org_id=org_id, email_norm=email_norm, enable=False
         )
 
     db.commit()
 
     _audit(
         db,
-        org_id=current_user.organization_id,
-        user_id=current_user.id,
+        org_id=org_id,
         title="Invite revoked",
         description=f"invite_id={inv.id}; email={email_norm}; invite=revoked; user_action={disabled_detail or 'none'}",
     )
@@ -543,16 +542,14 @@ def extend_invite(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not current_user.organization_id:
-        raise HTTPException(status_code=400, detail="User is not attached to an organization")
-
+    org_id = _require_org(current_user)
     _require_owner_for_invites(current_user)
 
     inv = (
         db.query(OrgInvite)
         .filter(
             OrgInvite.id == invite_id,
-            OrgInvite.organization_id == current_user.organization_id,
+            OrgInvite.org_id == org_id,      # ✅ org_id
         )
         .first()
     )
@@ -569,7 +566,6 @@ def extend_invite(
     if payload.role is not None:
         inv.role = _clean_role(payload.role)
 
-    # Reactivate management state
     inv.is_active = True
     inv.revoked_at = None
     inv.expires_at = new_expires_at
@@ -579,7 +575,6 @@ def extend_invite(
 
     raw_token: Optional[str] = None
     if not accepted:
-        # Only mint a token if invite can still be accepted
         raw_token = generate_invite_token()
         inv.token_hash = hash_invite_token(raw_token)
 
@@ -589,12 +584,12 @@ def extend_invite(
     enabled_detail: Optional[str] = None
     if accepted_user_id is not None:
         enabled_detail = _set_user_access_by_user_id(
-            db, org_id=current_user.organization_id, user_id=int(accepted_user_id), enable=True
+            db, org_id=org_id, user_id=int(accepted_user_id), enable=True
         )
 
     if enabled_detail is None:
         enabled_detail = _set_user_access_by_email(
-            db, org_id=current_user.organization_id, email_norm=email_norm, enable=True
+            db, org_id=org_id, email_norm=email_norm, enable=True
         )
 
     db.add(inv)
@@ -605,11 +600,10 @@ def extend_invite(
 
     _audit(
         db,
-        org_id=current_user.organization_id,
-        user_id=current_user.id,
+        org_id=org_id,
         title="Invite extended/reactivated",
         description=(
-            f"invite_id={inv.id}; email={email_norm}; expires_at={_as_utc_aware(inv.expires_at).isoformat() if inv.expires_at else 'none'}; "
+            f"invite_id={inv.id}; email={email_norm}; expires_at={(_as_utc_aware(inv.expires_at).isoformat() if inv.expires_at else 'none')}; "
             f"user_action={enabled_detail or 'none'}; token_returned={'yes' if raw_token else 'no'}"
         ),
     )
@@ -623,12 +617,10 @@ def extend_invite(
         revoked_at=_as_utc_aware(getattr(inv, "revoked_at", None)),
         accepted_at=_as_utc_aware(getattr(inv, "accepted_at", None)),
         accepted_user_id=getattr(inv, "accepted_user_id", None),
-
         status=state["status"],
         is_accepted=state["is_accepted"],
         is_expired=state["is_expired"],
         can_accept=state["can_accept"],
-
         token=raw_token,
     )
 
@@ -690,13 +682,14 @@ def accept_and_signup(
             detail={"code": "EMAIL_ALREADY_REGISTERED", "message": "Email already registered. Please log in."},
         )
 
+    # Keep using auth's pwd_context so you don't diverge hashing logic.
     from app.api.v1.auth import pwd_context
     hashed_password = pwd_context.hash(str(payload.password))
 
     user = User(
         email=email_norm,
         hashed_password=hashed_password,
-        organization_id=inv.organization_id,
+        organization_id=inv.org_id,   # ✅ invite points to org via org_id
     )
 
     if payload.full_name:
@@ -738,8 +731,7 @@ def accept_and_signup(
 
     _audit(
         db,
-        org_id=inv.organization_id,
-        user_id=user.id,
+        org_id=int(inv.org_id),
         title="Invite accepted",
         description=f"email={email_norm}; invite_id={inv.id}; user_id={user.id}",
     )
