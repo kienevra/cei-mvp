@@ -306,7 +306,7 @@ def _compute_invite_state(inv: OrgInvite, now: datetime) -> dict:
 
 def _require_org(current_user: User) -> int:
     """
-    CEI reality: User has organization_id; OrgInvite uses org_id.
+    CEI reality: User has organization_id; OrgInvite uses organization_id.
     """
     org_id = getattr(current_user, "organization_id", None)
     if not org_id:
@@ -346,7 +346,7 @@ def create_invite(
     existing = (
         db.query(OrgInvite)
         .filter(
-            OrgInvite.org_id == org_id,     # ✅ org_invites uses org_id
+            OrgInvite.organization_id == org_id,  # ✅ FIX: was OrgInvite.org_id
             OrgInvite.email == invited_email,
         )
         .first()
@@ -401,7 +401,7 @@ def create_invite(
     token_hash = hash_invite_token(raw_token)
 
     inv = OrgInvite(
-        org_id=org_id,                      # ✅ org_invites uses org_id
+        organization_id=org_id,  # ✅ FIX: was org_id=org_id
         email=invited_email,
         token_hash=token_hash,
         role=role,
@@ -448,7 +448,7 @@ def list_invites(
 
     invites = (
         db.query(OrgInvite)
-        .filter(OrgInvite.org_id == org_id)     # ✅ org_id
+        .filter(OrgInvite.organization_id == org_id)  # ✅ FIX: was OrgInvite.org_id
         .order_by(OrgInvite.created_at.desc())
         .all()
     )
@@ -493,7 +493,7 @@ def revoke_invite(
         db.query(OrgInvite)
         .filter(
             OrgInvite.id == invite_id,
-            OrgInvite.org_id == org_id,      # ✅ org_id
+            OrgInvite.organization_id == org_id,  # ✅ FIX: was OrgInvite.org_id
         )
         .first()
     )
@@ -549,7 +549,7 @@ def extend_invite(
         db.query(OrgInvite)
         .filter(
             OrgInvite.id == invite_id,
-            OrgInvite.org_id == org_id,      # ✅ org_id
+            OrgInvite.organization_id == org_id,  # ✅ FIX: was OrgInvite.org_id
         )
         .first()
     )
@@ -689,7 +689,7 @@ def accept_and_signup(
     user = User(
         email=email_norm,
         hashed_password=hashed_password,
-        organization_id=inv.org_id,   # ✅ invite points to org via org_id
+        organization_id=inv.organization_id,  # ✅ FIX: was inv.org_id
     )
 
     if payload.full_name:
@@ -731,7 +731,7 @@ def accept_and_signup(
 
     _audit(
         db,
-        org_id=int(inv.org_id),
+        org_id=int(inv.organization_id),  # ✅ FIX: was inv.org_id
         title="Invite accepted",
         description=f"email={email_norm}; invite_id={inv.id}; user_id={user.id}",
     )
