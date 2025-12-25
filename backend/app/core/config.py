@@ -1,3 +1,4 @@
+# backend/app/core/config.py
 from functools import lru_cache
 from typing import List, Optional
 
@@ -95,6 +96,32 @@ class Settings(BaseSettings):
         default=False,
         env="ENABLE_DOCS",
         description="If true, exposes /api/v1/docs and /api/v1/redoc.",
+    )
+
+    # ===== Observability / performance budgets (pilot hardening) =====
+
+    slow_http_ms: int = Field(
+        default=1500,
+        env="SLOW_HTTP_MS",
+        description="Warn when an HTTP request exceeds this duration (ms).",
+    )
+
+    slow_db_query_ms: int = Field(
+        default=250,
+        env="SLOW_DB_QUERY_MS",
+        description="Warn when a single DB query exceeds this duration (ms).",
+    )
+
+    slow_db_total_ms: int = Field(
+        default=800,
+        env="SLOW_DB_TOTAL_MS",
+        description="Warn when total DB time for a request exceeds this duration (ms).",
+    )
+
+    log_db_sql: bool = Field(
+        default=False,
+        env="LOG_DB_SQL",
+        description="If true, include SQL text in slow query logs (keep false by default in pilots).",
     )
 
     # Stripe / billing

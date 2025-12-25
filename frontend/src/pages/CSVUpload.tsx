@@ -35,6 +35,52 @@ function formatDateTimeLabel(raw?: string | null): string | null {
   });
 }
 
+/** Pull request_id from axios-ish errors and append as a Support code for the ErrorBanner. */
+function getSupportCodeFromError(err: any): string | null {
+  if (!err) return null;
+
+  // Preferred: api.ts stamps this on AxiosError instances
+  const stamped = typeof err?.cei_request_id === "string" ? err.cei_request_id : null;
+  if (stamped && stamped.trim()) return stamped.trim();
+
+  // Fallback: response header / body (common patterns)
+  const headers: any = err?.response?.headers || {};
+  const fromHeader =
+    (typeof headers["x-request-id"] === "string" && headers["x-request-id"]) ||
+    (typeof headers["X-Request-ID"] === "string" && headers["X-Request-ID"]) ||
+    null;
+  if (fromHeader && String(fromHeader).trim()) return String(fromHeader).trim();
+
+  const data: any = err?.response?.data;
+  const fromBody =
+    typeof data?.request_id === "string"
+      ? data.request_id
+      : typeof data?.requestId === "string"
+      ? data.requestId
+      : null;
+  if (fromBody && String(fromBody).trim()) return String(fromBody).trim();
+
+  return null;
+}
+
+function appendSupportCode(msg: string, rid: string | null): string {
+  if (!rid) return msg;
+  if (msg && msg.toLowerCase().includes("support code:")) return msg;
+  return `${msg} (Support code: ${rid})`;
+}
+
+function getUploadErrorMessage(e: any): string {
+  const rid = getSupportCodeFromError(e);
+
+  const msg =
+    e?.response?.data?.detail?.message ||
+    e?.response?.data?.detail ||
+    e?.message ||
+    "Upload failed. Please check the file and try again.";
+
+  return appendSupportCode(String(msg), rid);
+}
+
 const CSVUpload: React.FC = () => {
   const location = useLocation();
   const params = new URLSearchParams(location.search);
@@ -124,12 +170,7 @@ const CSVUpload: React.FC = () => {
 
       setStatus("done");
     } catch (e: any) {
-      const msg =
-        e?.response?.data?.detail?.message ||
-        e?.response?.data?.detail ||
-        e?.message ||
-        "Upload failed. Please check the file and try again.";
-      setError(msg);
+      setError(getUploadErrorMessage(e));
       setStatus("error");
     }
   };

@@ -4,6 +4,8 @@ import {
   getTimeseriesSummary,
   getTimeseriesSeries,
   getSites,
+  getIngestHealth,
+  type IngestHealthResponse,
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
@@ -98,7 +100,6 @@ function formatTimeRange(
   return `${fromLabel} → ${toLabel}`;
 }
 
-
 const Dashboard: React.FC = () => {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -110,6 +111,13 @@ const Dashboard: React.FC = () => {
 
   const [siteCount, setSiteCount] = useState<number | null>(null);
   const [sitesError, setSitesError] = useState<string | null>(null);
+
+  // NEW: ingest health card state
+  const [ingestHealth, setIngestHealth] = useState<IngestHealthResponse | null>(
+    null
+  );
+  const [ingestLoading, setIngestLoading] = useState(false);
+  const [ingestError, setIngestError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -163,6 +171,23 @@ const Dashboard: React.FC = () => {
         setSitesError(e?.message || "Failed to load sites.");
       });
 
+    // NEW: ingest health (24h) – pilot ops cockpit
+    setIngestLoading(true);
+    setIngestError(null);
+    getIngestHealth(24)
+      .then((data) => {
+        if (!isMounted) return;
+        setIngestHealth(data);
+      })
+      .catch((e: any) => {
+        if (!isMounted) return;
+        setIngestError(e?.message || "Failed to load ingest health.");
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setIngestLoading(false);
+      });
+
     return () => {
       isMounted = false;
     };
@@ -171,13 +196,12 @@ const Dashboard: React.FC = () => {
   const hasSummaryData = summary && summary.points > 0;
   const totalKwh = hasSummaryData ? summary!.total_value : 0;
   const lastUpdatedLabel = hasSummaryData
-  ? formatDateTimeLabel(summary!.to_timestamp)
-  : null;
+    ? formatDateTimeLabel(summary!.to_timestamp)
+    : null;
 
   const dataWindowLabel = hasSummaryData
-  ? formatTimeRange(summary!.from_timestamp, summary!.to_timestamp)
-  : null;
-
+    ? formatTimeRange(summary!.from_timestamp, summary!.to_timestamp)
+    : null;
 
   const formattedKwh = hasSummaryData
     ? totalKwh >= 1000
@@ -237,7 +261,40 @@ const Dashboard: React.FC = () => {
     )} hours · Min hourly: ${minVal.toFixed(1)} kWh/h.`;
   }
 
-  const anyError = summaryError || seriesError || sitesError;
+  const anyError = summaryError || seriesError || sitesError || ingestError;
+
+  // NEW: ingest health computed fields
+  const meters = ingestHealth?.meters || [];
+  const meterCount = meters.length;
+
+  const avgCompleteness =
+    meterCount > 0
+      ? meters.reduce((acc, m) => acc + (Number(m.completeness_pct) || 0), 0) /
+        meterCount
+      : null;
+
+  const missingMeters =
+    meterCount > 0
+      ? meters.filter((m) => (Number(m.completeness_pct) || 0) < 90).length
+      : 0;
+
+  const oldestLastSeen =
+    meterCount > 0
+      ? meters
+          .map((m) => m.last_seen)
+          .filter(Boolean)
+          .sort()[0] || null
+      : null;
+
+  const oldestLastSeenLabel = formatDateTimeLabel(oldestLastSeen);
+
+  let ingestStatusLabel = "—";
+  if (ingestLoading) ingestStatusLabel = "Checking…";
+  else if (meterCount === 0) ingestStatusLabel = "No meters detected";
+  else if ((avgCompleteness ?? 0) >= 98 && missingMeters === 0)
+    ingestStatusLabel = "Green";
+  else if ((avgCompleteness ?? 0) >= 90) ingestStatusLabel = "Amber";
+  else ingestStatusLabel = "Red";
 
   return (
     <div
@@ -298,10 +355,9 @@ const Dashboard: React.FC = () => {
           {dataWindowLabel && (
             <div style={{ marginTop: "0.1rem", fontSize: "0.75rem" }}>
               Data window: {dataWindowLabel}
-    </div>
-  )}
-</div>
-
+            </div>
+          )}
+        </div>
       </section>
 
       {/* Errors */}
@@ -313,6 +369,7 @@ const Dashboard: React.FC = () => {
               setSummaryError(null);
               setSeriesError(null);
               setSitesError(null);
+              setIngestError(null);
             }}
           />
         </section>
@@ -424,15 +481,69 @@ const Dashboard: React.FC = () => {
             last 24 hours.
           </div>
         </div>
+
+        {/* NEW: Ingest health card */}
+        <div className="cei-card">
+          <div
+            style={{
+              fontSize: "0.75rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--cei-text-muted)",
+            }}
+          >
+            Ingest health (last 24h)
+          </div>
+
+          <div
+            style={{
+              marginTop: "0.35rem",
+              fontSize: "1.2rem",
+              fontWeight: 600,
+            }}
+          >
+            {ingestStatusLabel}
+          </div>
+
+          <div
+            style={{
+              marginTop: "0.25rem",
+              fontSize: "0.8rem",
+              color: "var(--cei-text-muted)",
+              lineHeight: 1.5,
+            }}
+          >
+            {ingestLoading ? (
+              "Checking meter completeness…"
+            ) : meterCount === 0 ? (
+              "No meters returned. Once data is ingested, this will show coverage by meter."
+            ) : (
+              <>
+                Avg completeness:{" "}
+                <strong>
+                  {(avgCompleteness ?? 0).toFixed(1)}%
+                </strong>{" "}
+                · Meters under 90%: <strong>{missingMeters}</strong> · Meters:{" "}
+                <strong>{meterCount}</strong>
+                {oldestLastSeenLabel && (
+                  <>
+                    {" "}
+                    · Oldest last seen:{" "}
+                    <span style={{ color: "var(--cei-text-accent)" }}>
+                      {oldestLastSeenLabel}
+                    </span>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       </section>
 
       {/* Main grid: trend + commentary */}
       <section className="dashboard-main-grid">
         {/* Trend card */}
-        <div
-          className="cei-card"
-          style={{ maxWidth: "100%", overflow: "hidden" }}
-        >
+        <div className="cei-card" style={{ maxWidth: "100%", overflow: "hidden" }}>
           <div
             style={{
               display: "flex",
@@ -441,12 +552,7 @@ const Dashboard: React.FC = () => {
             }}
           >
             <div>
-              <div
-                style={{
-                  fontSize: "0.9rem",
-                  fontWeight: 600,
-                }}
-              >
+              <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
                 Portfolio energy trend – last 24 hours
               </div>
               <div
@@ -460,12 +566,7 @@ const Dashboard: React.FC = () => {
                 spot peaks, troughs, and suspiciously flat baselines.
               </div>
             </div>
-            <div
-              style={{
-                fontSize: "0.75rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
+            <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
               kWh · hourly
             </div>
           </div>
@@ -483,12 +584,7 @@ const Dashboard: React.FC = () => {
           )}
 
           {!seriesLoading && !hasTrend ? (
-            <div
-              style={{
-                fontSize: "0.8rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
+            <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
               No recent series data. After you ingest CSV data or connect a live
               feed, CEI will chart the last 24 hours here.
             </div>
@@ -528,8 +624,7 @@ const Dashboard: React.FC = () => {
                     if (hasTrend && maxVal > 0) {
                       if (maxVal > minVal) {
                         const ratio = (val - minVal) / (maxVal - minVal || 1);
-                        heightPx =
-                          baseBarHeightPx + ratio * maxBarHeightPx;
+                        heightPx = baseBarHeightPx + ratio * maxBarHeightPx;
                       } else {
                         // all equal > 0
                         heightPx = baseBarHeightPx + maxBarHeightPx;
@@ -566,10 +661,8 @@ const Dashboard: React.FC = () => {
                             background:
                               "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
                             height: `${heightPx}px`,
-                            boxShadow:
-                              "0 6px 18px rgba(56, 189, 248, 0.45)",
-                            border:
-                              "1px solid rgba(226, 232, 240, 0.8)",
+                            boxShadow: "0 6px 18px rgba(56, 189, 248, 0.45)",
+                            border: "1px solid rgba(226, 232, 240, 0.8)",
                           }}
                         />
                         <span
@@ -604,17 +697,8 @@ const Dashboard: React.FC = () => {
 
         {/* Right-hand commentary / “what to look at today” */}
         <div className="cei-card">
-          <div
-            style={{
-              marginBottom: "0.6rem",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "0.9rem",
-                fontWeight: 600,
-              }}
-            >
+          <div style={{ marginBottom: "0.6rem" }}>
+            <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
               What to pay attention to today
             </div>
             <div

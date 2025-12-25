@@ -136,6 +136,12 @@ function formatTimeRange(from?: string | null, to?: string | null): string | nul
 
 // Normalise FastAPI/Pydantic error payloads into a human-readable string
 const normalizeApiError = (e: any, fallback: string): string => {
+  // Prefer the "message" field first because api.ts may append "(Support code: <request_id>)"
+  // and we don't want to lose it by replacing with raw backend detail.
+  if (e?.message && typeof e.message === "string") {
+    return e.message;
+  }
+
   const detail = e?.response?.data?.detail;
 
   if (Array.isArray(detail)) {
@@ -151,10 +157,6 @@ const normalizeApiError = (e: any, fallback: string): string => {
 
   if (typeof detail === "string") {
     return detail;
-  }
-
-  if (e?.message && typeof e.message === "string") {
-    return e.message;
   }
 
   return fallback;
@@ -633,10 +635,7 @@ const SiteView: React.FC = () => {
       navigate("/sites");
     } catch (e: any) {
       console.error("Failed to delete site", e);
-      alert(
-        e?.response?.data?.detail ||
-          "Failed to delete site. Please try again or check logs."
-      );
+      alert(normalizeApiError(e, "Failed to delete site. Please try again or check logs."));
     }
   };
 

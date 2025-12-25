@@ -18,6 +18,82 @@ const api = axios.create({
   withCredentials: true,
 });
 
+/* ===== Request-id (observability) helpers ===== */
+
+function getRequestIdFromAxiosError(err: unknown): string | null {
+  if (!axios.isAxiosError(err)) return null;
+
+  // axios normalizes headers keys to lowercase in browsers
+  const headers: any = err.response?.headers || {};
+  const fromHeader =
+    (typeof headers["x-request-id"] === "string" && headers["x-request-id"]) ||
+    (typeof headers["X-Request-ID"] === "string" && headers["X-Request-ID"]) ||
+    (typeof headers["x-requestid"] === "string" && headers["x-requestid"]) ||
+    null;
+
+  if (fromHeader && String(fromHeader).trim()) return String(fromHeader).trim();
+
+  const data: any = err.response?.data;
+  const fromBody =
+    typeof data?.request_id === "string"
+      ? data.request_id
+      : typeof data?.requestId === "string"
+      ? data.requestId
+      : null;
+
+  if (fromBody && String(fromBody).trim()) return String(fromBody).trim();
+
+  return null;
+}
+
+function attachRequestId(err: unknown): void {
+  const rid = getRequestIdFromAxiosError(err);
+  if (!rid) return;
+
+  // Attach in a stable, UI-friendly place
+  try {
+    (err as any).cei_request_id = rid;
+  } catch {
+    // ignore
+  }
+}
+
+function appendSupportCode(msg: string, rid: string | null): string {
+  if (!rid) return msg;
+  // avoid duplicating
+  if (msg && msg.toLowerCase().includes("support code:")) return msg;
+  return `${msg} (Support code: ${rid})`;
+}
+/* ===== Request-id generation + propagation (end-to-end tracing) ===== */
+
+function generateRequestId(): string {
+  // Prefer crypto if available (modern browsers)
+  try {
+    const c: any = (globalThis as any).crypto;
+    if (c?.randomUUID) return String(c.randomUUID());
+  } catch {
+    // ignore
+  }
+
+  // Fallback: reasonably unique, URL-safe
+  return `cei_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+api.interceptors.request.use((cfg) => {
+  cfg.headers = cfg.headers || {};
+
+  // Don’t clobber an upstream proxy/client request id if someone set it.
+  const hasExisting =
+    typeof (cfg.headers as any)["X-Request-ID"] === "string" ||
+    typeof (cfg.headers as any)["x-request-id"] === "string";
+
+  if (!hasExisting) {
+    (cfg.headers as any)["X-Request-ID"] = generateRequestId();
+  }
+
+  return cfg;
+});
+
 // Attach access token on every request except auth login/signup/refresh/invite-accept
 api.interceptors.request.use((cfg) => {
   const token = localStorage.getItem("cei_token");
@@ -53,6 +129,9 @@ function isAuthPath(url: string | undefined): boolean {
 api.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error: AxiosError) => {
+    // Observability: stamp request_id onto the error early
+    attachRequestId(error);
+
     const status = error.response?.status;
     const originalRequest = error.config as AxiosRequestConfig & {
       _retry?: boolean;
@@ -104,6 +183,8 @@ api.interceptors.response.use(
           localStorage.setItem("cei_token", newToken);
           return newToken;
         } catch (e) {
+          // Attach request_id if refresh failed
+          attachRequestId(e);
           localStorage.removeItem("cei_token");
           window.location.href = "/login?reason=session_expired";
           throw e;
@@ -121,6 +202,7 @@ api.interceptors.response.use(
       originalRequest.headers["Authorization"] = `Bearer ${newToken}`;
       return api(originalRequest);
     } catch (e) {
+      attachRequestId(e);
       return Promise.reject(e);
     }
   }
@@ -140,27 +222,33 @@ function safeStringify(val: unknown): string {
 }
 
 function getApiErrorMessage(err: unknown, fallback: string): string {
+  const rid =
+    (err as any)?.cei_request_id ||
+    getRequestIdFromAxiosError(err) ||
+    null;
+
   if (axios.isAxiosError(err)) {
     const data: any = err.response?.data;
 
     if (data?.detail != null) {
       const detail =
         typeof data.detail === "string" ? data.detail : safeStringify(data.detail);
-      return detail || fallback;
+      return appendSupportCode(detail || fallback, rid);
     }
 
     if (data?.message != null) {
       const msg =
         typeof data.message === "string" ? data.message : safeStringify(data.message);
-      return msg || fallback;
+      return appendSupportCode(msg || fallback, rid);
     }
 
     const axMsg =
       typeof (err as any)?.message === "string" ? (err as any).message : "";
-    return axMsg || fallback;
+    return appendSupportCode(axMsg || fallback, rid);
   }
-  if (err instanceof Error) return err.message || fallback;
-  return fallback;
+
+  if (err instanceof Error) return appendSupportCode(err.message || fallback, rid);
+  return appendSupportCode(fallback, rid);
 }
 
 /* ===== Auth helpers (login + signup) ===== */
@@ -230,6 +318,7 @@ export async function getSites() {
     const r = await api.get("/sites");
     return Array.isArray(r.data) ? r.data : [];
   } catch (e) {
+    attachRequestId(e);
     if (axios.isAxiosError(e) && e.response?.status === 404) return [];
     throw e;
   }
@@ -443,6 +532,7 @@ export async function updateOrgSettings(
     const response = await api.patch<AccountMe>("/account/org-settings", payload);
     return response.data;
   } catch (err: any) {
+    attachRequestId(err);
     if (axios.isAxiosError(err) && err.response?.status === 403) {
       throw new Error("Only the org owner can update tariff settings.");
     }
@@ -498,6 +588,7 @@ export async function listIntegrationTokens(): Promise<IntegrationTokenOut[]> {
     const resp = await api.get<IntegrationTokenOut[]>("/auth/integration-tokens");
     return Array.isArray(resp.data) ? resp.data : [];
   } catch (err: any) {
+    attachRequestId(err);
     if (axios.isAxiosError(err) && err.response?.status === 403) return [];
     throw new Error(getApiErrorMessage(err, "Failed to load integration tokens."));
   }
@@ -512,6 +603,7 @@ export async function createIntegrationToken(
     });
     return resp.data;
   } catch (err: any) {
+    attachRequestId(err);
     if (axios.isAxiosError(err) && err.response?.status === 403) {
       throw new Error("Only the org owner can manage integration tokens.");
     }
@@ -523,6 +615,7 @@ export async function revokeIntegrationToken(tokenId: number): Promise<void> {
   try {
     await api.delete(`/auth/integration-tokens/${tokenId}`);
   } catch (err: any) {
+    attachRequestId(err);
     if (axios.isAxiosError(err) && err.response?.status === 403) {
       throw new Error("Only the org owner can manage integration tokens.");
     }
@@ -530,14 +623,7 @@ export async function revokeIntegrationToken(tokenId: number): Promise<void> {
   }
 }
 
-/* ===== Org invites (canonical) =====
-   /org/invites
-     - POST    /org/invites                   (owner-only) -> returns token ONCE (if usable)
-     - GET     /org/invites                   (owner-only) -> list (no token)
-     - DELETE  /org/invites/{invite_id}       (owner-only) -> revoke (and disable user if accepted)
-     - POST    /org/invites/{invite_id}/extend (owner-only) -> re-activate + extend, token only if not accepted
-     - POST    /org/invites/accept-and-signup (public) -> returns {access_token, token_type}
-*/
+/* ===== Org invites (canonical) ===== */
 
 export interface OrgInviteOut {
   id: number;
@@ -559,7 +645,6 @@ export interface OrgInviteOut {
 
   created_by_user_id?: number | null;
 
-  // Backend list includes these; keep optional to avoid UI fragility
   status?: string;
   is_accepted?: boolean;
   is_expired?: boolean;
@@ -567,7 +652,6 @@ export interface OrgInviteOut {
   can_revoke?: boolean;
   can_extend?: boolean;
 
-  // legacy acceptance markers (kept for UI resilience)
   used_at?: string | null;
   used_by_user_id?: number | null;
 }
@@ -578,7 +662,7 @@ export interface OrgInviteWithSecret extends OrgInviteOut {
 }
 
 export interface OrgInviteCreateRequest {
-  email: string; // REQUIRED (no generic invites)
+  email: string;
   role?: "owner" | "member";
   expires_in_days?: number;
 }
@@ -589,7 +673,7 @@ export interface OrgInviteExtendRequest {
 }
 
 export interface OrgInviteExtendedOut extends OrgInviteOut {
-  token?: string | null; // only for NOT-yet-accepted invites
+  token?: string | null;
 }
 
 export async function listOrgInvites(): Promise<OrgInviteOut[]> {
@@ -597,7 +681,7 @@ export async function listOrgInvites(): Promise<OrgInviteOut[]> {
     const resp = await api.get<OrgInviteOut[]>("/org/invites");
     return Array.isArray(resp.data) ? resp.data : [];
   } catch (err: any) {
-    // Non-owner / forbidden: treat as "no access" not a crash
+    attachRequestId(err);
     if (axios.isAxiosError(err) && err.response?.status === 403) return [];
     throw new Error(getApiErrorMessage(err, "Failed to load invites."));
   }
@@ -610,6 +694,7 @@ export async function createOrgInvite(
     const resp = await api.post<OrgInviteWithSecret>("/org/invites", payload);
     return resp.data;
   } catch (err: any) {
+    attachRequestId(err);
     if (axios.isAxiosError(err) && err.response?.status === 403) {
       throw new Error("Owner-only. Only an org owner can generate invites.");
     }
@@ -621,6 +706,7 @@ export async function revokeOrgInvite(inviteId: number): Promise<void> {
   try {
     await api.delete(`/org/invites/${inviteId}`);
   } catch (err: any) {
+    attachRequestId(err);
     if (axios.isAxiosError(err) && err.response?.status === 403) {
       throw new Error("Owner-only. Only an org owner can revoke invites.");
     }
@@ -639,6 +725,7 @@ export async function extendOrgInvite(
     );
     return resp.data;
   } catch (err: any) {
+    attachRequestId(err);
     if (axios.isAxiosError(err) && err.response?.status === 403) {
       throw new Error("Owner-only. Only an org owner can extend invites.");
     }
@@ -646,10 +733,6 @@ export async function extendOrgInvite(
   }
 }
 
-/**
- * Accept an invite token during signup.
- * POST /org/invites/accept-and-signup { token, email, password, full_name? }
- */
 export async function acceptInvite(payload: {
   token: string;
   email: string;
@@ -660,10 +743,7 @@ export async function acceptInvite(payload: {
   return resp.data as { access_token: string; token_type: string };
 }
 
-/* ===== Org lifecycle (Leave + Offboard) =====
-   - POST   /org/leave
-   - DELETE /org/offboard?mode=soft|nuke&org_id=...
-*/
+/* ===== Org lifecycle (Leave + Offboard) ===== */
 
 export type OffboardMode = "soft" | "nuke";
 
@@ -677,6 +757,7 @@ export async function leaveOrg(): Promise<{
     const resp = await api.post("/org/leave");
     return resp.data as any;
   } catch (err: any) {
+    attachRequestId(err);
     throw new Error(getApiErrorMessage(err, "Failed to leave organization."));
   }
 }
@@ -694,6 +775,7 @@ export async function offboardOrg(params: {
     const resp = await api.delete("/org/offboard", { params: query });
     return resp.data;
   } catch (err: any) {
+    attachRequestId(err);
     if (axios.isAxiosError(err) && err.response?.status === 403) {
       throw new Error("Owner-only. Only an org owner can offboard the organization.");
     }

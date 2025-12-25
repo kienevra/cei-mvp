@@ -18,6 +18,48 @@ function pickInviteToken(search: string): string | null {
   return null;
 }
 
+/* ===== Support code (request_id) helpers ===== */
+
+function getRequestIdFromError(err: any): string | null {
+  if (!err) return null;
+
+  // Preferred: stamped by api.ts interceptor
+  const stamped = typeof err?.cei_request_id === "string" ? err.cei_request_id : null;
+  if (stamped && stamped.trim()) return stamped.trim();
+
+  // Axios response headers (browser normalizes to lowercase)
+  const headers: any = err?.response?.headers || {};
+  const fromHeader =
+    (typeof headers["x-request-id"] === "string" && headers["x-request-id"]) ||
+    (typeof headers["X-Request-ID"] === "string" && headers["X-Request-ID"]) ||
+    (typeof headers["x-requestid"] === "string" && headers["x-requestid"]) ||
+    null;
+
+  if (fromHeader && String(fromHeader).trim()) return String(fromHeader).trim();
+
+  // Axios response body
+  const data: any = err?.response?.data;
+  const fromBody =
+    typeof data?.request_id === "string"
+      ? data.request_id
+      : typeof data?.requestId === "string"
+      ? data.requestId
+      : null;
+
+  if (fromBody && String(fromBody).trim()) return String(fromBody).trim();
+
+  return null;
+}
+
+function appendSupportCode(msg: string, rid: string | null): string {
+  if (!msg) msg = "Authentication failed. Please try again.";
+  if (!rid) return msg;
+
+  // avoid duplicating if it already exists
+  if (msg.toLowerCase().includes("support code:")) return msg;
+  return `${msg} (Support code: ${rid})`;
+}
+
 const Login: React.FC = () => {
   const { login, isAuthenticated } = useAuth();
   const location = useLocation();
@@ -71,12 +113,16 @@ const Login: React.FC = () => {
   }, [inviteToken]);
 
   function toErrorString(err: any): string {
+    const rid = getRequestIdFromError(err);
+
     const backendDetail =
       err?.response?.data?.detail ??
       err?.response?.data?.message ??
       err?.response?.data;
 
-    if (typeof backendDetail === "string") return backendDetail;
+    if (typeof backendDetail === "string") {
+      return appendSupportCode(backendDetail, rid);
+    }
 
     if (backendDetail && typeof backendDetail === "object") {
       // Support your structured errors: { code, message }
@@ -90,25 +136,28 @@ const Login: React.FC = () => {
         const msg = (backendDetail as any).message
           ? String((backendDetail as any).message)
           : "";
-        return code && msg
-          ? `${code}: ${msg}`
-          : msg || code || "Authentication failed. Please try again.";
+        const base =
+          code && msg
+            ? `${code}: ${msg}`
+            : msg || code || "Authentication failed. Please try again.";
+        return appendSupportCode(base, rid);
       }
 
       const msg =
         ((backendDetail as any).message &&
           String((backendDetail as any).message)) ||
         ((backendDetail as any).detail && String((backendDetail as any).detail));
-      if (msg) return msg;
+      if (msg) return appendSupportCode(msg, rid);
 
       try {
-        return JSON.stringify(backendDetail);
+        return appendSupportCode(JSON.stringify(backendDetail), rid);
       } catch {
-        return "Authentication failed. Please try again.";
+        return appendSupportCode("Authentication failed. Please try again.", rid);
       }
     }
 
-    return err?.message || "Authentication failed. Please try again.";
+    const fallback = err?.message || "Authentication failed. Please try again.";
+    return appendSupportCode(fallback, rid);
   }
 
   const handleSubmit = async (e: FormEvent) => {
@@ -232,14 +281,12 @@ const Login: React.FC = () => {
             }}
           />
 
-          <div className="auth-title">
-            We use A.I to cut manufacturing energy waste.
-          </div>
+          <div className="auth-title">We use A.I to cut manufacturing energy waste.</div>
 
           <div className="auth-subtitle">
-            CEI ingests your meter and SCADA data, builds statistical baselines
-            for each site, and turns night, weekend, and process inefficiencies
-            into actionable alerts and reports – without installing new hardware.
+            CEI ingests your meter and SCADA data, builds statistical baselines for
+            each site, and turns night, weekend, and process inefficiencies into
+            actionable alerts and reports – without installing new hardware.
           </div>
         </div>
 
@@ -256,9 +303,7 @@ const Login: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            <strong style={{ color: "var(--cei-text)" }}>
-              Invite detected.
-            </strong>{" "}
+            <strong style={{ color: "var(--cei-text)" }}>Invite detected.</strong>{" "}
             You’ll join an existing organization after account creation.
           </div>
         )}
@@ -293,9 +338,7 @@ const Login: React.FC = () => {
               fontWeight: mode === "login" ? 600 : 400,
               cursor: inviteToken ? "not-allowed" : "pointer",
             }}
-            title={
-              inviteToken ? "Invite flow requires account creation." : undefined
-            }
+            title={inviteToken ? "Invite flow requires account creation." : undefined}
           >
             Sign in
           </button>
@@ -391,8 +434,7 @@ const Login: React.FC = () => {
                   marginTop: "0.25rem",
                 }}
               >
-                This creates your org. Use an invite link to join an existing
-                org.
+                This creates your org. Use an invite link to join an existing org.
               </div>
             </div>
           )}
@@ -411,9 +453,7 @@ const Login: React.FC = () => {
           </div>
 
           <div>
-            <label htmlFor="password">
-              {isSignup ? "Create a password" : "Password"}
-            </label>
+            <label htmlFor="password">{isSignup ? "Create a password" : "Password"}</label>
             <input
               id="password"
               type="password"
