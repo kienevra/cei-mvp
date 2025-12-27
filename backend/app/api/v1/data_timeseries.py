@@ -1,17 +1,18 @@
 # backend/app/api/v1/data_timeseries.py
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set, Tuple
 import csv
 import io
 import logging
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user, get_org_context, OrgContext
+from app.core.security import get_org_context, OrgContext
 from app.db.session import get_db
 from app.models import TimeseriesRecord
 from app.api import deps  # org-scoping helpers
@@ -20,7 +21,8 @@ from app.core.rate_limit import timeseries_batch_rate_limit
 
 router = APIRouter(prefix="/timeseries", tags=["timeseries"])
 
-logger = logging.getLogger("cei.timeseries")
+# Use the canonical app logger ("cei") so request_observability formatting/filtering is consistent.
+logger = logging.getLogger("cei")
 
 
 class TimeseriesSummary(BaseModel):
@@ -104,32 +106,91 @@ class IngestHealthResponse(BaseModel):
     meters: List[IngestMeterHealth]
 
 
+def _bucket_timestamp(ts: datetime, resolution: str) -> datetime:
+    if resolution == "day":
+        return ts.replace(hour=0, minute=0, second=0, microsecond=0)
+    # default: hour
+    return ts.replace(minute=0, second=0, microsecond=0)
+
+
+def _apply_org_scope(q, org_ctx: OrgContext):
+    """
+    Enforce multi-tenant isolation at the TimeseriesRecord layer.
+
+    - If org_ctx.organization_id is set: filter by TimeseriesRecord.organization_id (preferred),
+      with a safe fallback to TimeseriesRecord.org_id if your model uses that legacy name.
+    - If org_ctx.organization_id is None: no filter (legacy/single-tenant dev behavior)
+
+    Fail-closed: if we can't find an org scope column on TimeseriesRecord, return an always-false filter.
+    """
+    org_id = org_ctx.organization_id
+    if org_id is None:
+        return q
+
+    # Preferred schema
+    if hasattr(TimeseriesRecord, "organization_id"):
+        return q.filter(TimeseriesRecord.organization_id == org_id)
+
+    # Legacy / alternate schema
+    if hasattr(TimeseriesRecord, "org_id"):
+        return q.filter(TimeseriesRecord.org_id == org_id)
+
+    # Fail closed (prevents cross-tenant leakage if schema drifts)
+    return q.filter(sa.false())
+
+
+def _get_allowed_site_ids(db: Session, org_id: int) -> Set[str]:
+    """
+    Resolve the set of allowed site_ids for an org as strings.
+    Uses the same helper the ingest service uses (canonical).
+    """
+    allowed = deps.get_org_allowed_site_ids(db, org_id)
+    return {str(s) for s in (allowed or [])}
+
+
+def _enforce_site_allowed_if_provided(
+    *,
+    db: Session,
+    org_ctx: OrgContext,
+    site_id: Optional[str],
+) -> None:
+    """
+    Hard guardrail: if a caller provides site_id and we are in multi-tenant mode,
+    verify the site belongs to the org. If not, return 404 (no leakage).
+    """
+    org_id = org_ctx.organization_id
+    if org_id is None or not site_id:
+        return
+
+    allowed = _get_allowed_site_ids(db, org_id)
+    if str(site_id) not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Site not found",
+        )
+
+
 @router.get("/summary", response_model=TimeseriesSummary)
 def get_timeseries_summary(
     site_id: Optional[str] = Query(None),
     meter_id: Optional[str] = Query(None),
     window_hours: int = Query(24, ge=1, le=24 * 90),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    org_ctx: OrgContext = Depends(get_org_context),
 ):
     """
     Summarize timeseries over the last N hours.
 
-    Returns:
-      - total value
-      - count of points
-      - min/max timestamps
-
     Multi-tenant behavior:
-    - If user.organization_id is set -> only aggregate data for sites belonging
-      to that org (via TimeseriesRecord.site_id mapping to Site.org_id).
-    - If user.organization_id is None -> behave as single-tenant/dev and do not
-      apply any org restriction.
+    - If org_ctx.organization_id is set -> strict org scoping (organization_id / org_id).
+    - If org_ctx.organization_id is None -> legacy/single-tenant behavior.
+    - If site_id is provided, we verify it is allowed for the org (404 if not).
     """
     now = datetime.utcnow()
     start = now - timedelta(hours=window_hours)
 
-    # Base aggregate query
+    _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id)
+
     q = (
         db.query(
             func.coalesce(func.sum(TimeseriesRecord.value), 0),
@@ -140,14 +201,12 @@ def get_timeseries_summary(
         .filter(TimeseriesRecord.timestamp >= start)
     )
 
-    # Optional filters for site/meter
     if site_id:
         q = q.filter(TimeseriesRecord.site_id == site_id)
     if meter_id:
         q = q.filter(TimeseriesRecord.meter_id == meter_id)
 
-    # Org scoping: restrict to the current user's organization if applicable
-    q = deps.apply_org_scope_to_timeseries_query(q, db, user)
+    q = _apply_org_scope(q, org_ctx)
 
     total_value, points, min_ts, max_ts = q.one()
 
@@ -156,7 +215,7 @@ def get_timeseries_summary(
         meter_id=meter_id,
         window_hours=window_hours,
         total_value=float(total_value or 0),
-        points=points,
+        points=int(points or 0),
         from_timestamp=min_ts,
         to_timestamp=max_ts,
     )
@@ -169,49 +228,40 @@ def get_timeseries_series(
     window_hours: int = Query(24, ge=1, le=24 * 90),
     resolution: str = Query("hour", pattern="^(hour|day)$"),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    org_ctx: OrgContext = Depends(get_org_context),
 ):
     """
     Return time-bucketed series over the last N hours.
 
     Bucketing is done in Python to keep it portable between SQLite and Postgres.
-    - resolution = "hour": bucket by hour (YYYY-MM-DD HH:00).
-    - resolution = "day": bucket by day (YYYY-MM-DD 00:00).
 
     Multi-tenant behavior:
-    - If user.organization_id is set -> only return points for sites belonging
-      to that org.
-    - If user.organization_id is None -> behave as single-tenant/dev.
+    - Strict org scoping when org_ctx.organization_id is set.
+    - If site_id is provided, verify allowed for org (404 if not).
     """
     now = datetime.utcnow()
     start = now - timedelta(hours=window_hours)
 
-    # Base row query
+    _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id)
+
     q = db.query(TimeseriesRecord).filter(TimeseriesRecord.timestamp >= start)
 
-    # Optional filters
     if site_id:
         q = q.filter(TimeseriesRecord.site_id == site_id)
     if meter_id:
         q = q.filter(TimeseriesRecord.meter_id == meter_id)
 
-    # Org scoping
-    q = deps.apply_org_scope_to_timeseries_query(q, db, user)
+    q = _apply_org_scope(q, org_ctx)
 
     rows = q.order_by(TimeseriesRecord.timestamp.asc()).all()
 
     buckets: Dict[datetime, float] = {}
-
     for row in rows:
         ts: datetime = row.timestamp
         bucket_ts = _bucket_timestamp(ts, resolution)
-        current = buckets.get(bucket_ts, 0.0)
-        # row.value may be Decimal; cast to float for API response
-        buckets[bucket_ts] = current + float(row.value)
+        buckets[bucket_ts] = buckets.get(bucket_ts, 0.0) + float(row.value)
 
-    # Sort buckets by time
     sorted_points = sorted(buckets.items(), key=lambda kv: kv[0])
-
     points = [TimeseriesPoint(ts=ts, value=value) for ts, value in sorted_points]
 
     return TimeseriesSeries(
@@ -229,7 +279,7 @@ def export_timeseries_csv(
     meter_id: Optional[str] = Query(None),
     window_hours: int = Query(24, ge=1, le=24 * 90),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    org_ctx: OrgContext = Depends(get_org_context),
 ):
     """
     Export raw timeseries rows for the last N hours as CSV.
@@ -241,36 +291,33 @@ def export_timeseries_csv(
       - value
 
     Multi-tenant behavior:
-    - Same org scoping as /summary and /series.
+    - Strict org scoping when org_ctx.organization_id is set.
+    - If site_id is provided, verify allowed for org (404 if not).
     """
     now = datetime.utcnow()
     start = now - timedelta(hours=window_hours)
 
-    # Base query
+    _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id)
+
     q = db.query(TimeseriesRecord).filter(TimeseriesRecord.timestamp >= start)
 
-    # Optional filters
     if site_id:
         q = q.filter(TimeseriesRecord.site_id == site_id)
     if meter_id:
         q = q.filter(TimeseriesRecord.meter_id == meter_id)
 
-    # Org scoping
-    q = deps.apply_org_scope_to_timeseries_query(q, db, user)
-
+    q = _apply_org_scope(q, org_ctx)
     q = q.order_by(TimeseriesRecord.timestamp.asc())
 
     def iter_csv():
         buffer = io.StringIO()
         writer = csv.writer(buffer)
 
-        # Header
         writer.writerow(["timestamp_utc", "site_id", "meter_id", "value"])
         yield buffer.getvalue()
         buffer.seek(0)
         buffer.truncate(0)
 
-        # Stream rows
         for row in q.yield_per(1000):
             writer.writerow(
                 [
@@ -285,9 +332,7 @@ def export_timeseries_csv(
             buffer.truncate(0)
 
     filename = "cei_timeseries_export.csv"
-    headers = {
-        "Content-Disposition": f'attachment; filename="{filename}"'
-    }
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
 
     return StreamingResponse(iter_csv(), media_type="text/csv", headers=headers)
 
@@ -310,24 +355,7 @@ def create_timeseries_batch(
       * A normal short-lived access JWT (interactive user), OR
       * A long-lived integration token (cei_int_...) created via /auth/integration-tokens.
     - In both cases we resolve a single organization_id via get_org_context and use that
-      to scope writes into TimeseriesRecord.
-
-    Payload:
-    - JSON body:
-      {
-        "records": [
-          {
-            "site_id": "site-1",
-            "meter_id": "main-incomer",
-            "timestamp_utc": "2025-12-05T07:00:00Z",
-            "value": 123.45,
-            "unit": "kWh",
-            "idempotency_key": "optional-stable-id"
-          },
-          ...
-        ],
-        "source": "your-system-name"
-      }
+      to scope writes into TimeseriesRecord.organization_id (or org_id for legacy schemas).
 
     Behavior:
     - Delegates to app.services.ingest.ingest_timeseries_batch for the heavy lifting.
@@ -342,8 +370,6 @@ def create_timeseries_batch(
 
     org_id = org_ctx.organization_id
     if org_id is None:
-        # In practice, integration tokens are always org-bound; a missing org_id
-        # here would indicate a misconfigured token or a legacy single-tenant path.
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No organization associated with this credential",
@@ -352,25 +378,26 @@ def create_timeseries_batch(
     # Convert Pydantic models to plain dicts before handing off to the service.
     records = [r.dict() for r in payload.records]
 
+    # Source fallback: make it explicit for observability.
+    source = payload.source or "api"
+
     result_dict = ingest_batch_service(
         records=records,
         organization_id=org_id,
-        source=payload.source,
+        source=source,
         db=db,
     )
 
-    # Structured log for observability
     logger.info(
         "timeseries_batch_ingest org_id=%s source=%s records=%d ingested=%d skipped_duplicate=%d failed=%d",
         org_id,
-        payload.source or "",
+        source,
         len(records),
         result_dict.get("ingested", 0),
         result_dict.get("skipped_duplicate", 0),
         result_dict.get("failed", 0),
     )
 
-    # Map raw dict errors into TimeseriesBatchError for the response model.
     errors = [
         TimeseriesBatchError(
             index=err.get("index", -1),
@@ -394,37 +421,29 @@ def get_ingest_health(
     meter_id: Optional[str] = Query(None),
     window_hours: int = Query(24, ge=1, le=24 * 90),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    org_ctx: OrgContext = Depends(get_org_context),
 ):
     """
     Ingestion health over the last N hours, grouped by (site_id, meter_id).
 
-    For each meter we return:
-    - expected_points: window_hours (assuming 1 point/hour)
-    - actual_points: count of rows in TimeseriesRecord
-    - completeness_pct: actual_points / expected_points * 100
-    - last_seen: latest timestamp for that meter in the window
-
     Multi-tenant behavior:
-    - If user.organization_id is set -> only consider data belonging to that org.
-    - If user.organization_id is None -> behave as single-tenant/dev.
+    - Strict org scoping when org_ctx.organization_id is set.
+    - If site_id is provided, verify allowed for org (404 if not).
     """
     now = datetime.utcnow()
     start = now - timedelta(hours=window_hours)
 
-    # Base query
+    _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id)
+
     q = db.query(TimeseriesRecord).filter(TimeseriesRecord.timestamp >= start)
 
-    # Optional filters
     if site_id:
         q = q.filter(TimeseriesRecord.site_id == site_id)
     if meter_id:
         q = q.filter(TimeseriesRecord.meter_id == meter_id)
 
-    # Org scoping
-    q = deps.apply_org_scope_to_timeseries_query(q, db, user)
+    q = _apply_org_scope(q, org_ctx)
 
-    # Pull rows and aggregate in Python to stay DB-agnostic
     rows = (
         q.order_by(
             TimeseriesRecord.site_id,
@@ -434,7 +453,7 @@ def get_ingest_health(
         .all()
     )
 
-    meter_map: Dict[tuple[str, str], Dict[str, Any]] = {}
+    meter_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
     for row in rows:
         key = (row.site_id, row.meter_id)
@@ -450,9 +469,7 @@ def get_ingest_health(
 
         data["actual_points"] += 1
 
-        if row.timestamp and (
-            data["last_seen"] is None or row.timestamp > data["last_seen"]
-        ):
+        if row.timestamp and (data["last_seen"] is None or row.timestamp > data["last_seen"]):
             data["last_seen"] = row.timestamp
 
     expected_points = window_hours if window_hours > 0 else 0
@@ -460,9 +477,7 @@ def get_ingest_health(
     meters: List[IngestMeterHealth] = []
     for (s_id, m_id), agg in meter_map.items():
         actual = agg["actual_points"]
-        completeness = (
-            (actual / expected_points) * 100.0 if expected_points > 0 else 0.0
-        )
+        completeness = (actual / expected_points) * 100.0 if expected_points > 0 else 0.0
         meters.append(
             IngestMeterHealth(
                 site_id=s_id,
@@ -476,10 +491,3 @@ def get_ingest_health(
         )
 
     return IngestHealthResponse(window_hours=window_hours, meters=meters)
-
-
-def _bucket_timestamp(ts: datetime, resolution: str) -> datetime:
-    if resolution == "day":
-        return ts.replace(hour=0, minute=0, second=0, microsecond=0)
-    # default: hour
-    return ts.replace(minute=0, second=0, microsecond=0)

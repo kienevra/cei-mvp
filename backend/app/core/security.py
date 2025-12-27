@@ -13,10 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import get_db
 from app.models import User
-
-# IntegrationToken is stored in app.db.models in your codebase (shim)
-from app.db.models import IntegrationToken
-
+from app.models import IntegrationToken  # ✅ FIX: use canonical model (not app.db.models)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -72,7 +69,10 @@ def _ensure_user_active(user: User) -> None:
     if not _is_user_active(user):
         # 403 (not 401) because credentials are valid but access is revoked
         raise _http_403(
-            detail={"code": "USER_DISABLED", "message": "User access has been disabled by the organization owner."}
+            detail={
+                "code": "USER_DISABLED",
+                "message": "User access has been disabled by the organization owner.",
+            }
         )
 
 
@@ -82,6 +82,7 @@ class OrgContext:
     Backward-compatible shape (matches what used to live in api/v1/auth.py).
     This lets existing endpoints keep working without refactors.
     """
+
     organization_id: Optional[int]
     user: Optional[User] = None
     integration_token_id: Optional[int] = None
@@ -126,6 +127,9 @@ def get_org_context(
       - User JWT via Authorization: Bearer <jwt>
       - Integration token via Authorization: Bearer <token>
     """
+    # Normalize (cheap + avoids invisible whitespace surprises)
+    token = (token or "").strip()
+
     # 1) Try as access JWT (user)
     try:
         payload = decode_jwt(token)
@@ -133,7 +137,11 @@ def get_org_context(
         if token_type == "access":
             email = payload.get("sub")
             if email:
-                user = db.query(User).filter(User.email == str(email).strip().lower()).first()
+                user = (
+                    db.query(User)
+                    .filter(User.email == str(email).strip().lower())
+                    .first()
+                )
                 if user:
                     # ✅ Enforce revoked access for user-auth ingestion, too
                     _ensure_user_active(user)
@@ -152,7 +160,10 @@ def get_org_context(
     token_hash = _hash_token(token)
     integ = (
         db.query(IntegrationToken)
-        .filter(IntegrationToken.token_hash == token_hash, IntegrationToken.is_active == True)  # noqa: E712
+        .filter(
+            IntegrationToken.token_hash == token_hash,
+            IntegrationToken.is_active.is_(True),  # ✅ FIX: SQLAlchemy-safe boolean
+        )
         .first()
     )
     if not integ:

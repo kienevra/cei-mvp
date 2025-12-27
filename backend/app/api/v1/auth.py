@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.rate_limit import login_rate_limit, refresh_rate_limit
 from app.core.security import get_current_user
-from app.db.models import IntegrationToken  # integration tokens live here (shim)
+from app.models import IntegrationToken  # integration tokens live here (shim)
 from app.db.session import get_db
 from app.models import Organization, User
 from app.api.deps import require_owner, create_org_audit_event

@@ -24,6 +24,22 @@ from app.core.request_context import (
 
 # --- Logging setup ---
 # Keep your structured format, but make it resilient if request_id isn't installed.
+#
+# Why this works:
+# - logging.Filter only runs on the logger it’s attached to; some third-party loggers can bypass it.
+# - LogRecordFactory runs for EVERY record, globally. So request_id always exists -> no KeyError.
+_old_factory = logging.getLogRecordFactory()
+
+
+def _record_factory(*args, **kwargs):
+    record = _old_factory(*args, **kwargs)
+    if not hasattr(record, "request_id"):
+        record.request_id = "-"
+    return record
+
+
+logging.setLogRecordFactory(_record_factory)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(levelname)s %(name)s request_id=%(request_id)s %(message)s",
@@ -38,14 +54,15 @@ try:
 
     install_request_id_logging()
 except Exception:
-    # Fallback: add a filter that injects request_id into all log records
+    # Fallback: add a filter that injects request_id from request_context.
+    # (RecordFactory already prevents KeyError; this improves correctness.)
     class _RequestIdFilter(logging.Filter):
         def filter(self, record: logging.LogRecord) -> bool:
             try:
                 rid = get_request_id()
             except Exception:
                 rid = None
-            record.request_id = rid or "-"
+            record.request_id = rid or getattr(record, "request_id", "-") or "-"
             return True
 
     logging.getLogger().addFilter(_RequestIdFilter())

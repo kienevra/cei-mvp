@@ -101,9 +101,19 @@ function getAuthErrorMessage(err: unknown, fallback: string): string {
   return appendSupportCode(fallback, rid);
 }
 
-export const AuthProvider: React.FC<{ children: ReactNode }> = ({
-  children,
-}) => {
+/* ===== Session-expired detection (pairs with api.ts Fix #3) ===== */
+
+function isSessionExpiredError(err: unknown): boolean {
+  const anyErr: any = err as any;
+  return (
+    anyErr?.code === "SESSION_EXPIRED" ||
+    anyErr?.name === "SessionExpiredError" ||
+    (typeof anyErr?.message === "string" &&
+      anyErr.message.toLowerCase().includes("session expired"))
+  );
+}
+
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
 
   // Token is the only thing we *must* persist
@@ -132,6 +142,54 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       // fail silently if storage is unavailable
     }
   }, [token]);
+
+  // Keep token state in sync if something else mutates localStorage (refresh pipeline, multi-tab)
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== "cei_token") return;
+      try {
+        const next = localStorage.getItem("cei_token");
+        setToken(next);
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("storage", onStorage);
+
+    // Also do a one-time sync on mount (covers same-tab changes that happen before listener)
+    try {
+      const next = localStorage.getItem("cei_token");
+      setToken(next);
+    } catch {
+      // ignore
+    }
+
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  // Global auth sink: if api.ts reports "session expired", reflect it in Auth state and route.
+  useEffect(() => {
+    const id = api.interceptors.response.use(
+      (resp) => resp,
+      (err) => {
+        if (isSessionExpiredError(err)) {
+          setToken(null);
+          setUser(null);
+          try {
+            localStorage.removeItem("cei_token");
+          } catch {
+            // ignore
+          }
+          navigate("/login?reason=session_expired", { replace: true });
+        }
+        return Promise.reject(err);
+      }
+    );
+
+    return () => {
+      api.interceptors.response.eject(id);
+    };
+  }, [navigate]);
 
   const login = async ({ username, password }: LoginPayload) => {
     // Backend expects application/x-www-form-urlencoded (OAuth2PasswordRequestForm)
@@ -168,7 +226,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       navigate("/", { replace: true });
     } catch (err: any) {
       // Ensure Login.tsx gets a clean message that includes Support code when available
-      throw new Error(getAuthErrorMessage(err, "Authentication failed. Please try again."));
+      throw new Error(
+        getAuthErrorMessage(err, "Authentication failed. Please try again.")
+      );
     }
   };
 

@@ -1,19 +1,39 @@
 # backend/app/api/v1/sites.py
-from typing import List, Optional
+from __future__ import annotations
+
+from typing import List, Optional, Set
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.core.security import get_current_user
 from app.models import Site, User, TimeseriesRecord
+
+# These are still coming from the shim in your repo. Leaving as-is to avoid regressions.
 from app.db.models import SiteEvent, AlertEvent
 
 router = APIRouter(prefix="/sites", tags=["sites"])
-
 logger = logging.getLogger("cei")
+
+
+def _canonical_site_key(site_db_id: int) -> str:
+    """
+    Canonical site_id used by TimeseriesRecord and ingest endpoints.
+
+    We standardize on "site-<id>" everywhere.
+    """
+    return f"site-{site_db_id}"
+
+
+def _timeseries_site_keys(site_db_id: int) -> Set[str]:
+    """
+    Timeseries keys we may need to match historically.
+    Canonical is "site-<id>", but older data might have "<id>".
+    """
+    return {_canonical_site_key(site_db_id), str(site_db_id)}
 
 
 class SiteBase(BaseModel):
@@ -26,12 +46,23 @@ class SiteCreate(SiteBase):
 
 
 class SiteRead(SiteBase):
+    """
+    API response model.
+
+    - id: numeric DB id (legacy/backward compatible)
+    - site_id: canonical string key used by timeseries ingestion ("site-<id>")
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
-
-    class Config:
-        orm_mode = True
+    site_id: str
 
 
+# IMPORTANT:
+# We support BOTH "/sites" and "/sites/" to avoid Starlette's automatic 307 redirect.
+# This fixes curl/axios behavior and removes the redirect hop.
+@router.get("", response_model=List[SiteRead])
 @router.get("/", response_model=List[SiteRead])
 def list_sites(
     db: Session = Depends(get_db),
@@ -47,11 +78,23 @@ def list_sites(
     org_id = getattr(user, "organization_id", None)
 
     query = db.query(Site).order_by(Site.id.asc())
-
     if org_id is not None:
         query = query.filter(Site.org_id == org_id)
 
-    return query.all()
+    sites = query.all()
+
+    # Enrich with canonical site_id key without changing DB model shape.
+    out: List[SiteRead] = []
+    for s in sites:
+        out.append(
+            SiteRead(
+                id=s.id,
+                site_id=_canonical_site_key(s.id),
+                name=getattr(s, "name", ""),
+                location=getattr(s, "location", None),
+            )
+        )
+    return out
 
 
 @router.get("/{site_id}", response_model=SiteRead)
@@ -70,19 +113,22 @@ def get_site(
     org_id = getattr(user, "organization_id", None)
 
     query = db.query(Site).filter(Site.id == site_id)
-
     if org_id is not None:
         query = query.filter(Site.org_id == org_id)
 
     site = query.first()
     if not site:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Site not found",
-        )
-    return site
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+
+    return SiteRead(
+        id=site.id,
+        site_id=_canonical_site_key(site.id),
+        name=getattr(site, "name", ""),
+        location=getattr(site, "location", None),
+    )
 
 
+@router.post("", response_model=SiteRead, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=SiteRead, status_code=status.HTTP_201_CREATED)
 def create_site(
     payload: SiteCreate,
@@ -111,7 +157,13 @@ def create_site(
     db.add(site)
     db.commit()
     db.refresh(site)
-    return site
+
+    return SiteRead(
+        id=site.id,
+        site_id=_canonical_site_key(site.id),
+        name=site.name,
+        location=site.location,
+    )
 
 
 @router.delete("/{site_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -127,12 +179,11 @@ def delete_site(
     - If user.organization_id is set -> only allow deleting sites in that org.
     - If user.organization_id is None -> fall back to legacy behavior (by id only).
 
-    Red-pill behavior:
-    - Deletes the Site row.
-    - Deletes all TimeseriesRecord rows whose site_id matches this site
-      (both "site-<id>" and "<id>").
-    - Deletes SiteEvent timeline entries for this site.
-    - Deletes AlertEvent history/workflow entries for this site.
+    Deletes:
+    - Site row
+    - TimeseriesRecord rows matching site_id keyspace ("site-<id>" and "<id>")
+    - SiteEvent rows tied to this site keyspace
+    - AlertEvent rows tied to this site keyspace
     """
     org_id = getattr(user, "organization_id", None)
 
@@ -143,13 +194,9 @@ def delete_site(
 
     site = site_query.first()
     if not site:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Site not found",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
 
-    # We track timeseries using "site-<id>" keys; sometimes plain "<id>" leaks in.
-    timeseries_keys = {f"site-{site.id}", str(site.id)}
+    timeseries_keys = _timeseries_site_keys(site.id)
 
     logger.info(
         "Deleting site %s (org_id=%s, keys=%s) with cascade",
@@ -158,26 +205,26 @@ def delete_site(
         sorted(timeseries_keys),
     )
 
-    # 2) Nuke timeseries data for this site_id key space
+    # 2) Delete timeseries data for this site keyspace
     deleted_ts = (
         db.query(TimeseriesRecord)
         .filter(TimeseriesRecord.site_id.in_(timeseries_keys))
         .delete(synchronize_session=False)
     )
 
-    # 3) Nuke alert history/workflow rows tied to this site
+    # 3) Delete alert history/workflow rows tied to this site
     alert_q = db.query(AlertEvent).filter(AlertEvent.site_id.in_(timeseries_keys))
     if org_id is not None and hasattr(AlertEvent, "organization_id"):
         alert_q = alert_q.filter(AlertEvent.organization_id == org_id)
     deleted_alerts = alert_q.delete(synchronize_session=False)
 
-    # 4) Nuke site timeline events tied to this site
+    # 4) Delete site timeline events tied to this site
     se_q = db.query(SiteEvent).filter(SiteEvent.site_id.in_(timeseries_keys))
     if org_id is not None and hasattr(SiteEvent, "organization_id"):
         se_q = se_q.filter(SiteEvent.organization_id == org_id)
     deleted_site_events = se_q.delete(synchronize_session=False)
 
-    # 5) Finally delete the site row itself
+    # 5) Delete site row
     db.delete(site)
     db.commit()
 
@@ -188,5 +235,4 @@ def delete_site(
         deleted_alerts,
         deleted_site_events,
     )
-
     return

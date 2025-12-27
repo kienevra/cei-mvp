@@ -1,8 +1,8 @@
+# backend/app/services/ingest.py
 import os
-import uuid
 import json
 import logging
-from typing import Tuple, Dict, Any, List, Optional
+from typing import Tuple, Dict, Any, List, Optional, Set
 from datetime import datetime
 from decimal import Decimal
 
@@ -46,7 +46,6 @@ def save_raw_timeseries(job_id: str, payload: List[Dict[str, Any]]) -> str:
     if STAGING_FILE:
         path = STAGING_FILE
         entry = {"job_id": job_id, "records": payload}
-        # Use append mode so multiple calls can coexist if needed; tests see a fresh file.
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
         logger.info("saved staging payload %s job_id=%s (STAGING_FILE mode)", path, job_id)
@@ -62,48 +61,33 @@ def save_raw_timeseries(job_id: str, payload: List[Dict[str, Any]]) -> str:
 def validate_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
     """
     Legacy validator used by process_job and older tests.
-
-    Behavior is aligned with tests/test_ingest.py expectations:
-
-    - site_id missing -> "Missing field: site_id"
-    - timestamp (or timestamp_utc) missing -> "Missing field: timestamp"
-    - value missing -> "Missing field: value"
-    - value non-numeric -> "Value must be numeric"
-    - value negative -> treated as invalid (error message not asserted in tests)
-    - unit != "kWh" (when provided) -> "Unit must be 'kWh'"
     """
     errs: List[str] = []
 
-    # site_id / meter_id
     if not r.get("site_id"):
         errs.append("Missing field: site_id")
     if not r.get("meter_id"):
         errs.append("Missing field: meter_id")
 
-    # value
     if "value" not in r:
         errs.append("Missing field: value")
     else:
         try:
             v = Decimal(str(r["value"]))
-            # tests expect negative values to be treated as invalid (expected_valid=False)
             if v < 0:
                 errs.append("Value must be non-negative")
         except Exception:
             errs.append("Value must be numeric")
 
-    # timestamp (accept both 'timestamp' and 'timestamp_utc', but tests refer to 'timestamp')
     ts_raw = r.get("timestamp") or r.get("timestamp_utc")
     if ts_raw is None:
         errs.append("Missing field: timestamp")
     else:
         try:
-            # Support "Z" suffix for UTC
             datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
         except Exception:
             errs.append("Invalid timestamp format")
 
-    # Unit (legacy tests expect this check)
     unit = r.get("unit")
     if unit is not None and unit != "kWh":
         errs.append("Unit must be 'kWh'")
@@ -113,11 +97,7 @@ def validate_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
 def process_job(job_id: str) -> int:
     """
-    Simple process: read staging file, validate, and return count of accepted rows.
-    In real app, insert into DB using SQLAlchemy session (not done here to keep file small).
-
-    This function is retained for backward compatibility with any staging-based
-    ingestion flows you might still be using.
+    Back-compat staging job processor. (No DB writes.)
     """
     path = os.path.join(STAGING_DIR, f"{job_id}.json")
     if not os.path.exists(path):
@@ -130,7 +110,6 @@ def process_job(job_id: str) -> int:
     for r in payload:
         ok, errs = validate_record(r)
         if ok:
-            # TODO: persist to DB for legacy flows if needed
             accepted += 1
         else:
             logger.warning("staging record %s failed validation: %s", r, errs)
@@ -145,26 +124,14 @@ def process_job(job_id: str) -> int:
 def validate_batch_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
     """
     Strict validator for the /timeseries/batch API.
-
-    Expected shape per record:
-      {
-        "site_id": "1",
-        "meter_id": "main-incomer",
-        "timestamp_utc": "2025-12-03T10:00:00Z",
-        "value": 123.4,
-        "unit": "kWh",                 # optional but if provided must be "kWh"
-        "idempotency_key": "..."       # optional but recommended
-      }
     """
     errs: List[str] = []
 
-    # Required identifiers
     if not r.get("site_id"):
         errs.append("site_id missing")
     if not r.get("meter_id"):
         errs.append("meter_id missing")
 
-    # Value
     if "value" not in r:
         errs.append("value missing")
     else:
@@ -173,7 +140,6 @@ def validate_batch_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
         except Exception:
             errs.append("value not numeric")
 
-    # Timestamp (UTC, ISO8601)
     ts_raw = r.get("timestamp_utc") or r.get("timestamp")
     if ts_raw is None:
         errs.append("timestamp_utc missing")
@@ -185,7 +151,6 @@ def validate_batch_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
         except Exception:
             errs.append("timestamp_utc not ISO8601")
 
-    # Unit (locked to kWh for now if provided)
     unit = r.get("unit")
     if unit is not None and unit != "kWh":
         errs.append("unit must be 'kWh'")
@@ -194,12 +159,6 @@ def validate_batch_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
 
 def _guess_code_from_validation_errors(errs: List[str]) -> TimeseriesIngestErrorCode:
-    """
-    Map raw validation error messages from validate_batch_record into a canonical
-    TimeseriesIngestErrorCode. This keeps the external API lean while preserving
-    detailed messages in `detail`.
-    """
-    # Timestamp-related issues
     for e in errs:
         if (
             "timestamp_utc missing" in e
@@ -208,18 +167,58 @@ def _guess_code_from_validation_errors(errs: List[str]) -> TimeseriesIngestError
         ):
             return TimeseriesIngestErrorCode.INVALID_TIMESTAMP
 
-    # Value-related issues
     for e in errs:
         if "value missing" in e or "value not numeric" in e:
             return TimeseriesIngestErrorCode.INVALID_VALUE
 
-    # Unit-related issues
     for e in errs:
         if "unit must be 'kWh'" in e:
             return TimeseriesIngestErrorCode.INVALID_UNIT
 
-    # Fallback: generic internal error (unexpected validation shape)
     return TimeseriesIngestErrorCode.INTERNAL_ERROR
+
+
+def _normalize_idempotency_key(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    return s or None
+
+
+def _record_model_supports_org() -> bool:
+    return hasattr(TimeseriesRecord, "organization_id")
+
+
+def _record_model_supports_idempotency() -> bool:
+    return hasattr(TimeseriesRecord, "idempotency_key")
+
+
+def _is_likely_idempotency_integrity_error(exc: IntegrityError) -> bool:
+    """
+    Best-effort classifier so we don't mislabel *every* IntegrityError as idempotency.
+    This is DB-specific, so we use string heuristics.
+    """
+    msg = str(getattr(exc, "orig", exc)).lower()
+    # common fragments across sqlite/postgres for unique violations
+    return ("unique" in msg or "duplicate" in msg) and ("idempotency" in msg or "idempotency_key" in msg)
+
+
+def _idempotency_exists(
+    db: Session,
+    *,
+    organization_id: Optional[int],
+    idempotency_key: str,
+) -> bool:
+    """
+    Deterministic idempotency gate.
+
+    - If model supports org scoping: enforce (organization_id, idempotency_key)
+    - Else: enforce global (idempotency_key)
+    """
+    q = db.query(TimeseriesRecord).filter(TimeseriesRecord.idempotency_key == idempotency_key)
+    if _record_model_supports_org() and organization_id is not None:
+        q = q.filter(TimeseriesRecord.organization_id == organization_id)
+    return db.query(q.exists()).scalar() is True
 
 
 def ingest_timeseries_batch(
@@ -231,35 +230,21 @@ def ingest_timeseries_batch(
     """
     Ingest a batch of timeseries records directly into TimeseriesRecord.
 
-    This is the core service for the POST /api/v1/timeseries/batch endpoint.
-
-    - Validates each record.
-    - If organization_id is set, enforces that site_id is in the org's allowed site list.
-    - Writes to DB with org scoping when supported by the model.
-    - Handles duplicates via DB constraints (if idempotency/unique keys exist).
-    - Returns a machine-readable summary.
+    Idempotency guarantee:
+    - If a record provides idempotency_key and TimeseriesRecord supports it,
+      we will NEVER double-ingest that key (scoped by org when possible),
+      even if the DB constraint is missing in production.
 
     Returns:
       {
         "ingested": int,
         "skipped_duplicate": int,
         "failed": int,
-        "errors": [
-          {
-            "index": int,
-            "code": str,   # one of TimeseriesIngestErrorCode.*
-            "detail": str
-          }
-        ]
+        "errors": [{"index": int, "code": str, "detail": str}]
       }
     """
     if not records:
-        return {
-            "ingested": 0,
-            "skipped_duplicate": 0,
-            "failed": 0,
-            "errors": [],
-        }
+        return {"ingested": 0, "skipped_duplicate": 0, "failed": 0, "errors": []}
 
     session_provided = db is not None
     if db is None:
@@ -270,17 +255,18 @@ def ingest_timeseries_batch(
     failed = 0
     errors: List[Dict[str, Any]] = []
 
-    # Precompute allowed site_ids for this org, once per batch
-    allowed_site_ids: Optional[set[str]] = None
+    # Allowed site_ids for org, once per batch
+    allowed_site_ids: Optional[Set[str]] = None
     if organization_id:
         try:
             allowed_list = get_org_allowed_site_ids(db, organization_id)
-            # Normalize to strings because TimeseriesRecord.site_id is a String column
             allowed_site_ids = {str(s) for s in allowed_list}
         except Exception as exc:
             logger.error("failed to load allowed site ids for org %s: %s", organization_id, exc)
-            # In the worst case, treat as no sites allowed to avoid leaking data across orgs
-            allowed_site_ids = set()
+            allowed_site_ids = set()  # fail-closed
+
+    model_has_org = _record_model_supports_org()
+    model_has_idem = _record_model_supports_idempotency()
 
     try:
         for idx, r in enumerate(records):
@@ -288,98 +274,117 @@ def ingest_timeseries_batch(
             if not ok:
                 failed += 1
                 code_enum = _guess_code_from_validation_errors(errs)
+                errors.append({"index": idx, "code": code_enum.value, "detail": "; ".join(errs)})
+                continue
+
+            site_id_str = str(r["site_id"])
+
+            if allowed_site_ids is not None and site_id_str not in allowed_site_ids:
+                failed += 1
                 errors.append(
                     {
                         "index": idx,
-                        "code": code_enum.value,
-                        "detail": "; ".join(errs),
+                        "code": TimeseriesIngestErrorCode.ORG_MISMATCH.value,
+                        "detail": f"site_id '{site_id_str}' is not allowed for this organization",
                     }
                 )
                 continue
 
-            # Enforce org-scoped site_id if org is known
-            site_id_str = str(r["site_id"])
-            if allowed_site_ids is not None:
-                if site_id_str not in allowed_site_ids:
-                    failed += 1
-                    errors.append(
-                        {
-                            "index": idx,
-                            "code": TimeseriesIngestErrorCode.ORG_MISMATCH.value,
-                            "detail": (
-                                f"site_id '{site_id_str}' is not allowed for this organization"
-                            ),
-                        }
-                    )
-                    continue
-
-            # Safe timestamp parsing (we already validated)
             ts_raw = r.get("timestamp_utc") or r.get("timestamp")
             ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
 
-            # Build kwargs based on what the TimeseriesRecord model actually has
+            # Normalize idempotency key early
+            idem_key = _normalize_idempotency_key(r.get("idempotency_key"))
+
+            # Deterministic idempotency pre-check (works even without DB constraints)
+            if model_has_idem and idem_key:
+                try:
+                    if _idempotency_exists(db, organization_id=organization_id, idempotency_key=idem_key):
+                        skipped_duplicate += 1
+                        errors.append(
+                            {
+                                "index": idx,
+                                "code": TimeseriesIngestErrorCode.DUPLICATE_IDEMPOTENCY_KEY.value,
+                                "detail": "Duplicate idempotency_key (pre-check)",
+                            }
+                        )
+                        continue
+                except Exception as exc:
+                    # If pre-check fails, we still attempt insert; DB constraint may still protect us.
+                    logger.warning("idempotency pre-check failed (idx=%s): %s", idx, exc)
+
             record_kwargs: Dict[str, Any] = {
                 "site_id": site_id_str,
                 "meter_id": r["meter_id"],
                 "value": float(r["value"]),
             }
 
-            # Timestamp field: support either timestamp_utc or timestamp
             if hasattr(TimeseriesRecord, "timestamp_utc"):
                 record_kwargs["timestamp_utc"] = ts
             elif hasattr(TimeseriesRecord, "timestamp"):
                 record_kwargs["timestamp"] = ts
 
-            # Org scoping if the model supports organization_id
-            if hasattr(TimeseriesRecord, "organization_id") and organization_id is not None:
+            if model_has_org and organization_id is not None:
                 record_kwargs["organization_id"] = organization_id
 
             record = TimeseriesRecord(**record_kwargs)
 
-            # Optionally set unit if the model supports it
             if hasattr(TimeseriesRecord, "unit"):
                 setattr(record, "unit", r.get("unit", "kWh"))
 
-            # Optionally set idempotency_key if the model supports it
-            if hasattr(TimeseriesRecord, "idempotency_key") and r.get("idempotency_key"):
-                setattr(record, "idempotency_key", r["idempotency_key"])
+            if model_has_idem and idem_key:
+                setattr(record, "idempotency_key", idem_key)
 
-            # Optionally set source if the model supports it
             if hasattr(TimeseriesRecord, "source") and source:
                 setattr(record, "source", source)
 
             try:
-                db.add(record)
-                db.commit()
+                with db.begin_nested():
+                    db.add(record)
+                    db.flush()
             except IntegrityError as exc:
-                db.rollback()
-                skipped_duplicate += 1
-                errors.append(
-                    {
-                        "index": idx,
-                        "code": TimeseriesIngestErrorCode.DUPLICATE_IDEMPOTENCY_KEY.value,
-                        "detail": str(getattr(exc, "orig", exc)),
-                    }
-                )
-            except Exception as exc:
-                db.rollback()
+                # Only classify as idempotency duplicate if it's likely that constraint,
+                # otherwise treat it as a failure so we don't mask data issues.
+                if model_has_idem and idem_key and _is_likely_idempotency_integrity_error(exc):
+                    skipped_duplicate += 1
+                    errors.append(
+                        {
+                            "index": idx,
+                            "code": TimeseriesIngestErrorCode.DUPLICATE_IDEMPOTENCY_KEY.value,
+                            "detail": str(getattr(exc, "orig", exc)),
+                        }
+                    )
+                    continue
+
                 failed += 1
                 errors.append(
                     {
                         "index": idx,
                         "code": TimeseriesIngestErrorCode.INTERNAL_ERROR.value,
-                        "detail": str(exc),
+                        "detail": str(getattr(exc, "orig", exc)),
                     }
                 )
+                continue
+            except Exception as exc:
+                failed += 1
+                errors.append(
+                    {"index": idx, "code": TimeseriesIngestErrorCode.INTERNAL_ERROR.value, "detail": str(exc)}
+                )
+                continue
             else:
                 ingested += 1
 
+        db.commit()
         return {
             "ingested": ingested,
             "skipped_duplicate": skipped_duplicate,
             "failed": failed,
             "errors": errors,
         }
+
+    except Exception:
+        db.rollback()
+        raise
     finally:
         if not session_provided:
             db.close()

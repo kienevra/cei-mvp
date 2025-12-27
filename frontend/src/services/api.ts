@@ -126,6 +126,25 @@ function isAuthPath(url: string | undefined): boolean {
   );
 }
 
+/* ===== Fix #3: stop hard-redirecting inside the API client ===== */
+
+class SessionExpiredError extends Error {
+  code = "SESSION_EXPIRED" as const;
+  constructor(message: string = "Session expired. Please log in again.") {
+    super(message);
+    this.name = "SessionExpiredError";
+  }
+}
+
+function sessionExpired(): SessionExpiredError {
+  try {
+    localStorage.removeItem("cei_token");
+  } catch {
+    // ignore
+  }
+  return new SessionExpiredError();
+}
+
 api.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error: AxiosError) => {
@@ -150,16 +169,13 @@ api.interceptors.response.use(
 
     // Prevent infinite loops
     if (originalRequest._retry) {
-      localStorage.removeItem("cei_token");
-      window.location.href = "/login?reason=session_expired";
-      return Promise.reject(error);
+      return Promise.reject(sessionExpired());
     }
     originalRequest._retry = true;
 
     const currentToken = localStorage.getItem("cei_token");
     if (!currentToken) {
-      window.location.href = "/login?reason=session_expired";
-      return Promise.reject(error);
+      return Promise.reject(sessionExpired());
     }
 
     // Single refresh pipeline
@@ -167,15 +183,17 @@ api.interceptors.response.use(
       isRefreshing = true;
       refreshPromise = (async () => {
         try {
+          // Fix #1: refresh must NOT depend on (possibly expired) Authorization header.
+          // Refresh cookie (HttpOnly) is the source of truth.
           const resp = await axios.post(
             `${baseURL}/auth/refresh`,
             {},
             {
               withCredentials: true,
-              headers: { Authorization: `Bearer ${currentToken}` },
               timeout: 8000,
             }
           );
+
           const newToken = (resp.data as any)?.access_token as string | undefined;
           if (!newToken) {
             throw new Error("No access_token in refresh response");
@@ -185,11 +203,11 @@ api.interceptors.response.use(
         } catch (e) {
           // Attach request_id if refresh failed
           attachRequestId(e);
-          localStorage.removeItem("cei_token");
-          window.location.href = "/login?reason=session_expired";
-          throw e;
+          throw sessionExpired();
         } finally {
+          // Fix #2: reset the pipeline completely
           isRefreshing = false;
+          refreshPromise = null;
         }
       })();
     }
@@ -222,10 +240,7 @@ function safeStringify(val: unknown): string {
 }
 
 function getApiErrorMessage(err: unknown, fallback: string): string {
-  const rid =
-    (err as any)?.cei_request_id ||
-    getRequestIdFromAxiosError(err) ||
-    null;
+  const rid = (err as any)?.cei_request_id || getRequestIdFromAxiosError(err) || null;
 
   if (axios.isAxiosError(err)) {
     const data: any = err.response?.data;
@@ -237,13 +252,11 @@ function getApiErrorMessage(err: unknown, fallback: string): string {
     }
 
     if (data?.message != null) {
-      const msg =
-        typeof data.message === "string" ? data.message : safeStringify(data.message);
+      const msg = typeof data.message === "string" ? data.message : safeStringify(data.message);
       return appendSupportCode(msg || fallback, rid);
     }
 
-    const axMsg =
-      typeof (err as any)?.message === "string" ? (err as any).message : "";
+    const axMsg = typeof (err as any)?.message === "string" ? (err as any).message : "";
     return appendSupportCode(axMsg || fallback, rid);
   }
 
@@ -427,9 +440,7 @@ export interface IngestHealthResponse {
   meters: IngestHealthMeter[];
 }
 
-export async function getIngestHealth(
-  windowHours: number = 24
-): Promise<IngestHealthResponse> {
+export async function getIngestHealth(windowHours: number = 24): Promise<IngestHealthResponse> {
   const res = await api.get<IngestHealthResponse>("/timeseries/ingest_health", {
     params: { window_hours: windowHours },
   });
@@ -525,9 +536,7 @@ export async function getAccountMe(): Promise<AccountMe> {
   return resp.data;
 }
 
-export async function updateOrgSettings(
-  payload: OrgSettingsUpdateRequest
-): Promise<AccountMe> {
+export async function updateOrgSettings(payload: OrgSettingsUpdateRequest): Promise<AccountMe> {
   try {
     const response = await api.patch<AccountMe>("/account/org-settings", payload);
     return response.data;
@@ -762,10 +771,7 @@ export async function leaveOrg(): Promise<{
   }
 }
 
-export async function offboardOrg(params: {
-  mode: OffboardMode;
-  org_id?: number;
-}): Promise<any> {
+export async function offboardOrg(params: { mode: OffboardMode; org_id?: number }): Promise<any> {
   const { mode, org_id } = params || ({} as any);
 
   const query: Record<string, string | number> = { mode };
@@ -835,9 +841,7 @@ export interface ManualOpportunity {
   description: string | null;
 }
 
-export async function getManualOpportunities(
-  siteId: number | string
-): Promise<ManualOpportunity[]> {
+export async function getManualOpportunities(siteId: number | string): Promise<ManualOpportunity[]> {
   const idStr = String(siteId);
   const resp = await api.get<ManualOpportunity[]>(
     `/sites/${idStr}/opportunities/manual`

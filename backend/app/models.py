@@ -207,17 +207,32 @@ class TimeseriesRecord(Base):
     __tablename__ = "timeseries_record"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # NOTE: site_id remains string key (e.g. "site-23") as per your current CEI design
     site_id = Column(String, nullable=False, index=True)
     meter_id = Column(String, nullable=False)
+
     timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
     value = Column(Numeric, nullable=False)
     unit = Column(String, nullable=False)
+
+    # NEW: org-scoped ingestion + observability
+    organization_id = Column("org_id", Integer, nullable=True, index=True)
+    idempotency_key = Column(String(128), nullable=True, index=True)
+    source = Column(String(64), nullable=True)
 
     # ✅ Cross-DB default
     created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
 
     __table_args__ = (
+        # existing
         Index("ix_timeseries_site_timestamp", "site_id", "timestamp"),
+
+        # NEW: fast org-scoped reads for analytics/alerts
+        Index("ix_timeseries_org_site_timestamp", "org_id", "site_id", "timestamp"),
+
+        # NEW: idempotency guarantee per org
+        sa.UniqueConstraint("org_id", "idempotency_key", name="uq_ts_org_idem"),
     )
 
 
