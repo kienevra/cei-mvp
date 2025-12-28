@@ -193,6 +193,32 @@ def _parse_timestamp_utc(raw: str) -> datetime:
     raise ValueError(f"Invalid timestamp format: {raw}")
 
 
+def _site_org_filter(db: Session, *, org_id: int):
+    """
+    Build a SQLAlchemy filter that scopes Site rows to an org, without assuming
+    the FK field name.
+
+    Supported:
+      - Site.organization_id
+      - Site.org_id
+      - Site.organization relationship (Organization.id)
+    """
+    if hasattr(Site, "organization_id"):
+        return Site.organization_id == org_id  # type: ignore[attr-defined]
+    if hasattr(Site, "org_id"):
+        return Site.org_id == org_id  # type: ignore[attr-defined]
+    if hasattr(Site, "organization"):
+        return Site.organization.has(id=org_id)  # type: ignore[attr-defined]
+    # If your model is *really* different, fail loudly.
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={
+            "type": "site_model_missing_org_scope",
+            "message": "Site model has no organization scoping field/relationship (expected organization_id/org_id/organization).",
+        },
+    )
+
+
 def _validate_forced_site_belongs_to_org(
     db: Session,
     *,
@@ -202,8 +228,8 @@ def _validate_forced_site_belongs_to_org(
     """
     Ensure forced_site_id exists for this org.
 
-    IMPORTANT: Your Site model uses numeric primary key `Site.id`.
-    Your API's external key is 'site-<id>'. So we validate using Site.id.
+    IMPORTANT: Your API uses external key 'site-<id>' and your Site model uses
+    numeric primary key `Site.id`. So we validate using Site.id + org scoping.
     """
     normalized, numeric_id = _parse_site_key(forced_site_id)
 
@@ -220,13 +246,13 @@ def _validate_forced_site_belongs_to_org(
     site = (
         db.query(Site)
         .filter(Site.id == numeric_id)
-        .filter(Site.organization_id == org_id)
+        .filter(_site_org_filter(db, org_id=org_id))
         .first()
     )
     if site is None:
         allowed = (
             db.query(Site.id)
-            .filter(Site.organization_id == org_id)
+            .filter(_site_org_filter(db, org_id=org_id))
             .order_by(Site.id.asc())
             .all()
         )
