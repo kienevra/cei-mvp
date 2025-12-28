@@ -209,7 +209,6 @@ def _site_org_filter(db: Session, *, org_id: int):
         return Site.org_id == org_id  # type: ignore[attr-defined]
     if hasattr(Site, "organization"):
         return Site.organization.has(id=org_id)  # type: ignore[attr-defined]
-    # If your model is *really* different, fail loudly.
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail={
@@ -402,9 +401,10 @@ async def upload_csv(
             rows_failed += 1
             if len(errors) < 20:
                 errors.append(f"Row {rows_received}: {e}")
+            # Do NOT pass request_id via extra: RequestIdFilter already injects it.
             logger.exception(
                 "Failed to ingest CSV row",
-                extra={"request_id": get_request_id(), "row": rows_received},
+                extra={"row": rows_received},
             )
 
     if records:
@@ -413,10 +413,10 @@ async def upload_csv(
             db.commit()
         except Exception:
             db.rollback()
+            # Do NOT pass request_id via extra: RequestIdFilter already injects it.
             logger.exception(
                 "CSV upload commit failed",
                 extra={
-                    "request_id": get_request_id(),
                     "rows_ingested": rows_ingested,
                     "rows_received": rows_received,
                 },
