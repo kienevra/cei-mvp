@@ -1,6 +1,6 @@
 # backend/app/api/v1/upload_csv.py
 
-from typing import List, Set, Optional, Dict, Any
+from typing import List, Set, Optional, Dict, Any, Tuple
 
 import csv
 import io
@@ -139,10 +139,26 @@ def _coerce_site_id(value: str) -> str:
         return ""
     if v.startswith("site-"):
         return v
-    # numeric?
     if v.isdigit():
         return f"site-{v}"
     return v
+
+
+def _parse_site_key(site_key: str) -> Tuple[str, Optional[int]]:
+    """
+    Return (normalized_site_key, numeric_id_if_present).
+
+    Examples:
+      - "site-26" -> ("site-26", 26)
+      - "26"      -> ("site-26", 26)
+      - "foo"     -> ("foo", None)
+    """
+    sk = _coerce_site_id(site_key)
+    if sk.startswith("site-"):
+        tail = sk.split("site-", 1)[1]
+        if tail.isdigit():
+            return sk, int(tail)
+    return sk, None
 
 
 def _parse_timestamp_utc(raw: str) -> datetime:
@@ -157,11 +173,9 @@ def _parse_timestamp_utc(raw: str) -> datetime:
     if not s:
         raise ValueError("Empty timestamp")
 
-    # ISO with 'Z' suffix
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
 
-    # ISO first
     try:
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
@@ -170,7 +184,6 @@ def _parse_timestamp_utc(raw: str) -> datetime:
     except ValueError:
         pass
 
-    # Fallback: 'YYYY-MM-DD HH:MM:SS' assumed UTC
     try:
         dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
         return dt.replace(tzinfo=timezone.utc)
@@ -180,30 +193,50 @@ def _parse_timestamp_utc(raw: str) -> datetime:
     raise ValueError(f"Invalid timestamp format: {raw}")
 
 
-def _validate_forced_site_belongs_to_org(db: Session, *, forced_site_id: str, org_id: int) -> None:
+def _validate_forced_site_belongs_to_org(
+    db: Session,
+    *,
+    forced_site_id: str,
+    org_id: int,
+) -> None:
     """
-    Ensure forced_site_id exists for this org, otherwise fail with a useful error.
+    Ensure forced_site_id exists for this org.
+
+    IMPORTANT: Your Site model uses numeric primary key `Site.id`.
+    Your API's external key is 'site-<id>'. So we validate using Site.id.
     """
+    normalized, numeric_id = _parse_site_key(forced_site_id)
+
+    if numeric_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "type": "invalid_site_id_format",
+                "message": "site_id must look like 'site-<number>' (e.g. site-26).",
+                "site_id": forced_site_id,
+            },
+        )
+
     site = (
         db.query(Site)
-        .filter(Site.site_id == forced_site_id)
+        .filter(Site.id == numeric_id)
         .filter(Site.organization_id == org_id)
         .first()
     )
     if site is None:
         allowed = (
-            db.query(Site.site_id)
+            db.query(Site.id)
             .filter(Site.organization_id == org_id)
             .order_by(Site.id.asc())
             .all()
         )
-        allowed_ids = [row[0] for row in allowed]
+        allowed_ids = [f"site-{row[0]}" for row in allowed]
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "type": "unknown_site_for_org",
-                "message": f"site_id '{forced_site_id}' is not a site in your organization.",
-                "site_id": forced_site_id,
+                "message": f"site_id '{normalized}' is not a site in your organization.",
+                "site_id": normalized,
                 "allowed_site_ids": allowed_ids[:50],
             },
         )
@@ -238,11 +271,9 @@ async def upload_csv(
       - If `site_id` query param is provided, the CSV does NOT need site_id column.
       - If the CSV does contain site_id in that mode, it is ignored for routing.
     """
-
-    if not file.filename.lower().endswith(".csv"):
+    if not (file.filename or "").lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only .csv files are supported")
 
-    # Normalize / validate forced site_id
     forced_site_id: Optional[str] = None
     if site_id is not None:
         cleaned = site_id.strip()
@@ -254,10 +285,10 @@ async def upload_csv(
         forced_site_id = _coerce_site_id(cleaned)
 
         # Hard validation: forced site must belong to org
-        # (This prevents silent ingests into a nonsense key.)
-        _validate_forced_site_belongs_to_org(db, forced_site_id=forced_site_id, org_id=user.organization_id)
+        _validate_forced_site_belongs_to_org(
+            db, forced_site_id=forced_site_id, org_id=user.organization_id
+        )
 
-    # Decode bytes -> text
     raw_bytes = await file.read()
     try:
         text = raw_bytes.decode("utf-8-sig")
@@ -269,10 +300,8 @@ async def upload_csv(
     if not reader.fieldnames:
         raise HTTPException(status_code=400, detail="CSV file has no header row")
 
-    raw_fieldnames = reader.fieldnames
-    canonical_map = _build_canonical_header_map(raw_fieldnames)
+    canonical_map = _build_canonical_header_map(reader.fieldnames)
 
-    # For per-site upload, relax required set: site_id column optional.
     if forced_site_id is not None:
         required = REQUIRED_COLUMNS - {"site_id"}
     else:
@@ -288,7 +317,6 @@ async def upload_csv(
     meter_ids: Set[str] = set()
     records: List[TimeseriesRecord] = []
 
-    # Ingest context
     org_id = user.organization_id
     source = "csv"
 
@@ -320,7 +348,6 @@ async def upload_csv(
 
             unit = raw_unit or DEFAULT_UNIT
 
-            # Resolve site_id
             if forced_site_id is not None:
                 site_id_value = forced_site_id
             else:
@@ -349,13 +376,11 @@ async def upload_csv(
             rows_failed += 1
             if len(errors) < 20:
                 errors.append(f"Row {rows_received}: {e}")
-            # Include request_id correlation in logs
             logger.exception(
                 "Failed to ingest CSV row",
                 extra={"request_id": get_request_id(), "row": rows_received},
             )
 
-    # Persist in one transaction
     if records:
         try:
             db.add_all(records)
@@ -364,7 +389,11 @@ async def upload_csv(
             db.rollback()
             logger.exception(
                 "CSV upload commit failed",
-                extra={"request_id": get_request_id(), "rows_ingested": rows_ingested, "rows_received": rows_received},
+                extra={
+                    "request_id": get_request_id(),
+                    "rows_ingested": rows_ingested,
+                    "rows_received": rows_received,
+                },
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
