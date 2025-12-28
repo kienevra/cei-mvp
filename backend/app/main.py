@@ -207,9 +207,10 @@ async def request_observability(request: Request, call_next):
 
         # Preserve your current behavior for true unhandled exceptions:
         # log full traceback and return a JSON 500 payload (but now with stable code/message too).
+        #
+        # NOTE: Do NOT pass request_id via logger extra here; the RequestIdFilter injects it.
         logger.error(
-            "Unhandled error request_id=%s method=%s path=%s error=%s",
-            request_id,
+            "Unhandled error method=%s path=%s error=%s",
             request.method,
             request.url.path,
             str(e),
