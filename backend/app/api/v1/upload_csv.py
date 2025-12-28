@@ -18,6 +18,7 @@ from fastapi import (
 )
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy.inspection import inspect
 
 from app.api.v1.auth import get_current_user
 from app.db.session import get_db
@@ -193,7 +194,7 @@ def _parse_timestamp_utc(raw: str) -> datetime:
     raise ValueError(f"Invalid timestamp format: {raw}")
 
 
-def _site_org_filter(db: Session, *, org_id: int):
+def _site_org_filter(*, org_id: int):
     """
     Build a SQLAlchemy filter that scopes Site rows to an org, without assuming
     the FK field name.
@@ -245,13 +246,13 @@ def _validate_forced_site_belongs_to_org(
     site = (
         db.query(Site)
         .filter(Site.id == numeric_id)
-        .filter(_site_org_filter(db, org_id=org_id))
+        .filter(_site_org_filter(org_id=org_id))
         .first()
     )
     if site is None:
         allowed = (
             db.query(Site.id)
-            .filter(_site_org_filter(db, org_id=org_id))
+            .filter(_site_org_filter(org_id=org_id))
             .order_by(Site.id.asc())
             .all()
         )
@@ -265,6 +266,81 @@ def _validate_forced_site_belongs_to_org(
                 "allowed_site_ids": allowed_ids[:50],
             },
         )
+
+
+def _mapped_keys(model) -> Set[str]:
+    """
+    Return keys that SQLAlchemy will accept in model(**kwargs).
+    This is the only safe source of truth (hasattr() can lie).
+    """
+    try:
+        mapper = inspect(model)
+        # mapper.attrs includes columns + relationships; relationships generally
+        # accept assignment too, but we only pass scalar-ish fields anyway.
+        return set(mapper.attrs.keys())
+    except Exception:
+        # Extremely defensive fallback
+        keys: Set[str] = set()
+        for k in dir(model):
+            if not k.startswith("_"):
+                keys.add(k)
+        return keys
+
+
+def _build_timeseries_record_kwargs(
+    *,
+    org_id: int,
+    site_id: str,
+    meter_id: str,
+    ts: datetime,
+    value: Decimal,
+    unit: str,
+    source: str,
+) -> Dict[str, Any]:
+    """
+    Build kwargs for TimeseriesRecord in a schema-tolerant way.
+
+    We ONLY include keys that are actually mapped by SQLAlchemy, to avoid
+    "'org_id' is an invalid keyword argument" in prod.
+    """
+    keys = _mapped_keys(TimeseriesRecord)
+    kwargs: Dict[str, Any] = {}
+
+    # Required-ish fields
+    if "site_id" in keys:
+        kwargs["site_id"] = site_id
+    if "meter_id" in keys:
+        kwargs["meter_id"] = meter_id
+    if "value" in keys:
+        kwargs["value"] = value
+
+    # Timestamp naming drift
+    if "timestamp" in keys:
+        kwargs["timestamp"] = ts
+    elif "timestamp_utc" in keys:
+        kwargs["timestamp_utc"] = ts
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "type": "timeseries_model_missing_timestamp",
+                "message": "TimeseriesRecord model missing timestamp field (expected timestamp or timestamp_utc).",
+            },
+        )
+
+    # Optional fields (schema-dependent)
+    if "unit" in keys:
+        kwargs["unit"] = unit
+    if "source" in keys:
+        kwargs["source"] = source
+
+    # Org scoping drift: could be org_id or organization_id
+    if "org_id" in keys:
+        kwargs["org_id"] = org_id
+    elif "organization_id" in keys:
+        kwargs["organization_id"] = org_id
+
+    return kwargs
 
 
 @router.post(
@@ -283,7 +359,7 @@ async def upload_csv(
     site_id: Optional[str] = None,
 ):
     """
-    Upload a CSV of timeseries data and ingest into TimeseriesRecord (org-scoped).
+    Upload a CSV of timeseries data and ingest into TimeseriesRecord.
 
     Canonical schema (recommended):
       - timestamp_utc
@@ -309,7 +385,6 @@ async def upload_csv(
             )
         forced_site_id = _coerce_site_id(cleaned)
 
-        # Hard validation: forced site must belong to org
         _validate_forced_site_belongs_to_org(
             db, forced_site_id=forced_site_id, org_id=user.organization_id
         )
@@ -344,6 +419,7 @@ async def upload_csv(
 
     org_id = user.organization_id
     source = "csv"
+    rid = get_request_id()
 
     for row in reader:
         rows_received += 1
@@ -382,15 +458,17 @@ async def upload_csv(
 
             meter_id_value = raw_meter or DEFAULT_METER_ID
 
-            rec = TimeseriesRecord(
+            rec_kwargs = _build_timeseries_record_kwargs(
                 org_id=org_id,
                 site_id=site_id_value,
                 meter_id=meter_id_value,
-                timestamp=ts,
+                ts=ts,
                 value=val,
                 unit=unit,
                 source=source,
             )
+
+            rec = TimeseriesRecord(**rec_kwargs)
             records.append(rec)
 
             site_ids.add(site_id_value)
@@ -401,10 +479,10 @@ async def upload_csv(
             rows_failed += 1
             if len(errors) < 20:
                 errors.append(f"Row {rows_received}: {e}")
-            # Do NOT pass request_id via extra: RequestIdFilter already injects it.
             logger.exception(
-                "Failed to ingest CSV row",
-                extra={"row": rows_received},
+                "Failed to ingest CSV row request_id=%s row=%s",
+                rid,
+                rows_received,
             )
 
     if records:
@@ -413,20 +491,18 @@ async def upload_csv(
             db.commit()
         except Exception:
             db.rollback()
-            # Do NOT pass request_id via extra: RequestIdFilter already injects it.
             logger.exception(
-                "CSV upload commit failed",
-                extra={
-                    "rows_ingested": rows_ingested,
-                    "rows_received": rows_received,
-                },
+                "CSV upload commit failed request_id=%s rows_ingested=%s rows_received=%s",
+                rid,
+                rows_ingested,
+                rows_received,
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
                     "type": "db_commit_failed",
                     "message": "Failed to commit ingested rows. See server logs for request_id.",
-                    "request_id": get_request_id(),
+                    "request_id": rid,
                 },
             )
 
