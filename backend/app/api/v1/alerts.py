@@ -238,6 +238,25 @@ def _resolve_org_context(user: Any) -> Tuple[Optional[int], Optional[Set[str]]]:
     return organization_id, allowed_site_ids
 
 
+def _normalize_site_id_param(raw: Optional[str]) -> Optional[str]:
+    """
+    Accepts:
+      - 'site-3'
+      - '3'
+      - '  site-3  '
+    Returns canonical 'site-<n>' when numeric is extractable, otherwise returns trimmed raw.
+    """
+    if raw is None:
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    n = _try_parse_site_numeric_id(s)
+    if n is not None:
+        return f"site-{n}"
+    return s
+
+
 @router.get(
     "/",
     response_model=List[AlertOut],
@@ -249,6 +268,10 @@ def list_alerts(
         ge=1,
         le=24 * 30,
         description="Look-back window in hours (e.g. 24, 168 for 7 days).",
+    ),
+    site_id: Optional[str] = Query(
+        None,
+        description="Optional timeseries site_id filter (e.g. 'site-1' or '1').",
     ),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
@@ -270,6 +293,9 @@ def list_alerts(
     Phase 4.1:
     - When this endpoint is called, alerts are best-effort persisted into
       alert_events + site_events for history/workflow.
+
+    IMPORTANT:
+    - If site_id is provided, this endpoint MUST only return alerts for that site.
     """
 
     # --- Plan / feature gating ---
@@ -294,15 +320,36 @@ def list_alerts(
     if window_hours > 24 * 30:
         window_hours = 24 * 30
 
+    normalized_site_id = _normalize_site_id_param(site_id)
+
+    # If caller asked for a site_id and we have an allow-list, enforce it.
+    if normalized_site_id and allowed_site_ids is not None:
+        if normalized_site_id not in allowed_site_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this site_id.",
+            )
+
     alerts = _generate_alerts_for_window(
         db=db,
         window_hours=window_hours,
         allowed_site_ids=allowed_site_ids,
+        site_id=normalized_site_id,
         persist_events=True,  # Phase 4.1: append-only history
         organization_id=organization_id,
         user_id=user_id,
     )
-    logger.info("Generated %d alerts for window_hours=%s", len(alerts), window_hours)
+
+    # Defensive: guarantee we only return requested site_id
+    if normalized_site_id:
+        alerts = [a for a in alerts if a.site_id == normalized_site_id]
+
+    logger.info(
+        "Generated %d alerts for window_hours=%s site_id=%s",
+        len(alerts),
+        window_hours,
+        normalized_site_id,
+    )
     return alerts
 
 
@@ -632,6 +679,7 @@ def _generate_alerts_for_window(
     window_hours: int,
     allowed_site_ids: Optional[Set[str]] = None,
     *,
+    site_id: Optional[str] = None,
     persist_events: bool = False,
     organization_id: Optional[int] = None,
     user_id: Optional[int] = None,
@@ -640,6 +688,17 @@ def _generate_alerts_for_window(
     # In that case, the correct behavior is a clean slate: no alerts.
     if allowed_site_ids is not None and len(allowed_site_ids) == 0:
         return []
+
+    # If caller passed a site_id, enforce allow-list too (defense in depth).
+    if site_id and allowed_site_ids is not None and site_id not in allowed_site_ids:
+        return []
+
+    # Intersect allow-list with the requested site_id, if present.
+    effective_site_ids: Optional[Set[str]] = None
+    if site_id:
+        effective_site_ids = {site_id}
+    elif allowed_site_ids:
+        effective_site_ids = set(allowed_site_ids)
 
     now = datetime.utcnow()
     window_start = now - timedelta(hours=window_hours)
@@ -658,8 +717,8 @@ def _generate_alerts_for_window(
         .filter(TimeseriesRecord.timestamp >= window_start)
     )
 
-    if allowed_site_ids:
-        stats_query = stats_query.filter(TimeseriesRecord.site_id.in_(allowed_site_ids))
+    if effective_site_ids:
+        stats_query = stats_query.filter(TimeseriesRecord.site_id.in_(effective_site_ids))
 
     stats_rows = stats_query.group_by(TimeseriesRecord.site_id).all()
 
@@ -669,23 +728,23 @@ def _generate_alerts_for_window(
     # --- Precompute statistical insights per site (baseline engine) ---
     insights_by_site: Dict[str, Dict[str, Any]] = {}
     for row in stats_rows:
-        site_id = row.site_id or "unknown"
+        sid = row.site_id or "unknown"
         try:
             insights = compute_site_insights(
                 db=db,
-                site_id=site_id,
+                site_id=sid,
                 window_hours=window_hours,
                 # rely on default lookback_days=30 for now
                 as_of=now,
             )
         except Exception:
-            logger.exception("Failed to compute insights for site_id=%s", site_id)
+            logger.exception("Failed to compute insights for site_id=%s", sid)
             insights = None
 
         if insights:
-            insights_by_site[site_id] = insights
+            insights_by_site[sid] = insights
 
-    # Aggregate portfolio numbers
+    # Aggregate portfolio numbers (still useful for relative_share even when site-filtered)
     portfolio_total = float(sum((row.total_value or 0) for row in stats_rows))
     total_sites = len(stats_rows)
     portfolio_avg_per_site = portfolio_total / total_sites if total_sites > 0 else 0.0
@@ -700,8 +759,8 @@ def _generate_alerts_for_window(
         .filter(TimeseriesRecord.timestamp >= window_start)
     )
 
-    if allowed_site_ids:
-        points_query = points_query.filter(TimeseriesRecord.site_id.in_(allowed_site_ids))
+    if effective_site_ids:
+        points_query = points_query.filter(TimeseriesRecord.site_id.in_(effective_site_ids))
 
     point_rows = points_query.all()
 
@@ -712,14 +771,14 @@ def _generate_alerts_for_window(
     buckets_by_site: Dict[str, Dict[str, float]] = {}
 
     for row in point_rows:
-        site_id = row.site_id or "unknown"
+        sid = row.site_id or "unknown"
         ts: datetime = row.timestamp
         try:
             val = float(row.value or 0)
         except Exception:
             val = 0.0
 
-        bucket = buckets_by_site.get(site_id)
+        bucket = buckets_by_site.get(sid)
         if bucket is None:
             bucket = {
                 "night_sum": 0.0,
@@ -731,7 +790,7 @@ def _generate_alerts_for_window(
                 "weekend_sum": 0.0,
                 "weekend_count": 0.0,
             }
-            buckets_by_site[site_id] = bucket
+            buckets_by_site[sid] = bucket
 
         hour = ts.hour
         if hour in night_hours:
@@ -757,23 +816,23 @@ def _generate_alerts_for_window(
     alert_id_counter = 1
 
     for row in stats_rows:
-        site_id = row.site_id or "unknown"
+        sid = row.site_id or "unknown"
         total_value = float(row.total_value or 0)
         points = int(row.points or 0)
         avg_value = float(row.avg_value or 0)
         max_value = float(row.max_value or 0)
-        min_value = float(row.min_value or 0)  # reserved for future rules
+        _min_value = float(row.min_value or 0)  # reserved for future rules
         last_ts = row.last_ts or now
-        site_name = site_name_map.get(site_id)
+        site_name = site_name_map.get(sid)
 
-        thresholds = get_thresholds_for_site(site_id)
+        thresholds = get_thresholds_for_site(sid)
 
         # Skip sites with too little data
         if points < thresholds.min_points or total_value <= thresholds.min_total_kwh:
             continue
 
         # Pull bucketed stats if we have them
-        bucket = buckets_by_site.get(site_id, {})
+        bucket = buckets_by_site.get(sid, {})
         night_sum = float(bucket.get("night_sum", 0.0))
         night_count = float(bucket.get("night_count", 0.0))
         day_sum = float(bucket.get("day_sum", 0.0))
@@ -789,15 +848,11 @@ def _generate_alerts_for_window(
         avg_weekend = weekend_sum / weekend_count if weekend_count > 0 else 0.0
 
         # Flattened statistical context for this site (if any)
-        insights = insights_by_site.get(site_id)
+        insights = insights_by_site.get(sid)
         stats_ctx = _build_stats_context_from_insights(insights)
 
         # ---------- Rule 1: Night-time baseline too high ----------
-
-        if avg_day > 0:
-            night_ratio = avg_night / avg_day if avg_day > 0 else 0.0
-        else:
-            night_ratio = 0.0
+        night_ratio = (avg_night / avg_day) if avg_day > 0 else 0.0
 
         # Only consider sites that matter at portfolio level
         is_material = portfolio_total > 0 and total_value >= 0.2 * portfolio_total
@@ -806,12 +861,12 @@ def _generate_alerts_for_window(
             alerts.append(
                 AlertOut(
                     id=f"{alert_id_counter}",
-                    site_id=site_id,
+                    site_id=sid,
                     site_name=site_name,
                     severity="critical",
                     title="High night-time baseline",
                     message=(
-                        f"{site_name or site_id} has a night-time baseline at "
+                        f"{site_name or sid} has a night-time baseline at "
                         f"{night_ratio:.0%} of the day-time average over the last {window_hours}h. "
                         "This usually indicates significant idle losses (compressors, HVAC, lines left on)."
                     ),
@@ -826,12 +881,12 @@ def _generate_alerts_for_window(
             alerts.append(
                 AlertOut(
                     id=f"{alert_id_counter}",
-                    site_id=site_id,
+                    site_id=sid,
                     site_name=site_name,
                     severity="warning",
                     title="Elevated night-time baseline",
                     message=(
-                        f"{site_name or site_id} shows a night-time baseline at "
+                        f"{site_name or sid} shows a night-time baseline at "
                         f"{night_ratio:.0%} of day-time average over the last {window_hours}h. "
                         "There is likely low-hanging fruit in shutdown procedures."
                     ),
@@ -851,12 +906,12 @@ def _generate_alerts_for_window(
                 alerts.append(
                     AlertOut(
                         id=f"{alert_id_counter}",
-                        site_id=site_id,
+                        site_id=sid,
                         site_name=site_name,
                         severity="warning",
                         title="Short-term peak significantly above typical load",
                         message=(
-                            f"{site_name or site_id} has a peak hour at {max_value:.1f} kWh, "
+                            f"{site_name or sid} has a peak hour at {max_value:.1f} kWh, "
                             f"which is {spike_ratio:.1f}x the average for the last {window_hours}h. "
                             "Check for overlapping batches, start-up procedures, or one-off events."
                         ),
@@ -876,12 +931,12 @@ def _generate_alerts_for_window(
                 alerts.append(
                     AlertOut(
                         id=f"{alert_id_counter}",
-                        site_id=site_id,
+                        site_id=sid,
                         site_name=site_name,
                         severity="critical",
                         title="Weekend baseline close to weekday levels",
                         message=(
-                            f"{site_name or site_id} shows weekend consumption at "
+                            f"{site_name or sid} shows weekend consumption at "
                             f"{weekend_ratio:.0%} of weekday average over the last {window_hours}h. "
                             "This usually indicates large portions of the plant stay energized through weekends."
                         ),
@@ -896,12 +951,12 @@ def _generate_alerts_for_window(
                 alerts.append(
                     AlertOut(
                         id=f"{alert_id_counter}",
-                        site_id=site_id,
+                        site_id=sid,
                         site_name=site_name,
                         severity="warning",
                         title="Elevated weekend baseline",
                         message=(
-                            f"{site_name or site_id} has weekend consumption at "
+                            f"{site_name or sid} has weekend consumption at "
                             f"{weekend_ratio:.0%} of weekday average over the last {window_hours}h. "
                             "Review weekend shutdown procedures and auxiliary loads."
                         ),
@@ -920,12 +975,12 @@ def _generate_alerts_for_window(
                 alerts.append(
                     AlertOut(
                         id=f"{alert_id_counter}",
-                        site_id=site_id,
+                        site_id=sid,
                         site_name=site_name,
                         severity="info",
                         title="Site dominates portfolio energy",
                         message=(
-                            f"{site_name or site_id} is consuming {share:.1f}% of portfolio "
+                            f"{site_name or sid} is consuming {share:.1f}% of portfolio "
                             f"energy over the last {window_hours}h. This is a natural candidate "
                             "for deeper opportunity hunting and focused projects."
                         ),
@@ -996,12 +1051,12 @@ def _generate_alerts_for_window(
                             alerts.append(
                                 AlertOut(
                                     id=f"{alert_id_counter}",
-                                    site_id=site_id,
+                                    site_id=sid,
                                     site_name=site_name,
                                     severity="critical",
                                     title="Forecast: high night-time baseline next 24h",
                                     message=(
-                                        f"{site_name or site_id} is projected to run with a night-time "
+                                        f"{site_name or sid} is projected to run with a night-time "
                                         f"baseline at {forecast_night_ratio:.0%} of the day-time forecast "
                                         "over the next 24h. Without changes, off-shift hours are likely to "
                                         "carry significant idle losses."
@@ -1017,12 +1072,12 @@ def _generate_alerts_for_window(
                             alerts.append(
                                 AlertOut(
                                     id=f"{alert_id_counter}",
-                                    site_id=site_id,
+                                    site_id=sid,
                                     site_name=site_name,
                                     severity="warning",
                                     title="Forecast: elevated night-time baseline next 24h",
                                     message=(
-                                        f"{site_name or site_id} is forecast to have night-time consumption at "
+                                        f"{site_name or sid} is forecast to have night-time consumption at "
                                         f"{forecast_night_ratio:.0%} of day-time levels over the next 24h. "
                                         "Tighten shutdown procedures now to avoid avoidable off-shift waste."
                                     ),

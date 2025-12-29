@@ -1,10 +1,13 @@
 # backend/app/api/v1/upload_csv.py
 
+from __future__ import annotations
+
 from typing import List, Set, Optional, Dict, Any, Tuple
 
 import csv
 import io
 import logging
+import inspect
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
@@ -16,15 +19,15 @@ from fastapi import (
     UploadFile,
     status,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 
 from app.core.security import get_current_user
 from app.db.session import get_db
-from app.models import TimeseriesRecord, Site
+from app.models import Site
 from app.core.rate_limit import csv_upload_rate_limit
 from app.core.request_context import get_request_id
+from app.services.ingest import ingest_timeseries_batch
 
 logger = logging.getLogger("cei")
 
@@ -82,9 +85,9 @@ class CsvUploadResult(BaseModel):
     rows_ingested: int
     rows_failed: int
     rows_skipped_duplicate: int = 0
-    errors: List[str] = []
-    sample_site_ids: List[str] = []
-    sample_meter_ids: List[str] = []
+    errors: List[str] = Field(default_factory=list)
+    sample_site_ids: List[str] = Field(default_factory=list)
+    sample_meter_ids: List[str] = Field(default_factory=list)
 
 
 def _normalize_header_name(col: str) -> str:
@@ -232,71 +235,57 @@ def _validate_forced_site_belongs_to_org(
         )
 
 
-def _org_attr_name_on_timeseries() -> Optional[str]:
-    """
-    Your TimeseriesRecord defines:
-      organization_id = Column("org_id", ...)
-    So the python attribute is organization_id.
-    """
-    if hasattr(TimeseriesRecord, "organization_id"):
-        return "organization_id"
-    if hasattr(TimeseriesRecord, "org_id"):
-        return "org_id"
-    return None
-
-
-def _ts_attr_name_on_timeseries() -> str:
-    if hasattr(TimeseriesRecord, "timestamp"):
-        return "timestamp"
-    if hasattr(TimeseriesRecord, "timestamp_utc"):
-        return "timestamp_utc"
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={
-            "type": "timeseries_model_missing_timestamp",
-            "message": "TimeseriesRecord model missing timestamp field (expected timestamp or timestamp_utc).",
-        },
-    )
-
-
 def _build_csv_idempotency_key(*, org_id: int, site_id: str, meter_id: str, ts: datetime) -> str:
     ts_norm = ts.astimezone(timezone.utc).replace(microsecond=0).isoformat()
     key = f"csv:{org_id}:{site_id}:{meter_id}:{ts_norm}"
     return key[:128]
 
 
-def _build_timeseries_record_kwargs(
+def _call_ingest_timeseries_batch(
     *,
+    db: Session,
     org_id: int,
-    site_id: str,
-    meter_id: str,
-    ts: datetime,
-    value: Decimal,
-    unit: str,
+    records: List[Dict[str, Any]],
     source: str,
-    idempotency_key: str,
+    request_id: str,
 ) -> Dict[str, Any]:
-    kwargs: Dict[str, Any] = {
-        "site_id": site_id,
-        "meter_id": meter_id,
-        "value": value,
+    """
+    Calls app.services.ingest.ingest_timeseries_batch, but tolerates minor signature drift
+    by only passing args the function actually accepts.
+
+    Expected output (typical):
+      {"ingested": int, "skipped_duplicate": int, "failed": int, "errors": [..]}
+    """
+    sig = inspect.signature(ingest_timeseries_batch)
+    kwargs: Dict[str, Any] = {}
+
+    # common parameter names we’ve used across CEI iterations
+    candidates = {
+        "db": db,
+        "session": db,
+        "org_id": org_id,
+        "organization_id": org_id,
+        "records": records,
+        "source": source,
+        "request_id": request_id,
+        "rid": request_id,
     }
 
-    ts_field = _ts_attr_name_on_timeseries()
-    kwargs[ts_field] = ts
+    for name in sig.parameters.keys():
+        if name in candidates:
+            kwargs[name] = candidates[name]
 
-    if hasattr(TimeseriesRecord, "unit"):
-        kwargs["unit"] = unit
-    if hasattr(TimeseriesRecord, "source"):
-        kwargs["source"] = source
-    if hasattr(TimeseriesRecord, "idempotency_key"):
-        kwargs["idempotency_key"] = idempotency_key
+    result = ingest_timeseries_batch(**kwargs)
 
-    org_attr = _org_attr_name_on_timeseries()
-    if org_attr:
-        kwargs[org_attr] = org_id
+    if isinstance(result, dict):
+        return result
 
-    return kwargs
+    # last resort: allow returning a pydantic model / object with attrs
+    out: Dict[str, Any] = {}
+    for k in ("ingested", "skipped_duplicate", "failed", "errors"):
+        if hasattr(result, k):
+            out[k] = getattr(result, k)
+    return out
 
 
 @router.post(
@@ -323,7 +312,6 @@ async def upload_csv(
                 detail="site_id query parameter cannot be empty if provided.",
             )
         forced_site_id = _coerce_site_id(cleaned)
-
         _validate_forced_site_belongs_to_org(
             db, forced_site_id=forced_site_id, org_id=user.organization_id
         )
@@ -341,17 +329,11 @@ async def upload_csv(
 
     canonical_map = _build_canonical_header_map(reader.fieldnames)
 
-    if forced_site_id is not None:
-        required = REQUIRED_COLUMNS - {"site_id"}
-    else:
-        required = REQUIRED_COLUMNS
-
+    required = (REQUIRED_COLUMNS - {"site_id"}) if (forced_site_id is not None) else REQUIRED_COLUMNS
     _ensure_required_columns(canonical_map, required=required)
 
     rows_received = 0
-    rows_ingested = 0
     rows_failed = 0
-    rows_skipped_duplicate = 0
     errors: List[str] = []
     site_ids: Set[str] = set()
     meter_ids: Set[str] = set()
@@ -360,7 +342,8 @@ async def upload_csv(
     source = "csv"
     rid = get_request_id()
 
-    records: List[TimeseriesRecord] = []
+    # Build canonical ingest payload (NOT ORM instances)
+    payloads: List[Dict[str, Any]] = []
     seen_keys: Set[Tuple[str, str, datetime]] = set()
 
     for row in reader:
@@ -385,6 +368,7 @@ async def upload_csv(
             ts = _parse_timestamp_utc(raw_ts)
 
             try:
+                # keep Decimal to preserve precision; ingest layer can coerce as needed
                 val = Decimal(raw_value)
             except InvalidOperation:
                 raise ValueError(f"Invalid numeric value: {raw_value}")
@@ -400,9 +384,9 @@ async def upload_csv(
 
             meter_id_value = raw_meter or DEFAULT_METER_ID
 
+            # in-file dedupe (same timestamp/site/meter repeated in file)
             key = (site_id_value, meter_id_value, ts)
             if key in seen_keys:
-                rows_skipped_duplicate += 1
                 continue
             seen_keys.add(key)
 
@@ -410,17 +394,17 @@ async def upload_csv(
                 org_id=org_id, site_id=site_id_value, meter_id=meter_id_value, ts=ts
             )
 
-            rec_kwargs = _build_timeseries_record_kwargs(
-                org_id=org_id,
-                site_id=site_id_value,
-                meter_id=meter_id_value,
-                ts=ts,
-                value=val,
-                unit=unit,
-                source=source,
-                idempotency_key=idem,
+            payloads.append(
+                {
+                    "site_id": site_id_value,
+                    "meter_id": meter_id_value,
+                    # Keep name aligned with your Direct API contract; ingest layer should accept this.
+                    "timestamp_utc": ts.astimezone(timezone.utc).replace(microsecond=0).isoformat(),
+                    "value": str(val),  # safe across JSON-ish handling
+                    "unit": unit,
+                    "idempotency_key": idem,
+                }
             )
-            records.append(TimeseriesRecord(**rec_kwargs))
 
             site_ids.add(site_id_value)
             meter_ids.add(meter_id_value)
@@ -431,60 +415,52 @@ async def upload_csv(
                 errors.append(f"Row {rows_received}: {e}")
             logger.exception("Failed to parse CSV row request_id=%s row=%s", rid, rows_received)
 
-    if records:
-        try:
-            db.add_all(records)
-            db.commit()
-            rows_ingested += len(records)
+    # No valid payloads
+    if not payloads:
+        return CsvUploadResult(
+            rows_received=rows_received,
+            rows_ingested=0,
+            rows_failed=rows_failed,
+            rows_skipped_duplicate=0,
+            errors=errors,
+            sample_site_ids=sorted(site_ids)[:10],
+            sample_meter_ids=sorted(meter_ids)[:10],
+        )
 
-        except IntegrityError:
-            db.rollback()
-            for rec in records:
-                try:
-                    db.add(rec)
-                    db.flush()
-                    rows_ingested += 1
-                except IntegrityError:
-                    db.rollback()
-                    rows_skipped_duplicate += 1
-                except Exception:
-                    db.rollback()
-                    rows_failed += 1
-                    if len(errors) < 20:
-                        errors.append("Row insert failed during fallback insert.")
-                    logger.exception("CSV per-row insert failed request_id=%s", rid)
+    # Canonical ingest (same path as /timeseries/batch)
+    try:
+        ingest_result = _call_ingest_timeseries_batch(
+            db=db,
+            org_id=org_id,
+            records=payloads,
+            source=source,
+            request_id=rid,
+        )
+    except Exception:
+        logger.exception("CSV ingest_timeseries_batch failed request_id=%s", rid)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "type": "csv_ingest_failed",
+                "message": "CSV ingestion failed. See server logs for request_id.",
+                "request_id": rid,
+            },
+        )
 
-            try:
-                db.commit()
-            except Exception:
-                db.rollback()
-                logger.exception("CSV upload commit failed after fallback request_id=%s", rid)
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail={
-                        "type": "db_commit_failed",
-                        "message": "Failed to commit ingested rows. See server logs for request_id.",
-                        "request_id": rid,
-                    },
-                )
+    ingested = int(ingest_result.get("ingested", 0) or 0)
+    skipped = int(ingest_result.get("skipped_duplicate", 0) or 0)
+    failed = int(ingest_result.get("failed", 0) or 0)
 
-        except Exception:
-            db.rollback()
-            logger.exception("CSV upload commit failed request_id=%s", rid)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={
-                    "type": "db_commit_failed",
-                    "message": "Failed to commit ingested rows. See server logs for request_id.",
-                    "request_id": rid,
-                },
-            )
+    ingest_errors = ingest_result.get("errors") or []
+    if isinstance(ingest_errors, list):
+        for e in ingest_errors[: max(0, 20 - len(errors))]:
+            errors.append(str(e))
 
     return CsvUploadResult(
         rows_received=rows_received,
-        rows_ingested=rows_ingested,
-        rows_failed=rows_failed,
-        rows_skipped_duplicate=rows_skipped_duplicate,
+        rows_ingested=ingested,
+        rows_failed=rows_failed + failed,
+        rows_skipped_duplicate=skipped,
         errors=errors,
         sample_site_ids=sorted(site_ids)[:10],
         sample_meter_ids=sorted(meter_ids)[:10],
