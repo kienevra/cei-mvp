@@ -18,9 +18,9 @@ from fastapi import (
 )
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy.inspection import inspect
+from sqlalchemy.exc import IntegrityError
 
-from app.api.v1.auth import get_current_user
+from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models import TimeseriesRecord, Site
 from app.core.rate_limit import csv_upload_rate_limit
@@ -81,6 +81,7 @@ class CsvUploadResult(BaseModel):
     rows_received: int
     rows_ingested: int
     rows_failed: int
+    rows_skipped_duplicate: int = 0
     errors: List[str] = []
     sample_site_ids: List[str] = []
     sample_meter_ids: List[str] = []
@@ -102,12 +103,6 @@ def _ensure_required_columns(
     canonical_map: Dict[str, str],
     required: Optional[Set[str]] = None,
 ) -> None:
-    """
-    Validate that canonical header set contains all required columns.
-    Raises HTTPException with structured schema detail if missing.
-
-    For per-site uploads we relax the need for a site_id column.
-    """
     effective_required: Set[str] = required or REQUIRED_COLUMNS
     present = set(canonical_map.values())
 
@@ -130,11 +125,6 @@ def _ensure_required_columns(
 
 
 def _coerce_site_id(value: str) -> str:
-    """
-    Normalize site ids into canonical 'site-<int>' form where possible.
-    If already 'site-26' keep it.
-    If numeric '26' convert to 'site-26'.
-    """
     v = (value or "").strip()
     if not v:
         return ""
@@ -146,14 +136,6 @@ def _coerce_site_id(value: str) -> str:
 
 
 def _parse_site_key(site_key: str) -> Tuple[str, Optional[int]]:
-    """
-    Return (normalized_site_key, numeric_id_if_present).
-
-    Examples:
-      - "site-26" -> ("site-26", 26)
-      - "26"      -> ("site-26", 26)
-      - "foo"     -> ("foo", None)
-    """
     sk = _coerce_site_id(site_key)
     if sk.startswith("site-"):
         tail = sk.split("site-", 1)[1]
@@ -163,13 +145,6 @@ def _parse_site_key(site_key: str) -> Tuple[str, Optional[int]]:
 
 
 def _parse_timestamp_utc(raw: str) -> datetime:
-    """
-    Parse timestamps robustly and return timezone-aware UTC datetime.
-    Accepts:
-      - ISO8601 with Z (e.g. 2025-12-26T12:00:00Z)
-      - ISO8601 with offset
-      - 'YYYY-MM-DD HH:MM:SS' (assumed UTC)
-    """
     s = (raw or "").strip()
     if not s:
         raise ValueError("Empty timestamp")
@@ -194,15 +169,10 @@ def _parse_timestamp_utc(raw: str) -> datetime:
     raise ValueError(f"Invalid timestamp format: {raw}")
 
 
-def _site_org_filter(*, org_id: int):
+def _site_org_filter(db: Session, *, org_id: int):
     """
-    Build a SQLAlchemy filter that scopes Site rows to an org, without assuming
-    the FK field name.
-
-    Supported:
-      - Site.organization_id
-      - Site.org_id
-      - Site.organization relationship (Organization.id)
+    Your Site model uses `org_id` (not organization_id).
+    Keep this tolerant anyway.
     """
     if hasattr(Site, "organization_id"):
         return Site.organization_id == org_id  # type: ignore[attr-defined]
@@ -225,12 +195,6 @@ def _validate_forced_site_belongs_to_org(
     forced_site_id: str,
     org_id: int,
 ) -> None:
-    """
-    Ensure forced_site_id exists for this org.
-
-    IMPORTANT: Your API uses external key 'site-<id>' and your Site model uses
-    numeric primary key `Site.id`. So we validate using Site.id + org scoping.
-    """
     normalized, numeric_id = _parse_site_key(forced_site_id)
 
     if numeric_id is None:
@@ -246,13 +210,13 @@ def _validate_forced_site_belongs_to_org(
     site = (
         db.query(Site)
         .filter(Site.id == numeric_id)
-        .filter(_site_org_filter(org_id=org_id))
+        .filter(_site_org_filter(db, org_id=org_id))
         .first()
     )
     if site is None:
         allowed = (
             db.query(Site.id)
-            .filter(_site_org_filter(org_id=org_id))
+            .filter(_site_org_filter(db, org_id=org_id))
             .order_by(Site.id.asc())
             .all()
         )
@@ -268,23 +232,37 @@ def _validate_forced_site_belongs_to_org(
         )
 
 
-def _mapped_keys(model) -> Set[str]:
+def _org_attr_name_on_timeseries() -> Optional[str]:
     """
-    Return keys that SQLAlchemy will accept in model(**kwargs).
-    This is the only safe source of truth (hasattr() can lie).
+    Your TimeseriesRecord defines:
+      organization_id = Column("org_id", ...)
+    So the python attribute is organization_id.
     """
-    try:
-        mapper = inspect(model)
-        # mapper.attrs includes columns + relationships; relationships generally
-        # accept assignment too, but we only pass scalar-ish fields anyway.
-        return set(mapper.attrs.keys())
-    except Exception:
-        # Extremely defensive fallback
-        keys: Set[str] = set()
-        for k in dir(model):
-            if not k.startswith("_"):
-                keys.add(k)
-        return keys
+    if hasattr(TimeseriesRecord, "organization_id"):
+        return "organization_id"
+    if hasattr(TimeseriesRecord, "org_id"):
+        return "org_id"
+    return None
+
+
+def _ts_attr_name_on_timeseries() -> str:
+    if hasattr(TimeseriesRecord, "timestamp"):
+        return "timestamp"
+    if hasattr(TimeseriesRecord, "timestamp_utc"):
+        return "timestamp_utc"
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={
+            "type": "timeseries_model_missing_timestamp",
+            "message": "TimeseriesRecord model missing timestamp field (expected timestamp or timestamp_utc).",
+        },
+    )
+
+
+def _build_csv_idempotency_key(*, org_id: int, site_id: str, meter_id: str, ts: datetime) -> str:
+    ts_norm = ts.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+    key = f"csv:{org_id}:{site_id}:{meter_id}:{ts_norm}"
+    return key[:128]
 
 
 def _build_timeseries_record_kwargs(
@@ -296,49 +274,27 @@ def _build_timeseries_record_kwargs(
     value: Decimal,
     unit: str,
     source: str,
+    idempotency_key: str,
 ) -> Dict[str, Any]:
-    """
-    Build kwargs for TimeseriesRecord in a schema-tolerant way.
+    kwargs: Dict[str, Any] = {
+        "site_id": site_id,
+        "meter_id": meter_id,
+        "value": value,
+    }
 
-    We ONLY include keys that are actually mapped by SQLAlchemy, to avoid
-    "'org_id' is an invalid keyword argument" in prod.
-    """
-    keys = _mapped_keys(TimeseriesRecord)
-    kwargs: Dict[str, Any] = {}
+    ts_field = _ts_attr_name_on_timeseries()
+    kwargs[ts_field] = ts
 
-    # Required-ish fields
-    if "site_id" in keys:
-        kwargs["site_id"] = site_id
-    if "meter_id" in keys:
-        kwargs["meter_id"] = meter_id
-    if "value" in keys:
-        kwargs["value"] = value
-
-    # Timestamp naming drift
-    if "timestamp" in keys:
-        kwargs["timestamp"] = ts
-    elif "timestamp_utc" in keys:
-        kwargs["timestamp_utc"] = ts
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "type": "timeseries_model_missing_timestamp",
-                "message": "TimeseriesRecord model missing timestamp field (expected timestamp or timestamp_utc).",
-            },
-        )
-
-    # Optional fields (schema-dependent)
-    if "unit" in keys:
+    if hasattr(TimeseriesRecord, "unit"):
         kwargs["unit"] = unit
-    if "source" in keys:
+    if hasattr(TimeseriesRecord, "source"):
         kwargs["source"] = source
+    if hasattr(TimeseriesRecord, "idempotency_key"):
+        kwargs["idempotency_key"] = idempotency_key
 
-    # Org scoping drift: could be org_id or organization_id
-    if "org_id" in keys:
-        kwargs["org_id"] = org_id
-    elif "organization_id" in keys:
-        kwargs["organization_id"] = org_id
+    org_attr = _org_attr_name_on_timeseries()
+    if org_attr:
+        kwargs[org_attr] = org_id
 
     return kwargs
 
@@ -353,25 +309,8 @@ async def upload_csv(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
-    # Optional query param to force all rows into a specific site.
-    # Per-site uploads call:
-    #   POST /api/v1/upload-csv/?site_id=site-26
     site_id: Optional[str] = None,
 ):
-    """
-    Upload a CSV of timeseries data and ingest into TimeseriesRecord.
-
-    Canonical schema (recommended):
-      - timestamp_utc
-      - value
-      - site_id
-      - meter_id
-      - unit (optional; defaults to kWh)
-
-    Per-site upload:
-      - If `site_id` query param is provided, the CSV does NOT need site_id column.
-      - If the CSV does contain site_id in that mode, it is ignored for routing.
-    """
     if not (file.filename or "").lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only .csv files are supported")
 
@@ -412,14 +351,17 @@ async def upload_csv(
     rows_received = 0
     rows_ingested = 0
     rows_failed = 0
+    rows_skipped_duplicate = 0
     errors: List[str] = []
     site_ids: Set[str] = set()
     meter_ids: Set[str] = set()
-    records: List[TimeseriesRecord] = []
 
     org_id = user.organization_id
     source = "csv"
     rid = get_request_id()
+
+    records: List[TimeseriesRecord] = []
+    seen_keys: Set[Tuple[str, str, datetime]] = set()
 
     for row in reader:
         rows_received += 1
@@ -458,6 +400,16 @@ async def upload_csv(
 
             meter_id_value = raw_meter or DEFAULT_METER_ID
 
+            key = (site_id_value, meter_id_value, ts)
+            if key in seen_keys:
+                rows_skipped_duplicate += 1
+                continue
+            seen_keys.add(key)
+
+            idem = _build_csv_idempotency_key(
+                org_id=org_id, site_id=site_id_value, meter_id=meter_id_value, ts=ts
+            )
+
             rec_kwargs = _build_timeseries_record_kwargs(
                 org_id=org_id,
                 site_id=site_id_value,
@@ -466,37 +418,59 @@ async def upload_csv(
                 value=val,
                 unit=unit,
                 source=source,
+                idempotency_key=idem,
             )
-
-            rec = TimeseriesRecord(**rec_kwargs)
-            records.append(rec)
+            records.append(TimeseriesRecord(**rec_kwargs))
 
             site_ids.add(site_id_value)
             meter_ids.add(meter_id_value)
-            rows_ingested += 1
 
         except Exception as e:
             rows_failed += 1
             if len(errors) < 20:
                 errors.append(f"Row {rows_received}: {e}")
-            logger.exception(
-                "Failed to ingest CSV row request_id=%s row=%s",
-                rid,
-                rows_received,
-            )
+            logger.exception("Failed to parse CSV row request_id=%s row=%s", rid, rows_received)
 
     if records:
         try:
             db.add_all(records)
             db.commit()
+            rows_ingested += len(records)
+
+        except IntegrityError:
+            db.rollback()
+            for rec in records:
+                try:
+                    db.add(rec)
+                    db.flush()
+                    rows_ingested += 1
+                except IntegrityError:
+                    db.rollback()
+                    rows_skipped_duplicate += 1
+                except Exception:
+                    db.rollback()
+                    rows_failed += 1
+                    if len(errors) < 20:
+                        errors.append("Row insert failed during fallback insert.")
+                    logger.exception("CSV per-row insert failed request_id=%s", rid)
+
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("CSV upload commit failed after fallback request_id=%s", rid)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "type": "db_commit_failed",
+                        "message": "Failed to commit ingested rows. See server logs for request_id.",
+                        "request_id": rid,
+                    },
+                )
+
         except Exception:
             db.rollback()
-            logger.exception(
-                "CSV upload commit failed request_id=%s rows_ingested=%s rows_received=%s",
-                rid,
-                rows_ingested,
-                rows_received,
-            )
+            logger.exception("CSV upload commit failed request_id=%s", rid)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -510,6 +484,7 @@ async def upload_csv(
         rows_received=rows_received,
         rows_ingested=rows_ingested,
         rows_failed=rows_failed,
+        rows_skipped_duplicate=rows_skipped_duplicate,
         errors=errors,
         sample_site_ids=sorted(site_ids)[:10],
         sample_meter_ids=sorted(meter_ids)[:10],
