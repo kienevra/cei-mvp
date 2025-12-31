@@ -27,21 +27,29 @@ if ([string]::IsNullOrWhiteSpace($Token)) {
   exit 2
 }
 
-# Prefer the Python launcher on Windows; fall back to python
-$py = "py"
-$pyArgs = @("-3")
-try {
-  & $py @pyArgs --version | Out-Null
-} catch {
-  $py = "python"
-  $pyArgs = @()
-}
-
 # Compute repo root (this script is at: backend/scripts/...)
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 
+# Prefer backend venv Python if present (this is what should have deps like requests installed)
+$venvPy = Join-Path $repoRoot "backend\.venv\Scripts\python.exe"
+if (Test-Path -LiteralPath $venvPy) {
+  $py = $venvPy
+  $pyArgs = @()
+} else {
+  # Fall back to the Python launcher on Windows; then python
+  $py = "py"
+  $pyArgs = @("-3")
+  try {
+    & $py @pyArgs --version | Out-Null
+  } catch {
+    $py = "python"
+    $pyArgs = @()
+  }
+}
+
 # Python sender lives in: docs/examples/...
 $script = Join-Path $repoRoot "docs\examples\factory_sender_minimal.py"
+$spoolDir = Join-Path $repoRoot "cei_spool"
 
 if (-not (Test-Path -LiteralPath $script)) {
   Write-Error "Sender script not found: $script"
@@ -63,7 +71,7 @@ if ($Mode -eq "csv") {
     exit 2
   }
 
-  & $py @pyArgs $script --mode csv --csv-path $csvFullPath --base-url $BaseUrl --token $Token
+  & $py @pyArgs $script --mode csv --csv-path $csvFullPath --base-url $BaseUrl --token $Token --spool-dir $spoolDir
   exit $LASTEXITCODE
 }
 
@@ -73,7 +81,7 @@ if ($Mode -eq "ramp") {
     exit 2
   }
 
-  & $py @pyArgs $script --mode ramp --site-id $SiteId --meter-id $MeterId --hours $Hours --base-url $BaseUrl --token $Token
+  & $py @pyArgs $script --mode ramp --site-id $SiteId --meter-id $MeterId --hours $Hours --base-url $BaseUrl --token $Token --spool-dir $spoolDir
   exit $LASTEXITCODE
 }
 
