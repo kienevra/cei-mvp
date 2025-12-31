@@ -9,7 +9,6 @@ import io
 import logging
 import inspect
 from datetime import datetime, timezone
-from decimal import Decimal
 
 from fastapi import (
     APIRouter,
@@ -31,9 +30,6 @@ from app.core.request_context import get_request_id
 # Single source of truth for ingestion guardrails (parity with /timeseries/batch)
 from app.services.ingest import (
     ingest_timeseries_batch,
-    FUTURE_SKEW_SECONDS,
-    MAX_PAST_DAYS,
-    MAX_VALUE_KWH,
     ALLOWED_UNITS,
     _parse_timestamp_utc,
     _validate_timestamp_guardrails,
@@ -355,6 +351,23 @@ def _call_ingest_timeseries_batch(
     return out
 
 
+def _is_duplicate_ingest_error(e: Any) -> bool:
+    """
+    Product decision:
+    - DUPLICATE_IDEMPOTENCY_KEY is not an "error" for CSV re-uploads.
+    - We still report it via rows_skipped_duplicate.
+    - So: filter it out of errors[] to keep UX clean.
+    """
+    try:
+        if isinstance(e, dict):
+            return (e.get("code") or "") == "DUPLICATE_IDEMPOTENCY_KEY"
+        if isinstance(e, str):
+            return "DUPLICATE_IDEMPOTENCY_KEY" in e
+    except Exception:
+        return False
+    return False
+
+
 @router.post(
     "/",
     response_model=CsvUploadResult,
@@ -406,13 +419,14 @@ async def upload_csv(
 
     if not reader.fieldnames:
         # ✅ Treat as schema_error (fits your test philosophy + FE robustness)
+        effective_required = (REQUIRED_COLUMNS - {"site_id"}) if forced_site_id else REQUIRED_COLUMNS
         raise HTTPException(
             status_code=400,
             detail={
                 "type": "schema_error",
                 "message": "CSV file has no header row.",
-                "missing": sorted(list((REQUIRED_COLUMNS - {"site_id"}) if forced_site_id else REQUIRED_COLUMNS)),
-                "expected": sorted(list(((REQUIRED_COLUMNS - {"site_id"}) if forced_site_id else REQUIRED_COLUMNS) | OPTIONAL_COLUMNS)),
+                "missing": sorted(list(effective_required)),
+                "expected": sorted(list(effective_required | OPTIONAL_COLUMNS)),
             },
         )
 
@@ -552,10 +566,17 @@ async def upload_csv(
     skipped = int(ingest_result.get("skipped_duplicate", 0) or 0)
     failed = int(ingest_result.get("failed", 0) or 0)
 
+    # ✅ Keep UX clean: do NOT treat duplicates as errors.
     ingest_errors = ingest_result.get("errors") or []
     if isinstance(ingest_errors, list):
-        for e in ingest_errors[: max(0, MAX_ERROR_LINES - len(errors))]:
+        remaining_slots = max(0, MAX_ERROR_LINES - len(errors))
+        for e in ingest_errors:
+            if remaining_slots <= 0:
+                break
+            if _is_duplicate_ingest_error(e):
+                continue
             errors.append(str(e))
+            remaining_slots -= 1
 
     return CsvUploadResult(
         rows_received=rows_received,
