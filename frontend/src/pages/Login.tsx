@@ -281,7 +281,7 @@ const Login: React.FC = () => {
             }}
           />
 
-          <div className="auth-title">We use A.I to cut manufacturing energy waste.</div>
+          <div className="auth-title">We use A.I to reduce your factorys carbon footprint.</div>
 
           <div className="auth-subtitle">
             CEI ingests your meter and SCADA data, builds statistical baselines for
