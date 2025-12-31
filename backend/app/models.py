@@ -341,7 +341,7 @@ class OrgInvite(Base):
     role = Column(String(32), nullable=False, server_default=text("'member'"))
 
     # sha256 hex = 64 chars
-    token_hash = Column(String(64), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False)
 
     is_active = Column(Boolean, nullable=False, default=True, server_default=sa.true())
 

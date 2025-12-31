@@ -216,6 +216,27 @@ def _normalize_currency_code(code: Optional[str]) -> Optional[str]:
     return c or None
 
 
+def _normalize_user_role(*, user: User) -> str:
+    """
+    Canonical roles for CEI SaaS: owner/member.
+
+    - Returns the DB role if it's valid.
+    - If missing/unknown, default to member.
+    - If legacy superuser is set but role missing, default to owner (practical compatibility).
+    """
+    db_role = getattr(user, "role", None)
+    if isinstance(db_role, str):
+        r = db_role.strip().lower()
+        if r in {"owner", "member"}:
+            return r
+
+    is_super = bool(getattr(user, "is_superuser", 0) or 0)
+    if is_super:
+        return "owner"
+
+    return "member"
+
+
 # === Compatibility shim for /api/v1/org/invites ===
 def _require_owner(user: User) -> None:
     """
@@ -541,9 +562,8 @@ def read_me(
             currency_code=currency_code,
         )
 
-    is_super = bool(getattr(current_user, "is_superuser", 0))
-    db_role = getattr(current_user, "role", None)
-    role = "admin" if is_super else (db_role or "member")
+    # ✅ SaaS canonical roles: owner/member (no "admin" role emitted)
+    role = _normalize_user_role(user=current_user)
 
     return AccountMeOut(
         id=current_user.id,

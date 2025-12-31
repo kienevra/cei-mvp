@@ -9,7 +9,7 @@ import io
 import logging
 import inspect
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from fastapi import (
     APIRouter,
@@ -27,7 +27,18 @@ from app.db.session import get_db
 from app.models import Site
 from app.core.rate_limit import csv_upload_rate_limit
 from app.core.request_context import get_request_id
-from app.services.ingest import ingest_timeseries_batch
+
+# Single source of truth for ingestion guardrails (parity with /timeseries/batch)
+from app.services.ingest import (
+    ingest_timeseries_batch,
+    FUTURE_SKEW_SECONDS,
+    MAX_PAST_DAYS,
+    MAX_VALUE_KWH,
+    ALLOWED_UNITS,
+    _parse_timestamp_utc,
+    _validate_timestamp_guardrails,
+    _parse_value_kwh,
+)
 
 logger = logging.getLogger("cei")
 
@@ -35,6 +46,9 @@ logger = logging.getLogger("cei")
 # => POST /api/v1/upload-csv/
 router = APIRouter(prefix="/upload-csv", tags=["upload"])
 
+# -----------------------------------------------------------------------------
+# CSV schema normalization
+# -----------------------------------------------------------------------------
 # Internal canonical column names we operate on.
 # We align with your /timeseries/export header: timestamp_utc, site_id, meter_id, value
 REQUIRED_COLUMNS: Set[str] = {"timestamp_utc", "value", "site_id", "meter_id"}
@@ -42,6 +56,9 @@ OPTIONAL_COLUMNS: Set[str] = {"unit"}
 
 DEFAULT_UNIT = "kWh"
 DEFAULT_METER_ID = "meter-1"
+
+# Cap error verbosity so the API response stays sane
+MAX_ERROR_LINES = 20
 
 # Common header variants mapped into our canonical schema.
 NORMALIZATION_MAP = {
@@ -111,17 +128,25 @@ def _ensure_required_columns(
 
     missing = sorted(list(effective_required - present))
     if missing:
-        expected_str = ", ".join(sorted(effective_required | OPTIONAL_COLUMNS))
+        expected = sorted(list(effective_required | OPTIONAL_COLUMNS))
+        expected_str = ", ".join(expected)
+        received_headers = sorted(list(canonical_map.keys()))
+        canonical_headers = sorted(list(set(canonical_map.values())))
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
+                # ✅ This is the "better product" contract your tests want.
                 "type": "schema_error",
                 "message": (
                     "Your file is missing required columns. "
                     f"Expected at least: {expected_str}."
                 ),
                 "missing": missing,
-                "expected": sorted(list(effective_required | OPTIONAL_COLUMNS)),
+                "expected": expected,
+                # Extra operator/debug context (additive, non-breaking)
+                "received_headers": received_headers[:200],
+                "canonicalized_headers": canonical_headers[:200],
                 "canonical_time_column": "timestamp_utc",
             },
         )
@@ -147,31 +172,6 @@ def _parse_site_key(site_key: str) -> Tuple[str, Optional[int]]:
     return sk, None
 
 
-def _parse_timestamp_utc(raw: str) -> datetime:
-    s = (raw or "").strip()
-    if not s:
-        raise ValueError("Empty timestamp")
-
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-
-    try:
-        dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except ValueError:
-        pass
-
-    try:
-        dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
-        return dt.replace(tzinfo=timezone.utc)
-    except ValueError:
-        pass
-
-    raise ValueError(f"Invalid timestamp format: {raw}")
-
-
 def _site_org_filter(db: Session, *, org_id: int):
     """
     Your Site model uses `org_id` (not organization_id).
@@ -190,6 +190,19 @@ def _site_org_filter(db: Session, *, org_id: int):
             "message": "Site model has no organization scoping field/relationship (expected organization_id/org_id/organization).",
         },
     )
+
+
+def _get_allowed_site_ids_for_org(db: Session, *, org_id: int) -> Set[str]:
+    """
+    Returns the allowed site_id keys in timeseries form: {"site-1","site-2",...}
+    """
+    rows = (
+        db.query(Site.id)
+        .filter(_site_org_filter(db, org_id=org_id))
+        .order_by(Site.id.asc())
+        .all()
+    )
+    return {f"site-{row[0]}" for row in rows}
 
 
 def _validate_forced_site_belongs_to_org(
@@ -241,6 +254,62 @@ def _build_csv_idempotency_key(*, org_id: int, site_id: str, meter_id: str, ts: 
     return key[:128]
 
 
+def _to_utc_z_iso(ts: datetime) -> str:
+    """
+    Enforce strict, unambiguous UTC timestamp string for ingest.py:
+      - timezone-aware
+      - microsecond=0
+      - format ends with 'Z'
+    """
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    ts = ts.astimezone(timezone.utc).replace(microsecond=0)
+    return ts.isoformat().replace("+00:00", "Z")
+
+
+def _parse_timestamp_utc_csv(raw: str) -> datetime:
+    """
+    CSV is allowed to be more permissive than /timeseries/batch:
+
+    Accept:
+      - 2025-12-29 11:00:00            (assume UTC)
+      - 2025-12-29T11:00:00            (assume UTC)
+      - 2025-12-29T11:00:00Z           (strict UTC)
+      - 2025-12-29T11:00:00+00:00      (strict offset)
+      - 2025-12-29T12:00:00+01:00      (offset; normalized to UTC)
+
+    Return:
+      timezone-aware UTC datetime, microsecond=0
+    """
+    s = (raw or "").strip()
+    if not s:
+        raise ValueError("Empty timestamp")
+
+    # If it includes Z or an explicit offset, defer to ingest.py strict parser.
+    has_z = s.endswith("Z")
+    has_offset = ("+" in s[10:] or "-" in s[10:]) and ("T" in s or " " in s)  # heuristic
+    if has_z or has_offset:
+        return _parse_timestamp_utc(s)
+
+    # Try ISO without tz -> assume UTC
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).replace(microsecond=0)
+    except Exception:
+        pass
+
+    # Try legacy "YYYY-MM-DD HH:MM:SS" -> assume UTC
+    try:
+        dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+        return dt.replace(tzinfo=timezone.utc).replace(microsecond=0)
+    except Exception:
+        pass
+
+    raise ValueError(f"Invalid timestamp format: {raw}")
+
+
 def _call_ingest_timeseries_batch(
     *,
     db: Session,
@@ -259,7 +328,6 @@ def _call_ingest_timeseries_batch(
     sig = inspect.signature(ingest_timeseries_batch)
     kwargs: Dict[str, Any] = {}
 
-    # common parameter names we’ve used across CEI iterations
     candidates = {
         "db": db,
         "session": db,
@@ -280,7 +348,6 @@ def _call_ingest_timeseries_batch(
     if isinstance(result, dict):
         return result
 
-    # last resort: allow returning a pydantic model / object with attrs
     out: Dict[str, Any] = {}
     for k in ("ingested", "skipped_duplicate", "failed", "errors"):
         if hasattr(result, k):
@@ -300,8 +367,17 @@ async def upload_csv(
     user=Depends(get_current_user),
     site_id: Optional[str] = None,
 ):
+    # ✅ Make this structured (non-breaking) so clients can distinguish file issues.
     if not (file.filename or "").lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Only .csv files are supported")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "type": "file_type_error",
+                "message": "Only .csv files are supported.",
+                "filename": file.filename,
+                "allowed_extensions": [".csv"],
+            },
+        )
 
     forced_site_id: Optional[str] = None
     if site_id is not None:
@@ -309,7 +385,11 @@ async def upload_csv(
         if not cleaned:
             raise HTTPException(
                 status_code=400,
-                detail="site_id query parameter cannot be empty if provided.",
+                detail={
+                    "type": "invalid_query_param",
+                    "message": "site_id query parameter cannot be empty if provided.",
+                    "param": "site_id",
+                },
             )
         forced_site_id = _coerce_site_id(cleaned)
         _validate_forced_site_belongs_to_org(
@@ -325,7 +405,16 @@ async def upload_csv(
     reader = csv.DictReader(io.StringIO(text))
 
     if not reader.fieldnames:
-        raise HTTPException(status_code=400, detail="CSV file has no header row")
+        # ✅ Treat as schema_error (fits your test philosophy + FE robustness)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "type": "schema_error",
+                "message": "CSV file has no header row.",
+                "missing": sorted(list((REQUIRED_COLUMNS - {"site_id"}) if forced_site_id else REQUIRED_COLUMNS)),
+                "expected": sorted(list(((REQUIRED_COLUMNS - {"site_id"}) if forced_site_id else REQUIRED_COLUMNS) | OPTIONAL_COLUMNS)),
+            },
+        )
 
     canonical_map = _build_canonical_header_map(reader.fieldnames)
 
@@ -342,7 +431,14 @@ async def upload_csv(
     source = "csv"
     rid = get_request_id()
 
-    # Build canonical ingest payload (NOT ORM instances)
+    # Stable UTC now for guards (match ingest.py expectation)
+    now_utc = datetime.now(timezone.utc).replace(microsecond=0)
+
+    # Multi-site uploads must not be able to ingest other org's sites.
+    allowed_site_ids: Optional[Set[str]] = None
+    if forced_site_id is None:
+        allowed_site_ids = _get_allowed_site_ids_for_org(db, org_id=org_id)
+
     payloads: List[Dict[str, Any]] = []
     seen_keys: Set[Tuple[str, str, datetime]] = set()
 
@@ -362,18 +458,20 @@ async def upload_csv(
             raw_site = (canonical_row.get("site_id") or "").strip()
             raw_meter = (canonical_row.get("meter_id") or "").strip()
 
-            if not raw_ts or not raw_value:
+            if not raw_ts or raw_value == "":
                 raise ValueError("timestamp_utc and value are required per row")
 
-            ts = _parse_timestamp_utc(raw_ts)
+            # CSV is permissive on timestamp inputs, but we normalize to strict UTC for ingest.py
+            ts = _parse_timestamp_utc_csv(raw_ts)
+            _validate_timestamp_guardrails(ts, now_utc=now_utc)
 
-            try:
-                # keep Decimal to preserve precision; ingest layer can coerce as needed
-                val = Decimal(raw_value)
-            except InvalidOperation:
-                raise ValueError(f"Invalid numeric value: {raw_value}")
+            # PARITY: reuse ingest.py value parsing + bounds
+            val_dec = _parse_value_kwh(raw_value)
 
-            unit = raw_unit or DEFAULT_UNIT
+            unit = (raw_unit or DEFAULT_UNIT).strip()
+            if unit and unit not in ALLOWED_UNITS:
+                # Keep message consistent with allowed units
+                raise ValueError(f"unit must be one of: {sorted(list(ALLOWED_UNITS))}")
 
             if forced_site_id is not None:
                 site_id_value = forced_site_id
@@ -382,9 +480,14 @@ async def upload_csv(
                 if not site_id_value:
                     raise ValueError("site_id is required per row for multi-site uploads")
 
-            meter_id_value = raw_meter or DEFAULT_METER_ID
+                if allowed_site_ids is not None and site_id_value not in allowed_site_ids:
+                    raise ValueError(f"site_id '{site_id_value}' is not in your organization")
 
-            # in-file dedupe (same timestamp/site/meter repeated in file)
+            meter_id_value = (raw_meter or DEFAULT_METER_ID).strip()
+            if not meter_id_value:
+                raise ValueError("meter_id is required per row")
+
+            # in-file dedupe
             key = (site_id_value, meter_id_value, ts)
             if key in seen_keys:
                 continue
@@ -398,9 +501,9 @@ async def upload_csv(
                 {
                     "site_id": site_id_value,
                     "meter_id": meter_id_value,
-                    # Keep name aligned with your Direct API contract; ingest layer should accept this.
-                    "timestamp_utc": ts.astimezone(timezone.utc).replace(microsecond=0).isoformat(),
-                    "value": str(val),  # safe across JSON-ish handling
+                    # Ensure ingest.py never sees naive strings:
+                    "timestamp_utc": _to_utc_z_iso(ts),
+                    "value": str(val_dec),
                     "unit": unit,
                     "idempotency_key": idem,
                 }
@@ -411,11 +514,10 @@ async def upload_csv(
 
         except Exception as e:
             rows_failed += 1
-            if len(errors) < 20:
+            if len(errors) < MAX_ERROR_LINES:
                 errors.append(f"Row {rows_received}: {e}")
-            logger.exception("Failed to parse CSV row request_id=%s row=%s", rid, rows_received)
+            logger.exception("Failed to parse/validate CSV row request_id=%s row=%s", rid, rows_received)
 
-    # No valid payloads
     if not payloads:
         return CsvUploadResult(
             rows_received=rows_received,
@@ -427,7 +529,6 @@ async def upload_csv(
             sample_meter_ids=sorted(meter_ids)[:10],
         )
 
-    # Canonical ingest (same path as /timeseries/batch)
     try:
         ingest_result = _call_ingest_timeseries_batch(
             db=db,
@@ -453,7 +554,7 @@ async def upload_csv(
 
     ingest_errors = ingest_result.get("errors") or []
     if isinstance(ingest_errors, list):
-        for e in ingest_errors[: max(0, 20 - len(errors))]:
+        for e in ingest_errors[: max(0, MAX_ERROR_LINES - len(errors))]:
             errors.append(str(e))
 
     return CsvUploadResult(

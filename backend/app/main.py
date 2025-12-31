@@ -45,10 +45,7 @@ logging.basicConfig(
     format="%(levelname)s %(name)s request_id=%(request_id)s %(message)s",
 )
 
-# NOTE:
-# Your repo currently shows app/core/errors.py as only an Enum; it may not define
-# install_request_id_logging(). We keep compatibility by trying to install it
-# if present, but we DO NOT hard-depend on it (avoids startup crashes).
+# Try to install request-id filter if present; do not hard-depend on it.
 try:
     from app.core.errors import install_request_id_logging  # type: ignore
 
@@ -134,13 +131,13 @@ def _error_payload(code: str, message: str, request_id: str, extra: Optional[dic
     """
     Standardized error contract (additive):
     - code/message/request_id (new, stable)
-    - detail preserved for backward-compat with older frontend parsing
+    - detail is preserved for older frontend parsing
     """
     payload: dict[str, Any] = {
         "code": code,
         "message": message,
         "request_id": request_id,
-        # Back-compat: many places in FE still look at `detail`
+        # Back-compat default detail shape
         "detail": {"code": code, "message": message},
     }
     if extra:
@@ -148,16 +145,48 @@ def _error_payload(code: str, message: str, request_id: str, extra: Optional[dic
     return payload
 
 
+def _http_exception_payload(exc: HTTPException, *, request_id: str) -> dict:
+    """
+    Build a robust, structured error payload for HTTPException.
+
+    Key behavior (the "better product"):
+    - If exc.detail is a dict, preserve it and MERGE it into payload["detail"].
+      That means your handlers can raise:
+          HTTPException(400, detail={"type":"schema_error", ...})
+      and clients will actually receive that structured payload.
+
+    - If exc.detail is a string, keep current conservative behavior.
+    """
+    code = f"HTTP_{exc.status_code}"
+
+    if isinstance(exc.detail, dict):
+        # Prefer a message from detail if provided; otherwise use a safe default.
+        # Keep the dict intact and merge under detail.
+        msg = exc.detail.get("message")
+        if not isinstance(msg, str) or not msg.strip():
+            msg = "Request failed."
+
+        # Merge so detail always includes code/message (back-compat) PLUS structured fields.
+        merged_detail: dict[str, Any] = {"code": code, "message": msg}
+        merged_detail.update(exc.detail)
+
+        return _error_payload(code=code, message=msg, request_id=request_id, extra={"detail": merged_detail})
+
+    # String/other detail -> keep conservative behavior
+    msg = exc.detail if isinstance(exc.detail, str) else "Request failed."
+    return _error_payload(code=code, message=msg, request_id=request_id)
+
+
 # --- Exception handlers (standardized error contract) ---
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     request_id = _rid_from_request(request)
-    # Keep messages conservative for 401/403; but if backend set detail string, surface it.
-    msg = exc.detail if isinstance(exc.detail, str) else "Request failed."
-    code = f"HTTP_{exc.status_code}"
+
+    payload = _http_exception_payload(exc, request_id=request_id)
+
     resp = JSONResponse(
         status_code=exc.status_code,
-        content=_error_payload(code=code, message=msg, request_id=request_id),
+        content=payload,
     )
     resp.headers["X-Request-ID"] = request_id
     return resp
