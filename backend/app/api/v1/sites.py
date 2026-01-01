@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_org_context, OrgContext
 from app.models import Site, User, TimeseriesRecord
 
 # These are still coming from the shim in your repo. Leaving as-is to avoid regressions.
@@ -34,6 +34,31 @@ def _timeseries_site_keys(site_db_id: int) -> Set[str]:
     Canonical is "site-<id>", but older data might have "<id>".
     """
     return {_canonical_site_key(site_db_id), str(site_db_id)}
+
+
+def _org_id_from_ctx(ctx: OrgContext) -> Optional[int]:
+    """
+    Normalize org_id from either JWT user or integration token.
+
+    Keep legacy behavior for dev/single-tenant:
+      - If org_id is None AND auth_type == "user": treat as legacy and allow unscoped reads.
+    For integration tokens:
+      - org_id must exist; otherwise deny (integration tokens must always be org-scoped).
+    """
+    org_id = getattr(ctx, "organization_id", None)
+
+    if org_id is None and getattr(ctx, "auth_type", "user") == "integration":
+        # Integration tokens are explicitly org-scoped in this codebase.
+        # If we ever see None here, it's a data/config issue; fail hard.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "INTEGRATION_TOKEN_NO_ORG",
+                "message": "Integration token is not attached to an organization.",
+            },
+        )
+
+    return org_id
 
 
 class SiteBase(BaseModel):
@@ -66,16 +91,22 @@ class SiteRead(SiteBase):
 @router.get("/", response_model=List[SiteRead])
 def list_sites(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_org_context),
 ):
     """
-    List sites for the current user.
+    List sites for the current org context.
+
+    Supports BOTH:
+      - User JWT (normal app usage)
+      - Integration tokens (factory/pilot usage)
 
     Multi-tenant behavior:
-    - If user.organization_id is set -> only return sites for that org.
-    - If user.organization_id is None -> treat as single-tenant/dev and return all sites.
+    - If ctx.organization_id is set -> only return sites for that org.
+    - If ctx.organization_id is None AND ctx.auth_type == "user"
+        -> treat as single-tenant/dev and return all sites (legacy behavior).
+    - If ctx.auth_type == "integration" and org_id is None -> 403 (should never happen).
     """
-    org_id = getattr(user, "organization_id", None)
+    org_id = _org_id_from_ctx(ctx)
 
     query = db.query(Site).order_by(Site.id.asc())
     if org_id is not None:
@@ -83,7 +114,6 @@ def list_sites(
 
     sites = query.all()
 
-    # Enrich with canonical site_id key without changing DB model shape.
     out: List[SiteRead] = []
     for s in sites:
         out.append(
@@ -101,16 +131,22 @@ def list_sites(
 def get_site(
     site_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_org_context),
 ):
     """
-    Fetch a single site.
+    Fetch a single site by numeric DB id.
+
+    Supports BOTH:
+      - User JWT
+      - Integration tokens
 
     Multi-tenant behavior:
-    - If user.organization_id is set -> enforce Site.org_id == user.organization_id.
-    - If user.organization_id is None -> fall back to legacy behavior (by id only).
+    - If ctx.organization_id is set -> enforce Site.org_id == ctx.organization_id.
+    - If ctx.organization_id is None AND ctx.auth_type == "user"
+        -> fall back to legacy behavior (by id only).
+    - If ctx.auth_type == "integration" and org_id is None -> 403 (should never happen).
     """
-    org_id = getattr(user, "organization_id", None)
+    org_id = _org_id_from_ctx(ctx)
 
     query = db.query(Site).filter(Site.id == site_id)
     if org_id is not None:
@@ -137,6 +173,9 @@ def create_site(
 ):
     """
     Create a site for the current user's organization.
+
+    SECURITY:
+    - JWT user only (NOT integration tokens)
 
     Multi-tenant behavior:
     - Requires user.organization_id; sites are always attached to an org.
@@ -174,6 +213,9 @@ def delete_site(
 ):
     """
     Hard-delete a site and all of its org-scoped footprint.
+
+    SECURITY:
+    - JWT user only (NOT integration tokens)
 
     Multi-tenant behavior:
     - If user.organization_id is set -> only allow deleting sites in that org.

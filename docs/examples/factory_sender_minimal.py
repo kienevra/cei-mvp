@@ -63,10 +63,6 @@ def deterministic_idempotency_key(site_id: str, meter_id: str, timestamp_utc: st
     return f"{site_id}|{meter_id}|{timestamp_utc}"
 
 
-def sha256_hex(s: str) -> str:
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()
-
-
 def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
@@ -105,7 +101,6 @@ class Record:
 
 def spool_write(spool_dir: str, payload: Dict[str, Any]) -> str:
     ensure_dir(spool_dir)
-    # Stable-ish file name: timestamp + random suffix
     stamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
     suffix = uuid.uuid4().hex[:8]
     path = os.path.join(spool_dir, f"batch_{stamp}_{suffix}.json")
@@ -147,6 +142,9 @@ def post_batch(
     """
     Returns: (ok, message)
     ok=True means payload can be removed from spool.
+
+    CEI may return HTTP 200 even when some records failed; we treat failed>0 as fatal
+    so pilot ops never silently succeed.
     """
     url = base_url.rstrip("/") + "/timeseries/batch"
     headers = {
@@ -159,16 +157,38 @@ def post_batch(
     except requests.RequestException as e:
         return False, f"network_error: {e}"
 
-    # Success
+    resp_text = r.text or ""
+    resp_json = None
+    try:
+        resp_json = r.json()
+    except Exception:
+        resp_json = None
+
     if 200 <= r.status_code < 300:
-        return True, f"ok: {r.status_code}"
+        if isinstance(resp_json, dict):
+            ing = resp_json.get("ingested")
+            skp = resp_json.get("skipped_duplicate")
+            fail = resp_json.get("failed")
+            errs = resp_json.get("errors")
 
-    # Rate limit / transient server errors -> retryable
+            summary = f"ingested={ing} skipped_duplicate={skp} failed={fail}"
+
+            # Fail-fast if any record failed (operator must fix inputs)
+            if isinstance(fail, int) and fail > 0:
+                return False, f"fatal_ingest_failed_records: {summary} errors={json.dumps(errs)[:1500]}"
+
+            return True, f"ok: {r.status_code} {summary}"
+
+        return True, f"ok: {r.status_code} {resp_text[:1000]}"
+
+    # Retryable (rate limits / server errors)
     if r.status_code == 429 or 500 <= r.status_code < 600:
-        return False, f"retryable_http_{r.status_code}: {r.text[:500]}"
+        body = json.dumps(resp_json) if resp_json is not None else resp_text
+        return False, f"retryable_http_{r.status_code}: {body[:1500]}"
 
-    # Validation/auth errors are non-retryable as-is (needs operator fix)
-    return False, f"fatal_http_{r.status_code}: {r.text[:800]}"
+    # Fatal (validation/auth)
+    body = json.dumps(resp_json) if resp_json is not None else resp_text
+    return False, f"fatal_http_{r.status_code}: {body[:1500]}"
 
 
 def retry_send(
@@ -180,9 +200,6 @@ def retry_send(
     base_backoff_s: float,
     max_backoff_s: float,
 ) -> Tuple[bool, str]:
-    """
-    Retries on retryable signals; stops early on fatal errors.
-    """
     attempt = 0
     while True:
         attempt += 1
@@ -191,14 +208,13 @@ def retry_send(
         if ok:
             return True, msg
 
-        # Fatal means: don't keep retrying this same payload forever.
-        if msg.startswith("fatal_http_"):
+        # Fatal means: stop retrying this payload forever.
+        if msg.startswith("fatal_http_") or msg.startswith("fatal_ingest_failed_records"):
             return False, msg
 
         if attempt >= max_attempts:
             return False, f"exhausted_attempts: {msg}"
 
-        # Exponential backoff + jitter
         sleep_s = min(max_backoff_s, base_backoff_s * (2 ** (attempt - 1)))
         jitter = random.uniform(0, 0.25 * sleep_s)
         time.sleep(sleep_s + jitter)
@@ -217,9 +233,8 @@ def load_records_from_csv(path: str) -> List[Record]:
         if missing:
             raise ValueError(f"CSV missing columns: {sorted(missing)}. Found: {reader.fieldnames}")
 
-        for i, row in enumerate(reader, start=1):
+        for _, row in enumerate(reader, start=1):
             ts = row["timestamp_utc"].strip()
-            # normalize to Z
             ts_norm = iso_z(parse_iso_utc(ts))
             records.append(
                 Record(
@@ -245,19 +260,25 @@ def generate_ramp_records(
     if start_utc:
         start = parse_iso_utc(start_utc)
     else:
-        # default: end at last full hour
         now = utc_now().replace(minute=0, second=0, microsecond=0)
         start = now - dt.timedelta(hours=hours)
 
     out: List[Record] = []
     for h in range(hours):
         t = start + dt.timedelta(hours=h)
-        # simple diurnal pattern
         hour = t.hour
         day_factor = 1.15 if 7 <= hour <= 18 else 0.85
         val = base_value * day_factor
         val *= 1.0 + random.uniform(-noise_pct, noise_pct) / 100.0
-        out.append(Record(site_id=site_id, meter_id=meter_id, timestamp_utc=iso_z(t), value=val, unit=unit))
+        out.append(
+            Record(
+                site_id=site_id,
+                meter_id=meter_id,
+                timestamp_utc=iso_z(t),
+                value=val,
+                unit=unit,
+            )
+        )
     return out
 
 
@@ -285,7 +306,7 @@ def main() -> int:
     # ramp mode
     parser.add_argument("--site-id", default="")
     parser.add_argument("--meter-id", default="main")
-    parser.add_argument("--unit", default="kwh")
+    parser.add_argument("--unit", default="kWh")  # IMPORTANT: CEI validates exact casing
     parser.add_argument("--hours", type=int, default=24)
     parser.add_argument("--start-utc", default="")
     parser.add_argument("--base-value", type=float, default=120.0)
@@ -317,7 +338,6 @@ def main() -> int:
             spool_delete(path)
             print(f"[spool] sent+deleted {os.path.basename(path)} ({msg})")
         else:
-            # Stop replay on first failure to avoid thrashing
             print(f"[spool] FAILED {os.path.basename(path)} ({msg})")
             print("[spool] stopping replay; will try again next run.")
             return 1
@@ -366,13 +386,11 @@ def main() -> int:
             sent += len(b)
             print(f"[send] ok batch size={len(b)} ({msg})")
         else:
-            # If retry exhausted or fatal, spool it and continue (pilot resiliency)
             path = spool_write(args.spool_dir, payload)
             spooled_new += 1
             print(f"[send] FAILED -> spooled {os.path.basename(path)} ({msg})")
 
-            # If it's fatal (validation/auth), stop immediately—operator must fix inputs/token.
-            if msg.startswith("fatal_http_"):
+            if msg.startswith("fatal_http_") or msg.startswith("fatal_ingest_failed_records"):
                 print("[send] fatal error; stopping.")
                 break
 
