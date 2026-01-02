@@ -37,7 +37,35 @@ MAX_PAST_DAYS = int(os.getenv("TIMESERIES_MAX_PAST_DAYS", "3650"))  # ~10 years
 # Optional: clamp insane values. 0 or negative disables the guard.
 MAX_VALUE_KWH = float(os.getenv("TIMESERIES_MAX_VALUE_KWH", "1000000"))  # 1,000,000 kWh/hour
 
-ALLOWED_UNITS = {"kWh"}  # keep strict for now
+# Canonical unit(s) stored/returned by CEI.
+CANONICAL_UNIT_KWH = "kWh"
+
+# Acceptable spellings -> canonical
+_UNIT_ALIASES = {
+    "kwh": CANONICAL_UNIT_KWH,
+}
+
+# Keep canonical set for messages/guards
+ALLOWED_UNITS = {CANONICAL_UNIT_KWH}
+
+
+def normalize_unit(unit: Any) -> str:
+    """
+    Option A: backend is NOT case-sensitive for unit.
+    Accepts variations like: "kwh", "KWH", " kWh " and normalizes to canonical "kWh".
+
+    Raises ValueError for missing/invalid units when the caller expects a unit.
+    """
+    raw = ("" if unit is None else str(unit)).strip()
+    if not raw:
+        raise ValueError("unit missing")
+
+    key = raw.lower()
+    canonical = _UNIT_ALIASES.get(key)
+    if canonical:
+        return canonical
+
+    raise ValueError("unit must be 'kWh'")
 
 
 # --- Legacy staging-based ingestion (used by older CSV/raw flows) ---
@@ -76,6 +104,8 @@ def save_raw_timeseries(job_id: str, payload: List[Dict[str, Any]]) -> str:
 def validate_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
     """
     Legacy validator used by process_job and older tests.
+
+    NOTE: Unit checking is now case-insensitive and normalizes to canonical "kWh".
     """
     errs: List[str] = []
 
@@ -104,8 +134,11 @@ def validate_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
             errs.append("Invalid timestamp format")
 
     unit = r.get("unit")
-    if unit is not None and unit != "kWh":
-        errs.append("Unit must be 'kWh'")
+    if unit is not None and str(unit).strip():
+        try:
+            _ = normalize_unit(unit)
+        except Exception:
+            errs.append("Unit must be 'kWh'")
 
     return (len(errs) == 0, errs)
 
@@ -201,6 +234,8 @@ def validate_batch_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
     Strict schema/format validator for the /timeseries/batch API.
     Deeper correctness (future timestamps, max age, numeric bounds) is enforced
     in ingest_timeseries_batch so ALL ingest paths share the same guardrails.
+
+    NOTE: Unit checking is now case-insensitive and normalizes to canonical "kWh".
     """
     errs: List[str] = []
 
@@ -229,8 +264,11 @@ def validate_batch_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
             errs.append("timestamp_utc not ISO8601")
 
     unit = r.get("unit")
-    if unit is not None and str(unit).strip() and str(unit).strip() not in ALLOWED_UNITS:
-        errs.append("unit must be 'kWh'")
+    if unit is not None and str(unit).strip():
+        try:
+            _ = normalize_unit(unit)
+        except Exception:
+            errs.append("unit must be 'kWh'")
 
     return (len(errs) == 0, errs)
 
@@ -253,7 +291,7 @@ def _guess_code_from_validation_errors(errs: List[str]) -> TimeseriesIngestError
 
     # Unit-related
     for e in errs:
-        if "unit must be 'kWh'" in e:
+        if "unit must be 'kWh'" in e or "Unit must be 'kWh'" in e:
             return TimeseriesIngestErrorCode.INVALID_UNIT
 
     # Org mismatch is emitted explicitly elsewhere
@@ -356,7 +394,7 @@ def ingest_timeseries_batch(
     - reject future timestamps beyond FUTURE_SKEW_SECONDS
     - (optional) reject overly old timestamps beyond MAX_PAST_DAYS
     - value must be numeric, finite, non-negative, and within MAX_VALUE_KWH (optional)
-    - unit must be 'kWh' (if provided)
+    - unit must be 'kWh' (if provided; case-insensitive accepted + normalized)
 
     Idempotency guarantee:
     - If TimeseriesRecord supports idempotency_key, we enforce deterministic idempotency.
@@ -426,6 +464,7 @@ def ingest_timeseries_batch(
                 continue
 
             # --- correctness parsing (timestamp/value/unit) ---
+            unit_canonical = CANONICAL_UNIT_KWH  # default if omitted
             try:
                 ts_raw = r.get("timestamp_utc") or r.get("timestamp")
                 ts = _parse_timestamp_utc(ts_raw)
@@ -433,9 +472,9 @@ def ingest_timeseries_batch(
 
                 v = _parse_value_kwh(r.get("value"))
 
-                unit = (str(r.get("unit")).strip() if r.get("unit") is not None else "")
-                if unit and unit not in ALLOWED_UNITS:
-                    raise ValueError("unit must be 'kWh'")
+                # Unit is optional: if provided, accept any casing and normalize to canonical.
+                if r.get("unit") is not None and str(r.get("unit")).strip():
+                    unit_canonical = normalize_unit(r.get("unit"))
             except Exception as exc:
                 failed += 1
                 code_enum = _guess_code_from_validation_errors([str(exc)])
@@ -487,7 +526,7 @@ def ingest_timeseries_batch(
             record = TimeseriesRecord(**record_kwargs)
 
             if hasattr(TimeseriesRecord, "unit"):
-                setattr(record, "unit", unit or "kWh")
+                setattr(record, "unit", unit_canonical)
 
             if model_has_idem and idem_key:
                 setattr(record, "idempotency_key", idem_key)

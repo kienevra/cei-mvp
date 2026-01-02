@@ -30,7 +30,8 @@ from app.core.request_context import get_request_id
 # Single source of truth for ingestion guardrails (parity with /timeseries/batch)
 from app.services.ingest import (
     ingest_timeseries_batch,
-    ALLOWED_UNITS,
+    CANONICAL_UNIT_KWH,
+    normalize_unit,
     _parse_timestamp_utc,
     _validate_timestamp_guardrails,
     _parse_value_kwh,
@@ -50,7 +51,7 @@ router = APIRouter(prefix="/upload-csv", tags=["upload"])
 REQUIRED_COLUMNS: Set[str] = {"timestamp_utc", "value", "site_id", "meter_id"}
 OPTIONAL_COLUMNS: Set[str] = {"unit"}
 
-DEFAULT_UNIT = "kWh"
+DEFAULT_UNIT = CANONICAL_UNIT_KWH
 DEFAULT_METER_ID = "meter-1"
 
 # Cap error verbosity so the API response stays sane
@@ -482,10 +483,14 @@ async def upload_csv(
             # PARITY: reuse ingest.py value parsing + bounds
             val_dec = _parse_value_kwh(raw_value)
 
-            unit = (raw_unit or DEFAULT_UNIT).strip()
-            if unit and unit not in ALLOWED_UNITS:
-                # Keep message consistent with allowed units
-                raise ValueError(f"unit must be one of: {sorted(list(ALLOWED_UNITS))}")
+            # Unit policy (Option A):
+            # - unit is optional
+            # - if provided (any casing), normalize to canonical "kWh"
+            # - if invalid, fail the row with a clean message
+            if raw_unit:
+                unit = normalize_unit(raw_unit)
+            else:
+                unit = DEFAULT_UNIT
 
             if forced_site_id is not None:
                 site_id_value = forced_site_id
@@ -529,6 +534,8 @@ async def upload_csv(
         except Exception as e:
             rows_failed += 1
             if len(errors) < MAX_ERROR_LINES:
+                # Unit errors become very common; make them crystal clear.
+                # normalize_unit already returns "unit must be 'kWh'" for bad values.
                 errors.append(f"Row {rows_received}: {e}")
             logger.exception("Failed to parse/validate CSV row request_id=%s row=%s", rid, rows_received)
 
