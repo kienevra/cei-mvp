@@ -382,9 +382,13 @@ def _build_fallback_idempotency_key(
 
 def ingest_timeseries_batch(
     records: List[Dict[str, Any]],
-    organization_id: Optional[int],
+    organization_id: Optional[int] = None,
     source: Optional[str] = None,
     db: Optional[Session] = None,
+    # --- compatibility aliases (upload_csv and other callers may use these) ---
+    org_id: Optional[int] = None,
+    session: Optional[Session] = None,
+    request_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Ingest a batch of timeseries records directly into TimeseriesRecord.
@@ -400,9 +404,20 @@ def ingest_timeseries_batch(
     - If TimeseriesRecord supports idempotency_key, we enforce deterministic idempotency.
       If the client provides idempotency_key -> use it.
       Else -> we auto-generate a stable fallback key from (org, site, meter, timestamp).
+
+    Compatibility:
+    - Accepts organization_id or org_id
+    - Accepts db or session
+    - Accepts request_id (optional) for log correlation
     """
     if not records:
         return {"ingested": 0, "skipped_duplicate": 0, "failed": 0, "errors": []}
+
+    # Resolve aliases
+    if organization_id is None:
+        organization_id = org_id
+    if db is None and session is not None:
+        db = session
 
     session_provided = db is not None
     if db is None:
@@ -422,7 +437,12 @@ def ingest_timeseries_batch(
             allowed_list = get_org_allowed_site_ids(db, organization_id)
             allowed_site_ids = {str(s) for s in allowed_list}
         except Exception as exc:
-            logger.error("failed to load allowed site ids for org %s: %s", organization_id, exc)
+            logger.error(
+                "failed to load allowed site ids for org %s request_id=%s: %s",
+                organization_id,
+                request_id,
+                exc,
+            )
             allowed_site_ids = set()  # fail-closed
 
     model_has_org = _record_model_supports_org()
@@ -505,7 +525,12 @@ def ingest_timeseries_batch(
                         )
                         continue
                 except Exception as exc:
-                    logger.warning("idempotency pre-check failed (idx=%s): %s", idx, exc)
+                    logger.warning(
+                        "idempotency pre-check failed (idx=%s) request_id=%s: %s",
+                        idx,
+                        request_id,
+                        exc,
+                    )
 
             # --- build ORM row ---
             record_kwargs: Dict[str, Any] = {
