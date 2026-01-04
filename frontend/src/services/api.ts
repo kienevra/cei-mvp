@@ -252,7 +252,8 @@ function getApiErrorMessage(err: unknown, fallback: string): string {
     }
 
     if (data?.message != null) {
-      const msg = typeof data.message === "string" ? data.message : safeStringify(data.message);
+      const msg =
+        typeof data.message === "string" ? data.message : safeStringify(data.message);
       return appendSupportCode(msg || fallback, rid);
     }
 
@@ -262,6 +263,62 @@ function getApiErrorMessage(err: unknown, fallback: string): string {
 
   if (err instanceof Error) return appendSupportCode(err.message || fallback, rid);
   return appendSupportCode(fallback, rid);
+}
+
+/* ===== Normalization helpers (UI contract hardening) ===== */
+
+// Decimal/string-safe numeric parsing
+const asNumber = (v: any): number | null => {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+};
+
+// Normalize AccountMe so pages don’t have to guess whether Decimals came back as strings
+function normalizeAccountMe(data: any): AccountMe {
+  const out: any = data ? { ...data } : {};
+
+  const orgLike: any = out.org ?? out.organization ?? null;
+
+  // Root-level (defensive)
+  if ("electricity_price_per_kwh" in out) {
+    const n = asNumber(out.electricity_price_per_kwh);
+    if (n !== null) out.electricity_price_per_kwh = n;
+  }
+  if ("gas_price_per_kwh" in out) {
+    const n = asNumber(out.gas_price_per_kwh);
+    if (n !== null) out.gas_price_per_kwh = n;
+  }
+
+  // Org-level (canonical)
+  if (orgLike && typeof orgLike === "object") {
+    const orgOut: any = { ...orgLike };
+
+    if ("electricity_price_per_kwh" in orgOut) {
+      const n = asNumber(orgOut.electricity_price_per_kwh);
+      if (n !== null) orgOut.electricity_price_per_kwh = n;
+    }
+    if ("gas_price_per_kwh" in orgOut) {
+      const n = asNumber(orgOut.gas_price_per_kwh);
+      if (n !== null) orgOut.gas_price_per_kwh = n;
+    }
+
+    // Keep whichever field name backend uses
+    if (out.org) out.org = orgOut;
+    if (out.organization) out.organization = orgOut;
+  }
+
+  return out as AccountMe;
+}
+
+// Normalize site ids for endpoints that are numeric-path-param based (e.g., /sites/{id}/...)
+function normalizeNumericSiteId(siteId: string | number): string {
+  const s = String(siteId).trim();
+  if (s.toLowerCase().startsWith("site-")) return s.slice(5);
+  return s;
 }
 
 /* ===== Auth helpers (login + signup) ===== */
@@ -415,7 +472,9 @@ export interface OpportunityMeasure {
 export async function getSiteOpportunities(
   siteId: string | number
 ): Promise<OpportunityMeasure[]> {
-  const idStr = String(siteId);
+  // ✅ Accept "site-<id>" OR numeric id, normalize for numeric path params
+  const idStr = normalizeNumericSiteId(siteId);
+
   const resp = await api.get<{ opportunities: OpportunityMeasure[] }>(
     `/sites/${idStr}/opportunities`
   );
@@ -440,7 +499,9 @@ export interface IngestHealthResponse {
   meters: IngestHealthMeter[];
 }
 
-export async function getIngestHealth(windowHours: number = 24): Promise<IngestHealthResponse> {
+export async function getIngestHealth(
+  windowHours: number = 24
+): Promise<IngestHealthResponse> {
   const res = await api.get<IngestHealthResponse>("/timeseries/ingest_health", {
     params: { window_hours: windowHours },
   });
@@ -533,13 +594,16 @@ export async function updateAlertEvent(
 
 export async function getAccountMe(): Promise<AccountMe> {
   const resp = await api.get<AccountMe>("/account/me");
-  return resp.data;
+  // ✅ Normalize decimals/strings into numbers once, centrally
+  return normalizeAccountMe(resp.data);
 }
 
-export async function updateOrgSettings(payload: OrgSettingsUpdateRequest): Promise<AccountMe> {
+export async function updateOrgSettings(
+  payload: OrgSettingsUpdateRequest
+): Promise<AccountMe> {
   try {
     const response = await api.patch<AccountMe>("/account/org-settings", payload);
-    return response.data;
+    return normalizeAccountMe(response.data);
   } catch (err: any) {
     attachRequestId(err);
     if (axios.isAxiosError(err) && err.response?.status === 403) {
@@ -842,7 +906,7 @@ export interface ManualOpportunity {
 }
 
 export async function getManualOpportunities(siteId: number | string): Promise<ManualOpportunity[]> {
-  const idStr = String(siteId);
+  const idStr = normalizeNumericSiteId(siteId);
   const resp = await api.get<ManualOpportunity[]>(
     `/sites/${idStr}/opportunities/manual`
   );
@@ -853,7 +917,7 @@ export async function createManualOpportunity(
   siteId: number | string,
   payload: { name: string; description?: string }
 ): Promise<ManualOpportunity> {
-  const idStr = String(siteId);
+  const idStr = normalizeNumericSiteId(siteId);
   const resp = await api.post<ManualOpportunity>(
     `/sites/${idStr}/opportunities/manual`,
     payload

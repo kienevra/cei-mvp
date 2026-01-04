@@ -1,6 +1,7 @@
 // frontend/src/pages/Settings.tsx
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   getAccountMe,
   updateOrgSettings,
@@ -66,7 +67,43 @@ function isValidNonNegNumberString(s: string): boolean {
   return Number.isFinite(n) && n >= 0;
 }
 
+// --------- helpers to keep logic consistent & non-regressing ----------
+function getOrgFromAccount(acc: any): OrganizationSummary | null {
+  if (!acc) return null;
+  return (acc.org as OrganizationSummary) ?? (acc.organization as OrganizationSummary) ?? null;
+}
+
+function getRoleFromAccount(acc: any): string {
+  return String(acc?.role || "").toLowerCase();
+}
+
+function canManageSensitiveSettings(roleRaw: string): boolean {
+  // keep legacy "admin" support (even if backend is owner/member)
+  return roleRaw === "owner" || roleRaw === "admin";
+}
+
+function parsePrimaryEnergySources(org: any, accAny: any): string {
+  const p = org?.primary_energy_sources;
+  if (Array.isArray(p)) return p.join(", ");
+  if (typeof p === "string") return p;
+
+  if (Array.isArray(accAny?.primary_energy_sources)) return accAny.primary_energy_sources.join(", ");
+  if (typeof accAny?.primary_energy_sources === "string") return accAny.primary_energy_sources;
+
+  return "";
+}
+
+function parseNumberToInput(val: unknown): string {
+  return typeof val === "number" ? String(val) : "";
+}
+
+function parseStringToInput(val: unknown): string {
+  return typeof val === "string" ? val : "";
+}
+
 const Settings: React.FC = () => {
+  const { t } = useTranslation();
+
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [unitSystem, setUnitSystem] = useState<"metric" | "imperial">("metric");
 
@@ -92,28 +129,18 @@ const Settings: React.FC = () => {
 
   const [newTokenName, setNewTokenName] = useState("");
   const [creatingToken, setCreatingToken] = useState(false);
-  const [createdTokenSecret, setCreatedTokenSecret] = useState<string | null>(
-    null
-  );
+  const [createdTokenSecret, setCreatedTokenSecret] = useState<string | null>(null);
   const [copiedTokenSecret, setCopiedTokenSecret] = useState(false);
   const [revokingId, setRevokingId] = useState<number | null>(null);
 
-  useEffect(() => {
-    loadAccount();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Flexible org/account view for gating (declared early so handlers can use it)
+  // Derived account/org/role gating (stable + memoized)
   const accountAny: any = account || {};
-  const org: OrganizationSummary | null =
-    (accountAny.org as OrganizationSummary) ??
-    (accountAny.organization as OrganizationSummary) ??
-    null;
-
-  const roleRaw = String(accountAny.role || "").toLowerCase();
-  const isOwner = roleRaw === "owner";
-  const isAdmin = roleRaw === "admin";
-  const canManageOrgSensitiveSettings = isOwner || isAdmin;
+  const org: OrganizationSummary | null = useMemo(() => getOrgFromAccount(accountAny), [accountAny]);
+  const roleRaw = useMemo(() => getRoleFromAccount(accountAny), [accountAny]);
+  const canManageOrgSensitiveSettings = useMemo(
+    () => canManageSensitiveSettings(roleRaw),
+    [roleRaw]
+  );
 
   const disabledFieldStyle: React.CSSProperties = {
     opacity: 0.75,
@@ -122,10 +149,59 @@ const Settings: React.FC = () => {
 
   // Pricing configured heuristic (UI-side, until backend exposes pricing_configured)
   const currencyReady = normalizeCurrencyCode(currencyCodeInput).length === 3;
-  const elecReady =
-    electricityPriceInput.trim() !== "" && Number(electricityPriceInput) > 0;
+  const elecReady = electricityPriceInput.trim() !== "" && Number(electricityPriceInput) > 0;
   const gasReady = gasPriceInput.trim() !== "" && Number(gasPriceInput) > 0;
   const pricingConfigured = currencyReady && (elecReady || gasReady);
+
+  const hasTariffConfig =
+    primaryEnergySources.trim().length > 0 ||
+    electricityPriceInput.trim().length > 0 ||
+    gasPriceInput.trim().length > 0 ||
+    currencyCodeInput.trim().length > 0;
+
+  // Keep initial behavior: load on mount.
+  useEffect(() => {
+    loadAccount();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const applyOrgToFormState = (orgFromData: OrganizationSummary | null, anyData: any) => {
+    if (!orgFromData) {
+      setPrimaryEnergySources("");
+      setElectricityPriceInput("");
+      setGasPriceInput("");
+      setCurrencyCodeInput("");
+      return;
+    }
+
+    setPrimaryEnergySources(parsePrimaryEnergySources(orgFromData as any, anyData));
+    setElectricityPriceInput(
+      parseNumberToInput((orgFromData as any)?.electricity_price_per_kwh) ||
+        parseNumberToInput(anyData?.electricity_price_per_kwh)
+    );
+    setGasPriceInput(
+      parseNumberToInput((orgFromData as any)?.gas_price_per_kwh) ||
+        parseNumberToInput(anyData?.gas_price_per_kwh)
+    );
+    setCurrencyCodeInput(
+      parseStringToInput((orgFromData as any)?.currency_code) ||
+        parseStringToInput(anyData?.currency_code)
+    );
+  };
+
+  const loadIntegrationTokens = async () => {
+    setTokensLoading(true);
+    setTokensError(null);
+    try {
+      const list = await listIntegrationTokens();
+      setTokens(Array.isArray(list) ? (list as any) : []);
+    } catch (err: any) {
+      console.error("Failed to load integration tokens", err);
+      setTokensError(toUiMessage(err, t("settings.integrationTokens.errors.load")));
+    } finally {
+      setTokensLoading(false);
+    }
+  };
 
   const loadAccount = async () => {
     setAccountLoading(true);
@@ -138,60 +214,13 @@ const Settings: React.FC = () => {
       setAccount(data);
 
       const anyData: any = data || {};
-      const orgFromData: OrganizationSummary | null =
-        (anyData.org as OrganizationSummary) ??
-        (anyData.organization as OrganizationSummary) ??
-        null;
+      const orgFromData = getOrgFromAccount(anyData);
 
-      if (orgFromData) {
-        const p = (orgFromData as any).primary_energy_sources;
-        if (Array.isArray(p)) {
-          setPrimaryEnergySources(p.join(", "));
-        } else if (typeof p === "string") {
-          setPrimaryEnergySources(p);
-        } else if (Array.isArray(anyData.primary_energy_sources)) {
-          setPrimaryEnergySources(anyData.primary_energy_sources.join(", "));
-        } else if (typeof anyData.primary_energy_sources === "string") {
-          setPrimaryEnergySources(anyData.primary_energy_sources);
-        } else {
-          setPrimaryEnergySources("");
-        }
-
-        if (typeof (orgFromData as any).electricity_price_per_kwh === "number") {
-          setElectricityPriceInput(
-            String((orgFromData as any).electricity_price_per_kwh)
-          );
-        } else if (typeof anyData.electricity_price_per_kwh === "number") {
-          setElectricityPriceInput(String(anyData.electricity_price_per_kwh));
-        } else {
-          setElectricityPriceInput("");
-        }
-
-        if (typeof (orgFromData as any).gas_price_per_kwh === "number") {
-          setGasPriceInput(String((orgFromData as any).gas_price_per_kwh));
-        } else if (typeof anyData.gas_price_per_kwh === "number") {
-          setGasPriceInput(String(anyData.gas_price_per_kwh));
-        } else {
-          setGasPriceInput("");
-        }
-
-        if (typeof (orgFromData as any).currency_code === "string") {
-          setCurrencyCodeInput((orgFromData as any).currency_code);
-        } else if (typeof anyData.currency_code === "string") {
-          setCurrencyCodeInput(anyData.currency_code);
-        } else {
-          setCurrencyCodeInput("");
-        }
-      } else {
-        setPrimaryEnergySources("");
-        setElectricityPriceInput("");
-        setGasPriceInput("");
-        setCurrencyCodeInput("");
-      }
+      applyOrgToFormState(orgFromData, anyData);
 
       // Now that we know role, load tokens only for owner/admin.
-      const role = String((data as any)?.role || "").toLowerCase();
-      const canManage = role === "owner" || role === "admin";
+      const role = getRoleFromAccount(anyData);
+      const canManage = canManageSensitiveSettings(role);
       if (canManage) {
         await loadIntegrationTokens();
       } else {
@@ -199,23 +228,9 @@ const Settings: React.FC = () => {
       }
     } catch (err: any) {
       console.error("Failed to load account for settings", err);
-      setAccountError(toUiMessage(err, "Failed to load account details."));
+      setAccountError(toUiMessage(err, t("settings.energyTariffs.accountErrorFallback")));
     } finally {
       setAccountLoading(false);
-    }
-  };
-
-  const loadIntegrationTokens = async () => {
-    setTokensLoading(true);
-    setTokensError(null);
-    try {
-      const list = await listIntegrationTokens();
-      setTokens(Array.isArray(list) ? (list as any) : []);
-    } catch (err: any) {
-      console.error("Failed to load integration tokens", err);
-      setTokensError(toUiMessage(err, "Failed to load integration tokens."));
-    } finally {
-      setTokensLoading(false);
     }
   };
 
@@ -224,7 +239,7 @@ const Settings: React.FC = () => {
     if (!newTokenName.trim()) return;
 
     if (!canManageOrgSensitiveSettings) {
-      setTokensError("Owner-only. Ask your org owner to create a token.");
+      setTokensError(t("settings.integrationTokens.errors.ownerOnlyCreate"));
       return;
     }
 
@@ -240,7 +255,7 @@ const Settings: React.FC = () => {
       await loadIntegrationTokens();
     } catch (err: any) {
       console.error("Failed to create integration token", err);
-      setTokensError(toUiMessage(err, "Failed to create integration token."));
+      setTokensError(toUiMessage(err, t("settings.integrationTokens.errors.create")));
     } finally {
       setCreatingToken(false);
     }
@@ -248,7 +263,7 @@ const Settings: React.FC = () => {
 
   const handleRevokeToken = async (id: number) => {
     if (!canManageOrgSensitiveSettings) {
-      setTokensError("Owner-only. Ask your org owner to revoke tokens.");
+      setTokensError(t("settings.integrationTokens.errors.ownerOnlyRevoke"));
       return;
     }
 
@@ -260,7 +275,7 @@ const Settings: React.FC = () => {
       await loadIntegrationTokens();
     } catch (err: any) {
       console.error("Failed to revoke integration token", err);
-      setTokensError(toUiMessage(err, "Failed to revoke integration token."));
+      setTokensError(toUiMessage(err, t("settings.integrationTokens.errors.revoke")));
     } finally {
       setRevokingId(null);
     }
@@ -281,38 +296,35 @@ const Settings: React.FC = () => {
     e.preventDefault();
 
     if (!account) {
-      setOrgSettingsError("Account details are not loaded yet.");
+      setOrgSettingsError(t("settings.energyTariffs.validation.accountNotLoaded"));
       return;
     }
 
     if (!canManageOrgSensitiveSettings) {
-      setOrgSettingsError("Owner-only. Ask your org owner to update tariffs.");
+      setOrgSettingsError(t("settings.energyTariffs.validation.ownerOnlyEdit"));
       return;
     }
 
     const anyAcc: any = account;
-    const orgFromAccount: OrganizationSummary | null =
-      (anyAcc.org as OrganizationSummary) ??
-      (anyAcc.organization as OrganizationSummary) ??
-      null;
+    const orgFromAccount = getOrgFromAccount(anyAcc);
 
     if (!orgFromAccount) {
-      setOrgSettingsError("No organization is associated with this account yet.");
+      setOrgSettingsError(t("settings.energyTariffs.validation.noOrg"));
       return;
     }
 
     // basic validation before hitting backend
     const cc = normalizeCurrencyCode(currencyCodeInput);
     if (currencyCodeInput.trim() !== "" && cc.length !== 3) {
-      setOrgSettingsError("Currency code must be a 3-letter code (e.g. EUR).");
+      setOrgSettingsError(t("settings.energyTariffs.validation.currencyCodeInvalid"));
       return;
     }
     if (!isValidNonNegNumberString(electricityPriceInput)) {
-      setOrgSettingsError("Electricity price must be a non-negative number.");
+      setOrgSettingsError(t("settings.energyTariffs.validation.electricityNonNegative"));
       return;
     }
     if (!isValidNonNegNumberString(gasPriceInput)) {
-      setOrgSettingsError("Gas price must be a non-negative number.");
+      setOrgSettingsError(t("settings.energyTariffs.validation.gasNonNegative"));
       return;
     }
 
@@ -324,11 +336,8 @@ const Settings: React.FC = () => {
       primary_energy_sources:
         primaryEnergySources.trim() === "" ? null : primaryEnergySources.trim(),
       electricity_price_per_kwh:
-        electricityPriceInput.trim() === ""
-          ? null
-          : Number(electricityPriceInput.trim()),
-      gas_price_per_kwh:
-        gasPriceInput.trim() === "" ? null : Number(gasPriceInput.trim()),
+        electricityPriceInput.trim() === "" ? null : Number(electricityPriceInput.trim()),
+      gas_price_per_kwh: gasPriceInput.trim() === "" ? null : Number(gasPriceInput.trim()),
       currency_code: currencyCodeInput.trim() === "" ? null : cc,
     };
 
@@ -337,68 +346,18 @@ const Settings: React.FC = () => {
       setAccount(updated);
 
       const updatedAny: any = updated || {};
-      const updatedOrg: OrganizationSummary | null =
-        (updatedAny.org as OrganizationSummary) ??
-        (updatedAny.organization as OrganizationSummary) ??
-        null;
+      const updatedOrg = getOrgFromAccount(updatedAny);
 
-      if (updatedOrg) {
-        const p = (updatedOrg as any).primary_energy_sources;
-        if (Array.isArray(p)) {
-          setPrimaryEnergySources(p.join(", "));
-        } else if (typeof p === "string") {
-          setPrimaryEnergySources(p);
-        } else if (Array.isArray(updatedAny.primary_energy_sources)) {
-          setPrimaryEnergySources(updatedAny.primary_energy_sources.join(", "));
-        } else if (typeof updatedAny.primary_energy_sources === "string") {
-          setPrimaryEnergySources(updatedAny.primary_energy_sources);
-        } else {
-          setPrimaryEnergySources("");
-        }
-
-        if (typeof (updatedOrg as any).electricity_price_per_kwh === "number") {
-          setElectricityPriceInput(
-            String((updatedOrg as any).electricity_price_per_kwh)
-          );
-        } else if (typeof updatedAny.electricity_price_per_kwh === "number") {
-          setElectricityPriceInput(String(updatedAny.electricity_price_per_kwh));
-        } else {
-          setElectricityPriceInput("");
-        }
-
-        if (typeof (updatedOrg as any).gas_price_per_kwh === "number") {
-          setGasPriceInput(String((updatedOrg as any).gas_price_per_kwh));
-        } else if (typeof updatedAny.gas_price_per_kwh === "number") {
-          setGasPriceInput(String(updatedAny.gas_price_per_kwh));
-        } else {
-          setGasPriceInput("");
-        }
-
-        if (typeof (updatedOrg as any).currency_code === "string") {
-          setCurrencyCodeInput((updatedOrg as any).currency_code);
-        } else if (typeof updatedAny.currency_code === "string") {
-          setCurrencyCodeInput(updatedAny.currency_code);
-        } else {
-          setCurrencyCodeInput("");
-        }
-      }
+      applyOrgToFormState(updatedOrg, updatedAny);
 
       setOrgSettingsSaved(true);
     } catch (err: any) {
       console.error("Failed to save org settings", err);
-      setOrgSettingsError(
-        toUiMessage(err, "Failed to save organization settings.")
-      );
+      setOrgSettingsError(toUiMessage(err, t("errors.generic")));
     } finally {
       setSavingOrgSettings(false);
     }
   };
-
-  const hasTariffConfig =
-    primaryEnergySources.trim().length > 0 ||
-    electricityPriceInput.trim().length > 0 ||
-    gasPriceInput.trim().length > 0 ||
-    currencyCodeInput.trim().length > 0;
 
   return (
     <div className="dashboard-page">
@@ -410,7 +369,7 @@ const Settings: React.FC = () => {
             letterSpacing: "-0.02em",
           }}
         >
-          Settings
+          {t("settings.header.title")}
         </h1>
         <p
           style={{
@@ -419,8 +378,7 @@ const Settings: React.FC = () => {
             color: "var(--cei-text-muted)",
           }}
         >
-          Local preferences for your CEI experience, plus technical settings for
-          data ingestion.
+          {t("settings.header.subtitle")}
         </p>
       </section>
 
@@ -433,11 +391,9 @@ const Settings: React.FC = () => {
               marginBottom: "0.5rem",
             }}
           >
-            Notifications
+            {t("settings.notifications.title")}
           </div>
-          <label
-            style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
-          >
+          <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <input
               type="checkbox"
               checked={emailAlerts}
@@ -445,7 +401,7 @@ const Settings: React.FC = () => {
               style={{ width: "auto" }}
             />
             <span style={{ fontSize: "0.85rem" }}>
-              Email me when new high-impact opportunities are detected.
+              {t("settings.notifications.emailAlertsLabel")}
             </span>
           </label>
         </div>
@@ -458,10 +414,10 @@ const Settings: React.FC = () => {
               marginBottom: "0.5rem",
             }}
           >
-            Units
+            {t("settings.units.title")}
           </div>
           <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-            Choose how energy and emissions metrics are displayed.
+            {t("settings.units.subtitle")}
           </div>
           <div
             style={{
@@ -478,14 +434,11 @@ const Settings: React.FC = () => {
                   unitSystem === "metric"
                     ? "rgba(34, 197, 94, 0.5)"
                     : "rgba(156, 163, 175, 0.4)",
-                background:
-                  unitSystem === "metric"
-                    ? "rgba(22, 163, 74, 0.25)"
-                    : "transparent",
+                background: unitSystem === "metric" ? "rgba(22, 163, 74, 0.25)" : "transparent",
               }}
               onClick={() => setUnitSystem("metric")}
             >
-              Metric (kWh, tCO₂e)
+              {t("settings.units.metric")}
             </button>
             <button
               type="button"
@@ -496,13 +449,11 @@ const Settings: React.FC = () => {
                     ? "rgba(34, 197, 94, 0.5)"
                     : "rgba(156, 163, 175, 0.4)",
                 background:
-                  unitSystem === "imperial"
-                    ? "rgba(22, 163, 74, 0.25)"
-                    : "transparent",
+                  unitSystem === "imperial" ? "rgba(22, 163, 74, 0.25)" : "transparent",
               }}
               onClick={() => setUnitSystem("imperial")}
             >
-              Imperial (kBtu, lb CO₂)
+              {t("settings.units.imperial")}
             </button>
           </div>
         </div>
@@ -523,27 +474,24 @@ const Settings: React.FC = () => {
               flexWrap: "wrap",
             }}
           >
-            <span
-              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
-            >
-              <span>Energy & tariffs</span>
+            <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <span>{t("settings.energyTariffs.title")}</span>
+
               {!canManageOrgSensitiveSettings && account && org && (
                 <span className="cei-pill-muted" style={{ fontSize: "0.75rem" }}>
-                  Owner-only
+                  {t("settings.energyTariffs.ownerOnly")}
                 </span>
               )}
+
               {account && org && !pricingConfigured && (
                 <span className="cei-pill-muted" style={{ fontSize: "0.75rem" }}>
-                  No tariffs configured – showing kWh only
+                  {t("settings.energyTariffs.noTariffsConfigured")}
                 </span>
               )}
             </span>
 
-            <span
-              style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}
-            >
-              Org-level settings used by the cost engine in KPIs, alerts, and
-              reports.
+            <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
+              {t("settings.energyTariffs.help")}
             </span>
           </div>
 
@@ -552,13 +500,13 @@ const Settings: React.FC = () => {
               className="cei-pill-muted"
               style={{ marginBottom: "0.6rem", fontSize: "0.8rem" }}
             >
-              Owner-only. You can view settings, but editing is disabled.
+              {t("settings.energyTariffs.readOnlyNotice")}
             </div>
           )}
 
           {accountLoading ? (
             <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              Loading organization settings…
+              {t("settings.energyTariffs.loading")}
             </div>
           ) : accountError ? (
             <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
@@ -566,13 +514,11 @@ const Settings: React.FC = () => {
             </div>
           ) : !account ? (
             <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              Account details are not available yet. Once your org is set up, you
-              can configure energy costs here.
+              {t("settings.energyTariffs.accountNotReady")}
             </div>
           ) : !org ? (
             <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              No organization is associated with this account yet. Cost analytics
-              will remain disabled until an org is created.
+              {t("settings.energyTariffs.noOrg")}
             </div>
           ) : (
             <form
@@ -594,11 +540,11 @@ const Settings: React.FC = () => {
                     marginBottom: "0.2rem",
                   }}
                 >
-                  Primary energy sources
+                  {t("settings.energyTariffs.fields.primaryEnergySources.label")}
                 </label>
                 <input
                   type="text"
-                  placeholder='e.g. "electricity", "electricity,gas"'
+                  placeholder={t("settings.energyTariffs.fields.primaryEnergySources.placeholder")}
                   value={primaryEnergySources}
                   onChange={(e) => setPrimaryEnergySources(e.target.value)}
                   disabled={!canManageOrgSensitiveSettings}
@@ -619,7 +565,7 @@ const Settings: React.FC = () => {
                     color: "var(--cei-text-muted)",
                   }}
                 >
-                  Comma-separated list; currently used for labeling and context.
+                  {t("settings.energyTariffs.fields.primaryEnergySources.help")}
                 </div>
               </div>
 
@@ -632,13 +578,13 @@ const Settings: React.FC = () => {
                     marginBottom: "0.2rem",
                   }}
                 >
-                  Electricity price (per kWh)
+                  {t("settings.energyTariffs.fields.electricityPrice.label")}
                 </label>
                 <input
                   type="number"
                   min="0"
                   step="0.0001"
-                  placeholder="e.g. 0.18"
+                  placeholder={t("settings.energyTariffs.fields.electricityPrice.placeholder")}
                   value={electricityPriceInput}
                   onChange={(e) => setElectricityPriceInput(e.target.value)}
                   disabled={!canManageOrgSensitiveSettings}
@@ -663,13 +609,13 @@ const Settings: React.FC = () => {
                     marginBottom: "0.2rem",
                   }}
                 >
-                  Gas price (per kWh, optional)
+                  {t("settings.energyTariffs.fields.gasPrice.label")}
                 </label>
                 <input
                   type="number"
                   min="0"
                   step="0.0001"
-                  placeholder="e.g. 0.06"
+                  placeholder={t("settings.energyTariffs.fields.gasPrice.placeholder")}
                   value={gasPriceInput}
                   onChange={(e) => setGasPriceInput(e.target.value)}
                   disabled={!canManageOrgSensitiveSettings}
@@ -694,16 +640,14 @@ const Settings: React.FC = () => {
                     marginBottom: "0.2rem",
                   }}
                 >
-                  Currency code
+                  {t("settings.energyTariffs.fields.currencyCode.label")}
                 </label>
                 <input
                   type="text"
                   maxLength={3}
-                  placeholder="e.g. EUR"
+                  placeholder={t("settings.energyTariffs.fields.currencyCode.placeholder")}
                   value={currencyCodeInput}
-                  onChange={(e) =>
-                    setCurrencyCodeInput(normalizeCurrencyCode(e.target.value))
-                  }
+                  onChange={(e) => setCurrencyCodeInput(normalizeCurrencyCode(e.target.value))}
                   disabled={!canManageOrgSensitiveSettings}
                   style={{
                     width: "100%",
@@ -734,24 +678,18 @@ const Settings: React.FC = () => {
                       {orgSettingsError}
                     </div>
                   )}
+
                   {orgSettingsSaved && !orgSettingsError && (
                     <div style={{ fontSize: "0.75rem", color: "#4ade80" }}>
-                      Settings saved. Cost analytics will now use these values.
+                      {t("settings.energyTariffs.messages.saved")}
                     </div>
                   )}
-                  {!hasTariffConfig &&
-                    !orgSettingsError &&
-                    !orgSettingsSaved && (
-                      <div
-                        style={{
-                          fontSize: "0.75rem",
-                          color: "var(--cei-text-muted)",
-                        }}
-                      >
-                        Until tariffs are configured, CEI will fall back to
-                        kWh-only analytics.
-                      </div>
-                    )}
+
+                  {!hasTariffConfig && !orgSettingsError && !orgSettingsSaved && (
+                    <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
+                      {t("settings.energyTariffs.messages.fallbackKwhOnly")}
+                    </div>
+                  )}
                 </div>
 
                 <button
@@ -760,18 +698,17 @@ const Settings: React.FC = () => {
                   disabled={!canManageOrgSensitiveSettings || savingOrgSettings}
                   style={{
                     whiteSpace: "nowrap",
-                    opacity:
-                      !canManageOrgSensitiveSettings || savingOrgSettings
-                        ? 0.7
-                        : 1,
+                    opacity: !canManageOrgSensitiveSettings || savingOrgSettings ? 0.7 : 1,
                   }}
                   title={
                     !canManageOrgSensitiveSettings
-                      ? "Owner-only. Ask your org owner to update tariffs."
+                      ? t("settings.energyTariffs.validation.ownerOnlyEdit")
                       : undefined
                   }
                 >
-                  {savingOrgSettings ? "Saving..." : "Save energy settings"}
+                  {savingOrgSettings
+                    ? t("settings.energyTariffs.actions.saving")
+                    : t("settings.energyTariffs.actions.saveEnergySettings")}
                 </button>
               </div>
             </form>
@@ -796,9 +733,9 @@ const Settings: React.FC = () => {
               }}
             >
               <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                <span>Integration tokens</span>
+                <span>{t("settings.integrationTokens.title")}</span>
                 <span className="cei-pill-muted" style={{ fontSize: "0.75rem" }}>
-                  Owner-only
+                  {t("settings.integrationTokens.ownerOnly")}
                 </span>
               </span>
             </div>
@@ -810,14 +747,16 @@ const Settings: React.FC = () => {
                 marginBottom: "0.75rem",
               }}
             >
-              Long-lived API tokens for SCADA/BMS/historian systems to push timeseries data
-              directly into CEI via{" "}
-              <code style={{ fontSize: "0.75rem" }}>POST /api/v1/timeseries/batch</code>.
+              {t("settings.integrationTokens.description")}{" "}
+              <code style={{ fontSize: "0.75rem" }}>
+                {t("settings.integrationTokens.endpoint")}
+              </code>
+              .
             </p>
 
             {!canManageOrgSensitiveSettings ? (
               <div className="cei-pill-muted" style={{ fontSize: "0.8rem" }}>
-                You don’t have permission to view or manage integration tokens. Ask your org owner.
+                {t("settings.integrationTokens.noPermission")}
               </div>
             ) : (
               <>
@@ -842,7 +781,7 @@ const Settings: React.FC = () => {
                 >
                   <input
                     type="text"
-                    placeholder="e.g. SCADA Plant 4"
+                    placeholder={t("settings.integrationTokens.createPlaceholder")}
                     value={newTokenName}
                     onChange={(e) => setNewTokenName(e.target.value)}
                     disabled={!canManageOrgSensitiveSettings}
@@ -864,16 +803,17 @@ const Settings: React.FC = () => {
                     disabled={!canManageOrgSensitiveSettings || creatingToken}
                     style={{
                       whiteSpace: "nowrap",
-                      opacity:
-                        !canManageOrgSensitiveSettings || creatingToken ? 0.7 : 1,
+                      opacity: !canManageOrgSensitiveSettings || creatingToken ? 0.7 : 1,
                     }}
                     title={
                       !canManageOrgSensitiveSettings
-                        ? "Owner-only. Ask your org owner to create a token."
+                        ? t("settings.integrationTokens.errors.ownerOnlyCreate")
                         : undefined
                     }
                   >
-                    {creatingToken ? "Creating..." : "Create token"}
+                    {creatingToken
+                      ? t("settings.integrationTokens.creatingButton")
+                      : t("settings.integrationTokens.createButton")}
                   </button>
                 </form>
 
@@ -888,14 +828,8 @@ const Settings: React.FC = () => {
                       background: "rgba(15, 23, 42, 0.7)",
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: "0.8rem",
-                        fontWeight: 500,
-                        marginBottom: "0.4rem",
-                      }}
-                    >
-                      New integration token (shown only once)
+                    <div style={{ fontSize: "0.8rem", fontWeight: 500, marginBottom: "0.4rem" }}>
+                      {t("settings.integrationTokens.newTokenTitle")}
                     </div>
                     <div
                       style={{
@@ -916,22 +850,19 @@ const Settings: React.FC = () => {
                         flexWrap: "wrap",
                       }}
                     >
-                      <span
-                        style={{
-                          fontSize: "0.75rem",
-                          color: "var(--cei-text-muted)",
-                        }}
-                      >
-                        Store this token securely (vault, password manager). You won’t be able to see it again.
+                      <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
+                        {t("settings.integrationTokens.newTokenHelp")}
                       </span>
                       <button
                         type="button"
                         className="cei-btn"
                         onClick={handleCopySecret}
                         style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }}
-                        title="Copy token to clipboard"
+                        title={t("settings.integrationTokens.actions.copy")}
                       >
-                        {copiedTokenSecret ? "Copied" : "Copy"}
+                        {copiedTokenSecret
+                          ? t("settings.integrationTokens.actions.copied")
+                          : t("settings.integrationTokens.actions.copy")}
                       </button>
                     </div>
                   </div>
@@ -946,11 +877,11 @@ const Settings: React.FC = () => {
                 >
                   {tokensLoading ? (
                     <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-                      Loading integration tokens...
+                      {t("settings.integrationTokens.loading")}
                     </div>
                   ) : tokens.length === 0 ? (
                     <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-                      No integration tokens yet. Create one above to let external systems push data into CEI.
+                      {t("settings.integrationTokens.empty")}
                     </div>
                   ) : (
                     <div
@@ -961,9 +892,9 @@ const Settings: React.FC = () => {
                         fontSize: "0.8rem",
                       }}
                     >
-                      {tokens.map((t) => (
+                      {tokens.map((tkn) => (
                         <div
-                          key={t.id}
+                          key={tkn.id}
                           style={{
                             display: "flex",
                             alignItems: "center",
@@ -975,32 +906,42 @@ const Settings: React.FC = () => {
                           }}
                         >
                           <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-                            <span style={{ fontWeight: 500 }}>{t.name}</span>
+                            <span style={{ fontWeight: 500 }}>{tkn.name}</span>
                             <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-                              Created: {fmtIsoOrRaw(t.created_at)}
-                              {t.last_used_at ? ` • Last used: ${fmtIsoOrRaw(t.last_used_at)}` : ""}
+                              {t("settings.integrationTokens.labels.created")}:{" "}
+                              {fmtIsoOrRaw(tkn.created_at)}
+                              {tkn.last_used_at
+                                ? ` • ${t("settings.integrationTokens.labels.lastUsed")}: ${fmtIsoOrRaw(
+                                    tkn.last_used_at
+                                  )}`
+                                : ""}
                             </span>
                           </div>
+
                           <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
                             <span
-                              className={t.is_active ? "cei-pill-success" : "cei-pill-muted"}
+                              className={tkn.is_active ? "cei-pill-success" : "cei-pill-muted"}
                               style={{ fontSize: "0.7rem" }}
                             >
-                              {t.is_active ? "Active" : "Revoked"}
+                              {tkn.is_active
+                                ? t("settings.integrationTokens.status.active")
+                                : t("settings.integrationTokens.status.revoked")}
                             </span>
                             <button
                               type="button"
                               className="cei-btn"
-                              disabled={!t.is_active || revokingId === t.id}
-                              onClick={() => handleRevokeToken(t.id)}
+                              disabled={!tkn.is_active || revokingId === tkn.id}
+                              onClick={() => handleRevokeToken(tkn.id)}
                               style={{
                                 fontSize: "0.75rem",
                                 padding: "0.25rem 0.6rem",
-                                opacity: !t.is_active || revokingId === t.id ? 0.6 : 1,
+                                opacity: !tkn.is_active || revokingId === tkn.id ? 0.6 : 1,
                               }}
-                              title={!t.is_active ? "Token already revoked." : "Revoke this token"}
+                              title={t("settings.integrationTokens.actions.revoke")}
                             >
-                              {revokingId === t.id ? "Revoking..." : "Revoke"}
+                              {revokingId === tkn.id
+                                ? t("settings.integrationTokens.actions.revoking")
+                                : t("settings.integrationTokens.actions.revoke")}
                             </button>
                           </div>
                         </div>

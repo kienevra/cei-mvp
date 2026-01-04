@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import { uploadCsv } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
+import { useTranslation, Trans } from "react-i18next";
 
 type CsvUploadBackendResult = {
   rows_received: number;
@@ -69,19 +70,23 @@ function appendSupportCode(msg: string, rid: string | null): string {
   return `${msg} (Support code: ${rid})`;
 }
 
-function getUploadErrorMessage(e: any): string {
+function getUploadErrorMessage(e: any, t: (key: string, opts?: any) => string): string {
   const rid = getSupportCodeFromError(e);
 
   const msg =
     e?.response?.data?.detail?.message ||
     e?.response?.data?.detail ||
     e?.message ||
-    "Upload failed. Please check the file and try again.";
+    t("csvUpload.errors.uploadFailedGeneric", {
+      defaultValue: "Upload failed. Please check the file and try again.",
+    });
 
   return appendSupportCode(String(msg), rid);
 }
 
 const CSVUpload: React.FC = () => {
+  const { t } = useTranslation();
+
   const location = useLocation();
   const params = new URLSearchParams(location.search);
   const forcedSiteId = params.get("site_id");
@@ -133,7 +138,7 @@ const CSVUpload: React.FC = () => {
     setResult(null);
 
     if (!file) {
-      setError("Please choose a CSV file to upload.");
+      setError(t("csvUpload.errors.noFileSelected", { defaultValue: "Please choose a CSV file to upload." }));
       setStatus("error");
       return;
     }
@@ -170,7 +175,7 @@ const CSVUpload: React.FC = () => {
 
       setStatus("done");
     } catch (e: any) {
-      setError(getUploadErrorMessage(e));
+      setError(getUploadErrorMessage(e, t));
       setStatus("error");
     }
   };
@@ -185,33 +190,49 @@ const CSVUpload: React.FC = () => {
     : null;
 
   const isBusy = status === "validating" || status === "ingesting";
+
   const buttonLabel =
     status === "validating"
-      ? "Validating & ingesting…"
+      ? t("csvUpload.button.validating", { defaultValue: "Validating & ingesting…" })
       : status === "ingesting"
-      ? "Ingesting…"
+      ? t("csvUpload.button.ingesting", { defaultValue: "Ingesting…" })
       : status === "done"
-      ? "Upload again"
-      : "Upload CSV";
+      ? t("csvUpload.button.uploadAgain", { defaultValue: "Upload again" })
+      : t("csvUpload.button.uploadCsv", { defaultValue: "Upload CSV" });
 
   const statusLabel = (() => {
     switch (status) {
       case "idle":
-        return "Waiting for a CSV file.";
+        return t("csvUpload.status.idle", { defaultValue: "Waiting for a CSV file." });
       case "ready":
         return file
-          ? `Ready to upload: ${file.name}`
-          : "Waiting for a CSV file.";
+          ? t("csvUpload.status.readyWithFile", {
+              defaultValue: "Ready to upload: {{name}}",
+              name: file.name,
+            })
+          : t("csvUpload.status.idle", { defaultValue: "Waiting for a CSV file." });
       case "validating":
-        return "Validating headers and preparing rows for ingestion…";
+        return t("csvUpload.status.validating", {
+          defaultValue: "Validating headers and preparing rows for ingestion…",
+        });
       case "ingesting":
-        return "Ingesting rows into the timeseries engine…";
+        return t("csvUpload.status.ingesting", {
+          defaultValue: "Ingesting rows into the timeseries engine…",
+        });
       case "done":
         return isPerSiteMode
-          ? "Upload complete. The latest data will feed this site’s charts, alerts, and reports."
-          : "Upload complete. The latest data will feed Dashboard, SiteView, Alerts, and Reports.";
+          ? t("csvUpload.status.donePerSite", {
+              defaultValue:
+                "Upload complete. The latest data will feed this site’s charts, alerts, and reports.",
+            })
+          : t("csvUpload.status.doneGlobal", {
+              defaultValue:
+                "Upload complete. The latest data will feed Dashboard, SiteView, Alerts, and Reports.",
+            });
       case "error":
-        return "Upload failed. Review the error message and adjust the CSV.";
+        return t("csvUpload.status.error", {
+          defaultValue: "Upload failed. Review the error message and adjust the CSV.",
+        });
       default:
         return null;
     }
@@ -241,8 +262,12 @@ const CSVUpload: React.FC = () => {
             }}
           >
             {isPerSiteMode
-              ? "Upload timeseries data for this site"
-              : "Upload timeseries data"}
+              ? t("csvUpload.title.perSite", {
+                  defaultValue: "Upload timeseries data for this site",
+                })
+              : t("csvUpload.title.global", {
+                  defaultValue: "Upload timeseries data",
+                })}
           </h1>
           <p
             style={{
@@ -252,25 +277,22 @@ const CSVUpload: React.FC = () => {
             }}
           >
             {isPerSiteMode ? (
-              <>
-                You&apos;re uploading data for{" "}
-                <code>{forcedSiteId}</code>. CEI will ingest all rows into this
-                site. Column <code>order</code> doesn&apos;t matter; the engine
-                reads the header row. For this scoped upload, your CSV must
-                include at least <code>timestamp</code>, <code>value</code>,{" "}
-                <code>unit</code>, and <code>meter_id</code>. A{" "}
-                <code>site_id</code> column is optional and will be ignored for
-                routing.
-              </>
+              <Trans
+                i18nKey="csvUpload.subtitle.perSite"
+                defaults={
+                  "You&apos;re uploading data for <code>{{forcedSiteId}}</code>. CEI will ingest all rows into this site. Column <code>order</code> doesn&apos;t matter; the engine reads the header row. For this scoped upload, your CSV must include at least <code>timestamp</code>, <code>value</code>, <code>unit</code>, and <code>meter_id</code>. A <code>site_id</code> column is optional and will be ignored for routing."
+                }
+                values={{ forcedSiteId }}
+                components={{ code: <code /> }}
+              />
             ) : (
-              <>
-                Drag a CSV into CEI and we&apos;ll ingest energy readings into
-                the timeseries engine. Column{" "}
-                <code>order doesn&apos;t matter</code> as long as the headers
-                include <code>timestamp</code>, <code>value</code>,{" "}
-                <code>unit</code>, <code>site_id</code>, and{" "}
-                <code>meter_id</code>.
-              </>
+              <Trans
+                i18nKey="csvUpload.subtitle.global"
+                defaults={
+                  "Drag a CSV into CEI and we&apos;ll ingest energy readings into the timeseries engine. Column <code>order doesn&apos;t matter</code> as long as the headers include <code>timestamp</code>, <code>value</code>, <code>unit</code>, <code>site_id</code>, and <code>meter_id</code>."
+                }
+                components={{ code: <code /> }}
+              />
             )}
           </p>
           {isPerSiteMode && (
@@ -281,8 +303,12 @@ const CSVUpload: React.FC = () => {
                 color: "var(--cei-text-accent)",
               }}
             >
-              Scoped mode: all ingested rows will use{" "}
-              <code>site_id = {forcedSiteId}</code>.
+              <Trans
+                i18nKey="csvUpload.scopedMode"
+                defaults={"Scoped mode: all ingested rows will use <code>site_id = {{forcedSiteId}}</code>."}
+                values={{ forcedSiteId }}
+                components={{ code: <code /> }}
+              />
             </div>
           )}
         </div>
@@ -293,22 +319,34 @@ const CSVUpload: React.FC = () => {
             color: "var(--cei-text-muted)",
           }}
         >
-          <div>Endpoint: {endpointLabel}</div>
-          <div>Auth: required</div>
+          <div>
+            {t("csvUpload.meta.endpoint", { defaultValue: "Endpoint:" })} {endpointLabel}
+          </div>
+          <div>{t("csvUpload.meta.authRequired", { defaultValue: "Auth: required" })}</div>
           {lastSnapshot && lastCompletedLabel && (
             <div style={{ marginTop: "0.35rem" }}>
               <div style={{ fontSize: "0.78rem" }}>
-                Last successful upload
-                {isPerSiteMode ? " (this scope)" : ""}
+                {t("csvUpload.meta.lastSuccessful", {
+                  defaultValue: "Last successful upload",
+                })}
+                {isPerSiteMode
+                  ? t("csvUpload.meta.scopeSuffix", { defaultValue: " (this scope)" })
+                  : ""}
               </div>
               <div style={{ fontSize: "0.78rem" }}>
                 <span style={{ color: "var(--cei-text-accent)" }}>
                   {lastCompletedLabel}
                 </span>
                 {", "}
-                ingested{" "}
-                <strong>{lastSnapshot.rows_ingested.toLocaleString()}</strong> /
-                {lastSnapshot.rows_received.toLocaleString()} rows.
+                <Trans
+                  i18nKey="csvUpload.meta.ingestedSummary"
+                  defaults={"ingested <strong>{{ingested}}</strong> / {{received}} rows."}
+                  values={{
+                    ingested: lastSnapshot.rows_ingested.toLocaleString(),
+                    received: lastSnapshot.rows_received.toLocaleString(),
+                  }}
+                  components={{ strong: <strong /> }}
+                />
               </div>
             </div>
           )}
@@ -337,7 +375,9 @@ const CSVUpload: React.FC = () => {
             >
               {/* Left: file picker */}
               <div>
-                <label htmlFor="csv-file">CSV file</label>
+                <label htmlFor="csv-file">
+                  {t("csvUpload.form.csvFileLabel", { defaultValue: "CSV file" })}
+                </label>
                 <input
                   id="csv-file"
                   type="file"
@@ -351,8 +391,10 @@ const CSVUpload: React.FC = () => {
                     color: "var(--cei-text-muted)",
                   }}
                 >
-                  CEI will read the header row and map columns by name. The
-                  engine expects at least:
+                  {t("csvUpload.form.mappingIntro", {
+                    defaultValue:
+                      "CEI will read the header row and map columns by name. The engine expects at least:",
+                  })}
                   <ul
                     style={{
                       margin: "0.4rem 0 0",
@@ -361,23 +403,43 @@ const CSVUpload: React.FC = () => {
                     }}
                   >
                     <li>
-                      <code>timestamp</code> – ISO 8601 or{" "}
-                      <code>YYYY-MM-DD HH:MM:SS</code>
+                      <code>timestamp</code> –{" "}
+                      <Trans
+                        i18nKey="csvUpload.form.timestampHint"
+                        defaults={"ISO 8601 or <code>YYYY-MM-DD HH:MM:SS</code>"}
+                        components={{ code: <code /> }}
+                      />
                     </li>
                     <li>
-                      <code>value</code> – numeric reading
+                      <code>value</code> – {t("csvUpload.form.valueHint", { defaultValue: "numeric reading" })}
                     </li>
                     <li>
-                      <code>unit</code> – e.g. <code>kWh</code>
+                      <code>unit</code> –{" "}
+                      <Trans
+                        i18nKey="csvUpload.form.unitHint"
+                        defaults={"e.g. <code>kWh</code>"}
+                        components={{ code: <code /> }}
+                      />
                     </li>
                     {!isPerSiteMode && (
                       <li>
-                        <code>site_id</code> – e.g. <code>site-1</code>
+                        <code>site_id</code> –{" "}
+                        <Trans
+                          i18nKey="csvUpload.form.siteIdHint"
+                          defaults={"e.g. <code>site-1</code>"}
+                          components={{ code: <code /> }}
+                        />
                       </li>
                     )}
                     <li>
-                      <code>meter_id</code> – e.g. <code>meter-main-1</code>{" "}
-                      (if omitted, CEI will default to a generic meter id)
+                      <code>meter_id</code> –{" "}
+                      <Trans
+                        i18nKey="csvUpload.form.meterIdHint"
+                        defaults={
+                          "e.g. <code>meter-main-1</code> (if omitted, CEI will default to a generic meter id)"
+                        }
+                        components={{ code: <code /> }}
+                      />
                     </li>
                   </ul>
                 </div>
@@ -393,7 +455,7 @@ const CSVUpload: React.FC = () => {
                 }}
               >
                 <div style={{ marginBottom: "0.4rem", fontWeight: 500 }}>
-                  Tips for smooth ingestion
+                  {t("csvUpload.tips.title", { defaultValue: "Tips for smooth ingestion" })}
                 </div>
                 <ul
                   style={{
@@ -402,21 +464,34 @@ const CSVUpload: React.FC = () => {
                     lineHeight: 1.6,
                   }}
                 >
-                  <li>Keep timestamps in a single timezone per file.</li>
+                  <li>{t("csvUpload.tips.item1", { defaultValue: "Keep timestamps in a single timezone per file." })}</li>
                   <li>
-                    Use stable <code>site_id</code> values so dashboards can
-                    build trends over time.
+                    <Trans
+                      i18nKey="csvUpload.tips.item2Base"
+                      defaults={
+                        "Use stable <code>site_id</code> values so dashboards can build trends over time."
+                      }
+                      components={{ code: <code /> }}
+                    />
                     {isPerSiteMode && (
                       <>
                         {" "}
-                        For this scoped upload CEI will enforce{" "}
-                        <code>{forcedSiteId}</code> on every row.
+                        <Trans
+                          i18nKey="csvUpload.tips.item2Scoped"
+                          defaults={
+                            "For this scoped upload CEI will enforce <code>{{forcedSiteId}}</code> on every row."
+                          }
+                          values={{ forcedSiteId }}
+                          components={{ code: <code /> }}
+                        />
                       </>
                     )}
                   </li>
                   <li>
-                    If you backfill older data, it will not change the “last 24
-                    hours” KPIs but will appear in broader windows later.
+                    {t("csvUpload.tips.item3", {
+                      defaultValue:
+                        "If you backfill older data, it will not change the “last 24 hours” KPIs but will appear in broader windows later.",
+                    })}
                   </li>
                 </ul>
               </div>
@@ -467,7 +542,7 @@ const CSVUpload: React.FC = () => {
                   marginBottom: "0.35rem",
                 }}
               >
-                Ingestion summary
+                {t("csvUpload.result.title", { defaultValue: "Ingestion summary" })}
               </div>
               <div
                 style={{
@@ -476,17 +551,28 @@ const CSVUpload: React.FC = () => {
                   marginBottom: "0.45rem",
                 }}
               >
-                CEI received{" "}
-                <strong>{result.rows_received.toLocaleString()}</strong> row
-                {result.rows_received === 1 ? "" : "s"}, ingested{" "}
-                <strong>{result.rows_ingested.toLocaleString()}</strong>, and
-                skipped{" "}
-                <strong>{result.rows_failed.toLocaleString()}</strong>.
+                <Trans
+                  i18nKey="csvUpload.result.summary"
+                  defaults={
+                    "CEI received <strong>{{received}}</strong> row{{pluralSuffix}}, ingested <strong>{{ingested}}</strong>, and skipped <strong>{{failed}}</strong>."
+                  }
+                  values={{
+                    received: result.rows_received.toLocaleString(),
+                    ingested: result.rows_ingested.toLocaleString(),
+                    failed: result.rows_failed.toLocaleString(),
+                    pluralSuffix: result.rows_received === 1 ? "" : "s",
+                  }}
+                  components={{ strong: <strong /> }}
+                />
                 {successRate !== null && (
                   <>
                     {" "}
-                    Effective success rate:{" "}
-                    <strong>{successRate.toFixed(1)}%</strong>.
+                    <Trans
+                      i18nKey="csvUpload.result.successRate"
+                      defaults={"Effective success rate: <strong>{{rate}}</strong>."}
+                      values={{ rate: `${successRate.toFixed(1)}%` }}
+                      components={{ strong: <strong /> }}
+                    />
                   </>
                 )}
               </div>
@@ -509,10 +595,10 @@ const CSVUpload: React.FC = () => {
                       marginBottom: "0.2rem",
                     }}
                   >
-                    Sample site_ids
+                    {t("csvUpload.result.sampleSiteIds", { defaultValue: "Sample site_ids" })}
                   </div>
                   {result.sample_site_ids.length === 0 ? (
-                    <div>None detected</div>
+                    <div>{t("csvUpload.result.noneDetected", { defaultValue: "None detected" })}</div>
                   ) : (
                     <div>{result.sample_site_ids.join(", ")}</div>
                   )}
@@ -528,10 +614,10 @@ const CSVUpload: React.FC = () => {
                       marginBottom: "0.2rem",
                     }}
                   >
-                    Sample meter_ids
+                    {t("csvUpload.result.sampleMeterIds", { defaultValue: "Sample meter_ids" })}
                   </div>
                   {result.sample_meter_ids.length === 0 ? (
-                    <div>None detected</div>
+                    <div>{t("csvUpload.result.noneDetected", { defaultValue: "None detected" })}</div>
                   ) : (
                     <div>{result.sample_meter_ids.join(", ")}</div>
                   )}
@@ -552,7 +638,11 @@ const CSVUpload: React.FC = () => {
                       fontWeight: 500,
                     }}
                   >
-                    Sample row-level issues (first {result.errors.length}):
+                    {t("csvUpload.result.sampleIssues", {
+                      defaultValue:
+                        "Sample row-level issues (first {{count}}):",
+                      count: result.errors.length,
+                    })}
                   </div>
                   <ul
                     style={{

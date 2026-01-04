@@ -1,0 +1,61 @@
+{
+  "brand": {
+    "full": "CEI – Carbon Efficiency Intelligence"
+  },
+  "auth": {
+    "authRequired": "Accedi per continuare.",
+    "sessionExpired": "La sessione è scaduta. Accedi di nuovo.",
+    "hero": {
+      "title": "Usiamo l’IA per ridurre l’impronta di carbonio della tua fabbrica.",
+      "subtitle": "CEI acquisisce i dati dei contatori e SCADA, costruisce baseline statistiche per ogni sito e trasforma inefficienze notturne, del weekend e di processo in avvisi e report operativi — senza installare nuovo hardware."
+    },
+    "invite": {
+      "notice": "Stai entrando in un’organizzazione tramite invito. Crea il tuo account per continuare.",
+      "badgeTitle": "Invito rilevato.",
+      "badgeBody": "Dopo la creazione dell’account entrerai in un’organizzazione esistente.",
+      "requiresSignup": "Il flusso invito richiede la creazione di un account."
+    },
+    "actions": {
+      "signIn": "Accedi",
+      "createAccount": "Crea account",
+      "joiningViaInvite": "Accesso tramite invito…",
+      "creatingAccountProgress": "Creazione account…",
+      "signingInProgress": "Accesso in corso…",
+      "joinOrganization": "Entra nell’organizzazione"
+    },
+    "fields": {
+      "fullName": {
+        "label": "Nome e cognome (facoltativo)",
+        "placeholder": "es. Mario Rossi",
+        "help": "Viene salvato sul profilo ed è usato nei log di audit."
+      },
+      "organizationName": {
+        "label": "Nome organizzazione",
+        "placeholder": "es. Dev Manufacturing",
+        "help": "Questo crea la tua organizzazione. Usa un link di invito per entrare in un’organizzazione esistente."
+      },
+      "email": {
+        "label": "Email di lavoro",
+        "placeholder": "tuo.nome@azienda.it"
+      },
+      "password": {
+        "label": "Password",
+        "createLabel": "Crea una password",
+        "placeholder": "••••••••",
+        "help": "Minimo 8 caratteri. Usa una password robusta."
+      },
+      "passwordConfirm": {
+        "label": "Conferma password",
+        "placeholder": "••••••••"
+      }
+    },
+    "errors": {
+      "generic": "Autenticazione non riuscita. Riprova.",
+      "emailPasswordRequired": "Email e password sono obbligatorie.",
+      "passwordMinLength": "La password deve contenere almeno 8 caratteri.",
+      "passwordsNoMatch": "Le password non coincidono.",
+      "inviteJoinNotLive": "L’accesso tramite invito non è ancora disponibile su questo backend (manca /org/invites/accept-and-signup). Distribuisci il router inviti e riprova.",
+      "inviteMissingAccessToken": "Invito accettato, ma la risposta non contiene access_token."
+    }
+  }
+}

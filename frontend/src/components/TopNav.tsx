@@ -1,7 +1,8 @@
 // frontend/src/components/TopNav.tsx
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import { useTranslation } from "react-i18next";
 
 // Read environment flag from Vite
 const rawEnv = (import.meta as any).env || {};
@@ -14,19 +15,13 @@ const envName = String(rawEnvName).toLowerCase();
 
 let envLabel = "DEV";
 let envClass = "cei-pill cei-pill-neutral";
-let envTitle =
-  "Local development environment. Safe for experiments and test data.";
 
 if (envName.startsWith("prod")) {
   envLabel = "PROD";
   envClass = "cei-pill cei-pill-negative";
-  envTitle =
-    "Production environment. Live tenant data – be careful with changes.";
 } else if (envName.startsWith("pilot") || envName.startsWith("stage")) {
   envLabel = envName.startsWith("pilot") ? "PILOT" : "STAGING";
   envClass = "cei-pill cei-pill-warning";
-  envTitle =
-    "Pilot / staging environment. Used for customer testing before full rollout.";
 }
 
 const TopNav: React.FC = () => {
@@ -35,15 +30,57 @@ const TopNav: React.FC = () => {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const navItems = [
-    { label: "Dashboard", path: "/" },
-    { label: "Sites", path: "/sites" },
-    { label: "Alerts", path: "/alerts" },
-    { label: "Upload CSV", path: "/upload" },
-    { label: "Reports", path: "/reports" },
-    { label: "Settings", path: "/settings" },
-    { label: "Account", path: "/account" },
-  ];
+  const { t, i18n } = useTranslation();
+
+  const navItems = useMemo(
+    () => [
+      { label: t("nav.dashboard", { defaultValue: "Dashboard" }), path: "/" },
+      { label: t("nav.sites", { defaultValue: "Sites" }), path: "/sites" },
+      { label: t("nav.alerts", { defaultValue: "Alerts" }), path: "/alerts" },
+      {
+        label: t("nav.uploadCsv", { defaultValue: "Upload CSV" }),
+        path: "/upload",
+      },
+      { label: t("nav.reports", { defaultValue: "Reports" }), path: "/reports" },
+      {
+        label: t("nav.settings", { defaultValue: "Settings" }),
+        path: "/settings",
+      },
+      { label: t("nav.account", { defaultValue: "Account" }), path: "/account" },
+    ],
+    [t]
+  );
+
+  const currentLang = (i18n.language || "en").toLowerCase().startsWith("it")
+    ? "it"
+    : "en";
+
+  const setLang = async (lang: "en" | "it") => {
+    try {
+      await i18n.changeLanguage(lang);
+    } catch {
+      // non-fatal; keep UX stable even if i18n isn't fully wired yet
+    }
+  };
+
+  // i18n env tooltip (no hardcoded English)
+  const envTitle = useMemo(() => {
+    if (envName.startsWith("prod")) {
+      return t("env.prod", {
+        defaultValue:
+          "Production environment. Live tenant data – be careful with changes.",
+      });
+    }
+    if (envName.startsWith("pilot") || envName.startsWith("stage")) {
+      return t("env.pilot", {
+        defaultValue:
+          "Pilot / staging environment. Used for customer testing before full rollout.",
+      });
+    }
+    return t("env.dev", {
+      defaultValue: "Local development environment. Safe for experiments and test data.",
+    });
+  }, [t]);
 
   const handleNavClick = (path: string) => {
     navigate(path);
@@ -69,7 +106,7 @@ const TopNav: React.FC = () => {
         <Link
           to="/"
           className="cei-topnav-brand"
-          title="Go to Dashboard"
+          title={t("topnav.goToDashboard", { defaultValue: "Go to Dashboard" })}
           style={{
             display: "flex",
             alignItems: "center",
@@ -81,7 +118,7 @@ const TopNav: React.FC = () => {
         >
           <img
             src="/cei-logo-icon.png"
-            alt="CEI logo"
+            alt={t("topnav.logoAlt", { defaultValue: "CEI logo" })}
             style={{
               height: "40px",
               width: "auto",
@@ -91,7 +128,9 @@ const TopNav: React.FC = () => {
           <div>
             <span className="cei-topnav-brand-main">CEI</span>
             <span className="cei-topnav-brand-sub">
-              Carbon Efficiency Intelligence
+              {t("topnav.brandSubtitle", {
+                defaultValue: "Carbon Efficiency Intelligence",
+              })}
             </span>
           </div>
         </Link>
@@ -113,15 +152,50 @@ const TopNav: React.FC = () => {
             {envLabel}
           </span>
 
+          {/* Language switcher (desktop) */}
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.35rem",
+              marginRight: "0.75rem",
+            }}
+            aria-label={t("i18n.language", { defaultValue: "Language" })}
+            title={t("i18n.language", { defaultValue: "Language" })}
+          >
+            <button
+              type="button"
+              className="cei-btn cei-btn-ghost"
+              style={{
+                padding: "0.25rem 0.5rem",
+                fontSize: "0.78rem",
+                opacity: currentLang === "en" ? 1 : 0.75,
+              }}
+              onClick={() => setLang("en")}
+              aria-pressed={currentLang === "en"}
+            >
+              EN
+            </button>
+            <button
+              type="button"
+              className="cei-btn cei-btn-ghost"
+              style={{
+                padding: "0.25rem 0.5rem",
+                fontSize: "0.78rem",
+                opacity: currentLang === "it" ? 1 : 0.75,
+              }}
+              onClick={() => setLang("it")}
+              aria-pressed={currentLang === "it"}
+            >
+              IT
+            </button>
+          </div>
+
           {user?.email && (
             <span style={{ marginRight: "0.5rem" }}>{user.email}</span>
           )}
-          <button
-            type="button"
-            className="cei-btn cei-btn-ghost"
-            onClick={logout}
-          >
-            Logout
+          <button type="button" className="cei-btn cei-btn-ghost" onClick={logout}>
+            {t("auth.logout", { defaultValue: "Logout" })}
           </button>
         </div>
 
@@ -129,7 +203,11 @@ const TopNav: React.FC = () => {
         <div className="cei-mobile-menu-toggle">
           <button
             type="button"
-            aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-label={
+              menuOpen
+                ? t("topnav.closeMenu", { defaultValue: "Close navigation menu" })
+                : t("topnav.openMenu", { defaultValue: "Open navigation menu" })
+            }
             className="cei-btn cei-btn-ghost"
             onClick={toggleMenu}
           >
@@ -177,13 +255,7 @@ const TopNav: React.FC = () => {
                   >
                     <span>{item.label}</span>
                     {active && (
-                      <span
-                        style={{
-                          fontSize: "0.7rem",
-                          opacity: 0.7,
-                          marginLeft: 8,
-                        }}
-                      >
+                      <span style={{ fontSize: "0.7rem", opacity: 0.7, marginLeft: 8 }}>
                         ●
                       </span>
                     )}
@@ -193,13 +265,7 @@ const TopNav: React.FC = () => {
             </div>
 
             <div className="cei-mobile-menu-footer">
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.2rem",
-                }}
-              >
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
                 {/* Environment badge on mobile */}
                 <span
                   className={envClass}
@@ -215,15 +281,60 @@ const TopNav: React.FC = () => {
                   {envLabel}
                 </span>
 
-                <span>{user?.email ? user.email : "Signed in"}</span>
+                {/* Language switcher (mobile) */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "0.4rem",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span style={{ fontSize: "0.78rem", opacity: 0.85 }}>
+                    {t("i18n.language", { defaultValue: "Language" })}:
+                  </span>
+                  <button
+                    type="button"
+                    className="cei-btn cei-btn-ghost"
+                    style={{
+                      padding: "0.25rem 0.5rem",
+                      fontSize: "0.78rem",
+                      opacity: currentLang === "en" ? 1 : 0.75,
+                    }}
+                    onClick={() => setLang("en")}
+                    aria-pressed={currentLang === "en"}
+                  >
+                    EN
+                  </button>
+                  <button
+                    type="button"
+                    className="cei-btn cei-btn-ghost"
+                    style={{
+                      padding: "0.25rem 0.5rem",
+                      fontSize: "0.78rem",
+                      opacity: currentLang === "it" ? 1 : 0.75,
+                    }}
+                    onClick={() => setLang("it")}
+                    aria-pressed={currentLang === "it"}
+                  >
+                    IT
+                  </button>
+                </div>
+
+                <span>
+                  {user?.email
+                    ? user.email
+                    : t("auth.signedIn", { defaultValue: "Signed in" })}
+                </span>
               </div>
+
               <button
                 type="button"
                 className="cei-btn cei-btn-danger"
                 style={{ padding: "0.3rem 0.7rem", fontSize: "0.78rem" }}
                 onClick={handleLogoutClick}
               >
-                Logout
+                {t("auth.logout", { defaultValue: "Logout" })}
               </button>
             </div>
           </div>

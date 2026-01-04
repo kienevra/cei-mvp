@@ -1,11 +1,8 @@
+// frontend/src/pages/SitesList.tsx
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  getSites,
-  createSite,
-  getSiteKpi,
-  deleteSite,
-} from "../services/api";
+import { useTranslation } from "react-i18next";
+import { getSites, createSite, getSiteKpi, deleteSite } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 
@@ -26,6 +23,8 @@ type SiteTrendMetrics = {
 };
 
 const SitesList: React.FC = () => {
+  const { t } = useTranslation();
+
   const [sites, setSites] = useState<SiteRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,9 +34,9 @@ const SitesList: React.FC = () => {
   const [newLocation, setNewLocation] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const [siteMetrics, setSiteMetrics] = useState<
-    Record<string, SiteTrendMetrics>
-  >({});
+  const [siteMetrics, setSiteMetrics] = useState<Record<string, SiteTrendMetrics>>(
+    {}
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -69,9 +68,7 @@ const SitesList: React.FC = () => {
                 const kpi: any = await getSiteKpi(siteKey);
 
                 const total24 =
-                  typeof kpi?.last_24h_kwh === "number"
-                    ? kpi.last_24h_kwh
-                    : 0;
+                  typeof kpi?.last_24h_kwh === "number" ? kpi.last_24h_kwh : 0;
 
                 const dev24 =
                   typeof kpi?.deviation_pct_24h === "number" &&
@@ -104,12 +101,9 @@ const SitesList: React.FC = () => {
                   totalKwh24h: total24,
                   deviationPct24h: dev24,
                   expectedKwh24h: expected24,
-                  isBaselineWarmingUp:
-                    isBaselineWarmingUpFromApi ?? heuristicWarmingUp,
+                  isBaselineWarmingUp: isBaselineWarmingUpFromApi ?? heuristicWarmingUp,
                   totalHistoryDays:
-                    totalHistoryDaysFromApi !== undefined
-                      ? totalHistoryDaysFromApi
-                      : null,
+                    totalHistoryDaysFromApi !== undefined ? totalHistoryDaysFromApi : null,
                 };
               } catch {
                 metrics = {
@@ -139,7 +133,7 @@ const SitesList: React.FC = () => {
         setError(
           e?.response?.data?.detail ||
             e?.message ||
-            "Failed to load sites."
+            t("sitesList.errors.load", { defaultValue: "Failed to load sites." })
         );
       } finally {
         if (!isMounted) return;
@@ -152,12 +146,14 @@ const SitesList: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [t]);
 
   const handleCreateSite = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) {
-      setCreateError("Site name is required.");
+      setCreateError(
+        t("sitesList.errors.nameRequired", { defaultValue: "Site name is required." })
+      );
       return;
     }
     setCreateError(null);
@@ -178,7 +174,7 @@ const SitesList: React.FC = () => {
       setCreateError(
         err?.response?.data?.detail ||
           err?.message ||
-          "Failed to create site."
+          t("sitesList.errors.create", { defaultValue: "Failed to create site." })
       );
     } finally {
       setCreating(false);
@@ -186,20 +182,26 @@ const SitesList: React.FC = () => {
   };
 
   const handleDeleteSite = async (id: number | string, name?: string) => {
-    const label = name || `site ${id}`;
+    const idStr = String(id);
+    const label =
+      name ||
+      t("sitesList.row.defaultSiteName", { defaultValue: "Site {{id}}", id: idStr });
+
     const confirmed = window.confirm(
-      `Delete ${label}? This will permanently remove this site and its associated data in CEI.`
+      t("sitesList.confirmDelete.full", {
+        defaultValue:
+          "Delete {{label}}?\n\nThis will permanently remove this site and its associated data in CEI.",
+        label,
+      })
     );
     if (!confirmed) return;
 
     try {
       await deleteSite(id);
-      const idStr = String(id);
+
       const siteKey = `site-${idStr}`;
 
-      setSites((prev: SiteRecord[]) =>
-        prev.filter((s) => String(s.id) !== idStr)
-      );
+      setSites((prev: SiteRecord[]) => prev.filter((s) => String(s.id) !== idStr));
 
       setSiteMetrics((prev: Record<string, SiteTrendMetrics>) => {
         const next = { ...prev };
@@ -210,7 +212,9 @@ const SitesList: React.FC = () => {
       console.error("Failed to delete site", e);
       alert(
         e?.response?.data?.detail ||
-          "Failed to delete site. Please try again or check logs."
+          t("sitesList.errors.delete", {
+            defaultValue: "Failed to delete site. Please try again or check logs.",
+          })
       );
     }
   };
@@ -234,7 +238,7 @@ const SitesList: React.FC = () => {
               letterSpacing: "-0.02em",
             }}
           >
-            Sites
+            {t("sitesList.header.title", { defaultValue: "Sites" })}
           </h1>
           <p
             style={{
@@ -243,8 +247,10 @@ const SitesList: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Manage the plants, facilities, and lines you&apos;re monitoring.
-            Sites are the anchor for dashboards, alerts, and reports.
+            {t("sitesList.header.subtitle", {
+              defaultValue:
+                "Manage the plants, facilities, and lines you're monitoring. Sites are the anchor for dashboards, alerts, and reports.",
+            })}
           </p>
         </div>
 
@@ -260,7 +266,7 @@ const SitesList: React.FC = () => {
         >
           <Link to="/upload">
             <button className="cei-btn cei-btn-ghost">
-              Go to CSV upload
+              {t("sitesList.actions.goToUpload", { defaultValue: "Go to CSV upload" })}
             </button>
           </Link>
         </div>
@@ -276,14 +282,8 @@ const SitesList: React.FC = () => {
       {/* Add site card */}
       <section className="dashboard-row">
         <div className="cei-card">
-          <div
-            style={{
-              fontSize: "0.9rem",
-              fontWeight: 600,
-              marginBottom: "0.4rem",
-            }}
-          >
-            Add a site
+          <div style={{ fontSize: "0.9rem", fontWeight: 600, marginBottom: "0.4rem" }}>
+            {t("sitesList.addCard.title", { defaultValue: "Add a site" })}
           </div>
           <p
             style={{
@@ -292,8 +292,10 @@ const SitesList: React.FC = () => {
               marginBottom: "0.6rem",
             }}
           >
-            Create sites for your organization so that uploaded meters and
-            alerts can be anchored to real facilities.
+            {t("sitesList.addCard.body", {
+              defaultValue:
+                "Create sites for your organization so that uploaded meters and alerts can be anchored to real facilities.",
+            })}
           </p>
 
           <form
@@ -314,13 +316,15 @@ const SitesList: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                Site name *
+                {t("sitesList.addCard.siteNameLabel", { defaultValue: "Site name *" })}
               </label>
               <input
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="e.g. Lamborghini Bologna"
+                placeholder={t("sitesList.addCard.siteNamePlaceholder", {
+                  defaultValue: "e.g. Lamborghini Bologna",
+                })}
                 style={{
                   width: "100%",
                   padding: "0.4rem 0.5rem",
@@ -342,13 +346,17 @@ const SitesList: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                Location (optional)
+                {t("sitesList.addCard.locationLabel", {
+                  defaultValue: "Location (optional)",
+                })}
               </label>
               <input
                 type="text"
                 value={newLocation}
                 onChange={(e) => setNewLocation(e.target.value)}
-                placeholder="e.g. Bologna, IT"
+                placeholder={t("sitesList.addCard.locationPlaceholder", {
+                  defaultValue: "e.g. Bologna, IT",
+                })}
                 style={{
                   width: "100%",
                   padding: "0.4rem 0.5rem",
@@ -362,24 +370,16 @@ const SitesList: React.FC = () => {
             </div>
 
             <div>
-              <button
-                type="submit"
-                className="cei-btn cei-btn-primary"
-                disabled={creating}
-              >
-                {creating ? "Creating…" : "Add site"}
+              <button type="submit" className="cei-btn cei-btn-primary" disabled={creating}>
+                {creating
+                  ? t("sitesList.addCard.creating", { defaultValue: "Creating…" })
+                  : t("sitesList.addCard.add", { defaultValue: "Add site" })}
               </button>
             </div>
           </form>
 
           {createError && (
-            <div
-              style={{
-                marginTop: "0.5rem",
-                fontSize: "0.78rem",
-                color: "#f97373",
-              }}
-            >
+            <div style={{ marginTop: "0.5rem", fontSize: "0.78rem", color: "#f97373" }}>
               {createError}
             </div>
           )}
@@ -399,50 +399,34 @@ const SitesList: React.FC = () => {
             }}
           >
             <div>
-              <div
-                style={{
-                  fontSize: "0.9rem",
-                  fontWeight: 600,
-                }}
-              >
-                Sites in your organization
+              <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
+                {t("sitesList.table.title", { defaultValue: "Sites in your organization" })}
               </div>
-              <div
-                style={{
-                  marginTop: "0.2rem",
-                  fontSize: "0.8rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
-                Click the site ID or name to open its dashboard. Upload CSVs
-                keyed to <code>site-&lt;id&gt;</code> to drive trends, alerts,
-                and reports.
+              <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+                {t("sitesList.table.subtitlePrefix", {
+                  defaultValue:
+                    "Click the site ID or name to open its dashboard. Upload CSVs keyed to",
+                })}{" "}
+                <code>site-&lt;id&gt;</code>{" "}
+                {t("sitesList.table.subtitleSuffix", {
+                  defaultValue: "to drive trends, alerts, and reports.",
+                })}
               </div>
             </div>
           </div>
 
           {loading && (
-            <div
-              style={{
-                padding: "1.2rem 0.5rem",
-                display: "flex",
-                justifyContent: "center",
-              }}
-            >
+            <div style={{ padding: "1.2rem 0.5rem", display: "flex", justifyContent: "center" }}>
               <LoadingSpinner />
             </div>
           )}
 
           {!loading && sites.length === 0 && (
-            <div
-              style={{
-                fontSize: "0.85rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              No sites yet. Use the form above to create your first site, then
-              upload timeseries data linked to <code>site-1</code>,{" "}
-              <code>site-2</code>, etc.
+            <div style={{ fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
+              {t("sitesList.table.empty", {
+                defaultValue:
+                  "No sites yet. Use the form above to create your first site, then upload timeseries data linked to site-1, site-2, etc.",
+              })}
             </div>
           )}
 
@@ -451,10 +435,10 @@ const SitesList: React.FC = () => {
               <table>
                 <thead>
                   <tr>
-                    <th>ID</th>
-                    <th>Site</th>
-                    <th>Location</th>
-                    <th>Last 24h trend</th>
+                    <th>{t("sitesList.table.columns.id", { defaultValue: "ID" })}</th>
+                    <th>{t("sitesList.table.columns.site", { defaultValue: "Site" })}</th>
+                    <th>{t("sitesList.table.columns.location", { defaultValue: "Location" })}</th>
+                    <th>{t("sitesList.table.columns.trend24h", { defaultValue: "Last 24h trend" })}</th>
                     <th />
                   </tr>
                 </thead>
@@ -462,51 +446,84 @@ const SitesList: React.FC = () => {
                   {sites.map((site: SiteRecord) => {
                     const idStr = String(site.id);
                     const siteKey = `site-${idStr}`;
-                    const name = site.name || `Site ${idStr}`;
-                    const location = site.location || "—";
+
+                    const name =
+                      site.name ||
+                      t("sitesList.row.defaultSiteName", {
+                        defaultValue: "Site {{id}}",
+                        id: idStr,
+                      });
+
+                    const location =
+                      site.location ||
+                      t("sitesList.row.unknownLocation", { defaultValue: "—" });
 
                     const metrics = siteMetrics[siteKey];
 
-                    let trendLabel = "No 24h data yet";
+                    let trendLabel = t("sitesList.trend.no24hDataYet", {
+                      defaultValue: "No 24h data yet",
+                    });
                     let pillClassName = "cei-pill cei-pill-neutral";
 
                     if (metrics && metrics.totalKwh24h > 0) {
                       const dev = metrics.deviationPct24h;
                       const isWarming =
                         metrics.isBaselineWarmingUp === true ||
-                        (!Number.isFinite(dev as number) &&
-                          metrics.expectedKwh24h !== null);
+                        (!Number.isFinite(dev as number) && metrics.expectedKwh24h !== null);
 
                       if (isWarming) {
                         const days = metrics.totalHistoryDays;
                         const daysLabel =
                           typeof days === "number" && days > 0
-                            ? ` · ~${days}d history`
+                            ? t("sitesList.trend.historyDaysLabel", {
+                                defaultValue: " · ~{{days}}d history",
+                                days,
+                              })
                             : "";
+
                         pillClassName = "cei-pill cei-pill-neutral";
-                        trendLabel = `Learning baseline (24h${daysLabel})`;
+                        trendLabel = t("sitesList.trend.learningBaselineWithHistory", {
+                          defaultValue: "Learning baseline (24h{{daysLabel}})",
+                          daysLabel,
+                        });
                       } else if (typeof dev === "number") {
-                        const absPct = `${Math.abs(dev).toFixed(1)}%`;
+                        const pct = `${Math.abs(dev).toFixed(1)}%`;
 
                         if (dev >= 10) {
                           pillClassName = "cei-pill cei-pill-negative";
-                          trendLabel = `▲ ${absPct} above baseline (24h)`;
+                          trendLabel = t("sitesList.trend.aboveBaseline24h", {
+                            defaultValue: "▲ {{pct}} above baseline (24h)",
+                            pct,
+                          });
                         } else if (dev > 2) {
                           pillClassName = "cei-pill cei-pill-warning";
-                          trendLabel = `▲ ${absPct} above baseline (24h)`;
+                          trendLabel = t("sitesList.trend.aboveBaseline24h", {
+                            defaultValue: "▲ {{pct}} above baseline (24h)",
+                            pct,
+                          });
                         } else if (dev <= -5) {
                           pillClassName = "cei-pill cei-pill-positive";
-                          trendLabel = `▼ ${absPct} below baseline (24h)`;
+                          trendLabel = t("sitesList.trend.belowBaseline24h", {
+                            defaultValue: "▼ {{pct}} below baseline (24h)",
+                            pct,
+                          });
                         } else if (dev < -1) {
                           pillClassName = "cei-pill cei-pill-positive";
-                          trendLabel = `▼ ${absPct} below baseline (24h)`;
+                          trendLabel = t("sitesList.trend.belowBaseline24h", {
+                            defaultValue: "▼ {{pct}} below baseline (24h)",
+                            pct,
+                          });
                         } else {
                           pillClassName = "cei-pill cei-pill-neutral";
-                          trendLabel = "● Near baseline (24h)";
+                          trendLabel = t("sitesList.trend.nearBaseline24h", {
+                            defaultValue: "● Near baseline (24h)",
+                          });
                         }
                       } else {
                         pillClassName = "cei-pill cei-pill-neutral";
-                        trendLabel = "Learning baseline (24h)";
+                        trendLabel = t("sitesList.trend.learningBaseline24h", {
+                          defaultValue: "Learning baseline (24h)",
+                        });
                       }
                     }
 
@@ -538,13 +555,7 @@ const SitesList: React.FC = () => {
                         </td>
                         <td>{location}</td>
                         <td>
-                          <span
-                            className={pillClassName}
-                            style={{
-                              fontSize: "0.75rem",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
+                          <span className={pillClassName} style={{ fontSize: "0.75rem", whiteSpace: "nowrap" }}>
                             {trendLabel}
                           </span>
                         </td>
@@ -566,27 +577,24 @@ const SitesList: React.FC = () => {
                                 textDecoration: "none",
                               }}
                             >
-                              View
+                              {t("sitesList.buttons.view", { defaultValue: "View" })}
                             </Link>
 
                             <button
                               type="button"
-                              onClick={() =>
-                                handleDeleteSite(site.id, site.name)
-                              }
+                              onClick={() => handleDeleteSite(site.id, site.name)}
                               className="cei-btn"
                               style={{
                                 fontSize: "0.8rem",
                                 padding: "0.25rem 0.6rem",
                                 borderRadius: "999px",
-                                border:
-                                  "1px solid rgba(248, 113, 113, 0.8)",
+                                border: "1px solid rgba(248, 113, 113, 0.8)",
                                 color: "rgb(248, 113, 113)",
                                 background:
                                   "radial-gradient(circle at top left, rgba(239, 68, 68, 0.12), rgba(15, 23, 42, 0.95))",
                               }}
                             >
-                              Delete
+                              {t("sitesList.buttons.delete", { defaultValue: "Delete" })}
                             </button>
                           </div>
                         </td>

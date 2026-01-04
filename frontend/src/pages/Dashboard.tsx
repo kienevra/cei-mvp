@@ -1,5 +1,6 @@
 // frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   getTimeseriesSummary,
   getTimeseriesSeries,
@@ -51,10 +52,7 @@ function formatDateTimeLabel(raw?: string | null): string | null {
   });
 }
 
-function formatTimeRange(
-  from?: string | null,
-  to?: string | null
-): string | null {
+function formatTimeRange(from?: string | null, to?: string | null): string | null {
   if (!from || !to) return null;
   const fromD = new Date(from);
   const toD = new Date(to);
@@ -101,6 +99,8 @@ function formatTimeRange(
 }
 
 const Dashboard: React.FC = () => {
+  const { t } = useTranslation();
+
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -112,7 +112,7 @@ const Dashboard: React.FC = () => {
   const [siteCount, setSiteCount] = useState<number | null>(null);
   const [sitesError, setSitesError] = useState<string | null>(null);
 
-  // NEW: ingest health card state
+  // ingest health card state
   const [ingestHealth, setIngestHealth] = useState<IngestHealthResponse | null>(
     null
   );
@@ -132,7 +132,12 @@ const Dashboard: React.FC = () => {
       })
       .catch((e: any) => {
         if (!isMounted) return;
-        setSummaryError(e?.message || "Failed to load energy summary.");
+        setSummaryError(
+          e?.message ||
+            t("dashboard.errors.summary", {
+              defaultValue: "Failed to load energy summary.",
+            })
+        );
       })
       .finally(() => {
         if (!isMounted) return;
@@ -149,7 +154,12 @@ const Dashboard: React.FC = () => {
       })
       .catch((e: any) => {
         if (!isMounted) return;
-        setSeriesError(e?.message || "Failed to load energy trend.");
+        setSeriesError(
+          e?.message ||
+            t("dashboard.errors.trend", {
+              defaultValue: "Failed to load energy trend.",
+            })
+        );
       })
       .finally(() => {
         if (!isMounted) return;
@@ -168,10 +178,13 @@ const Dashboard: React.FC = () => {
       })
       .catch((e: any) => {
         if (!isMounted) return;
-        setSitesError(e?.message || "Failed to load sites.");
+        setSitesError(
+          e?.message ||
+            t("dashboard.errors.sites", { defaultValue: "Failed to load sites." })
+        );
       });
 
-    // NEW: ingest health (24h) – pilot ops cockpit
+    // Ingest health (24h)
     setIngestLoading(true);
     setIngestError(null);
     getIngestHealth(24)
@@ -181,7 +194,12 @@ const Dashboard: React.FC = () => {
       })
       .catch((e: any) => {
         if (!isMounted) return;
-        setIngestError(e?.message || "Failed to load ingest health.");
+        setIngestError(
+          e?.message ||
+            t("dashboard.errors.ingestHealth", {
+              defaultValue: "Failed to load ingest health.",
+            })
+        );
       })
       .finally(() => {
         if (!isMounted) return;
@@ -191,7 +209,7 @@ const Dashboard: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [t]);
 
   const hasSummaryData = summary && summary.points > 0;
   const totalKwh = hasSummaryData ? summary!.total_value : 0;
@@ -209,7 +227,7 @@ const Dashboard: React.FC = () => {
       : `${totalKwh.toFixed(1)} kWh`
     : "—";
 
-  // Build trend points from API data (force numeric, 24h labels)
+  // Build trend points from API data
   let trendPoints: TrendPoint[] = [];
   if (series && series.points && series.points.length > 0) {
     trendPoints = series.points.map((p) => {
@@ -232,16 +250,16 @@ const Dashboard: React.FC = () => {
   const maxVal = hasTrend ? Math.max(...trendValues) : 0;
   const minVal = hasTrend ? Math.min(...trendValues) : 0;
 
-  // Chart content width: fixed per bar, with a minimum
-  const barPixelWidth = 40; // px per bar
-  const minContentWidth = 600; // px minimum
+  // Chart content width
+  const barPixelWidth = 40;
+  const minContentWidth = 600;
   const chartContentWidth = hasTrend
     ? Math.max(trendPoints.length * barPixelWidth, minContentWidth)
     : minContentWidth;
 
-  // Pixel-based bar height mapping for visible magnitude differences
-  const maxBarHeightPx = 160; // tallest bar inside chart
-  const baseBarHeightPx = 20; // minimum visible height when value > 0
+  // Pixel-based bar height mapping
+  const maxBarHeightPx = 160;
+  const baseBarHeightPx = 20;
 
   // High-level summary of the trend
   let trendSummary: string | null = null;
@@ -252,18 +270,20 @@ const Dashboard: React.FC = () => {
     const peakLabel = trendPoints[peakIndex]?.label ?? "—";
     const windowHours = summary!.window_hours || 24;
 
-    trendSummary = `Peak hour: ${peakLabel} at ${maxVal.toFixed(
-      1
-    )} kWh · Average: ${avgVal.toFixed(
-      1
-    )} kWh/h over ${windowHours.toFixed(
-      0
-    )} hours · Min hourly: ${minVal.toFixed(1)} kWh/h.`;
+    trendSummary = t("dashboard.trend.summary", {
+      defaultValue:
+        "Peak hour: {{peakLabel}} at {{maxVal}} kWh · Average: {{avgVal}} kWh/h over {{windowHours}} hours · Min hourly: {{minVal}} kWh/h.",
+      peakLabel,
+      maxVal: maxVal.toFixed(1),
+      avgVal: avgVal.toFixed(1),
+      windowHours: windowHours.toFixed(0),
+      minVal: minVal.toFixed(1),
+    });
   }
 
   const anyError = summaryError || seriesError || sitesError || ingestError;
 
-  // NEW: ingest health computed fields
+  // ingest health computed fields
   const meters = ingestHealth?.meters || [];
   const meterCount = meters.length;
 
@@ -288,19 +308,24 @@ const Dashboard: React.FC = () => {
 
   const oldestLastSeenLabel = formatDateTimeLabel(oldestLastSeen);
 
-  let ingestStatusLabel = "—";
-  if (ingestLoading) ingestStatusLabel = "Checking…";
-  else if (meterCount === 0) ingestStatusLabel = "No meters detected";
+  let ingestStatusLabel = t("dashboard.ingest.status.na", { defaultValue: "—" });
+  if (ingestLoading)
+    ingestStatusLabel = t("dashboard.ingest.status.checking", {
+      defaultValue: "Checking…",
+    });
+  else if (meterCount === 0)
+    ingestStatusLabel = t("dashboard.ingest.status.noMeters", {
+      defaultValue: "No meters detected",
+    });
   else if ((avgCompleteness ?? 0) >= 98 && missingMeters === 0)
-    ingestStatusLabel = "Green";
-  else if ((avgCompleteness ?? 0) >= 90) ingestStatusLabel = "Amber";
-  else ingestStatusLabel = "Red";
+    ingestStatusLabel = t("dashboard.ingest.status.green", { defaultValue: "Green" });
+  else if ((avgCompleteness ?? 0) >= 90)
+    ingestStatusLabel = t("dashboard.ingest.status.amber", { defaultValue: "Amber" });
+  else
+    ingestStatusLabel = t("dashboard.ingest.status.red", { defaultValue: "Red" });
 
   return (
-    <div
-      className="dashboard-page"
-      style={{ maxWidth: "100vw", overflowX: "hidden" }}
-    >
+    <div className="dashboard-page" style={{ maxWidth: "100vw", overflowX: "hidden" }}>
       {/* Header */}
       <section
         style={{
@@ -318,7 +343,7 @@ const Dashboard: React.FC = () => {
               letterSpacing: "-0.02em",
             }}
           >
-            Portfolio overview
+            {t("dashboard.header.title", { defaultValue: "Portfolio overview" })}
           </h1>
           <p
             style={{
@@ -327,10 +352,13 @@ const Dashboard: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            High-level energy view across all sites over the last 24 hours. Use
-            this as your daily cockpit: is the fleet behaving as expected?
+            {t("dashboard.header.subtitle", {
+              defaultValue:
+                "High-level energy view across all sites over the last 24 hours. Use this as your daily cockpit: is the fleet behaving as expected?",
+            })}
           </p>
         </div>
+
         <div
           style={{
             textAlign: "right",
@@ -340,21 +368,31 @@ const Dashboard: React.FC = () => {
         >
           {siteCount !== null && (
             <div>
-              Monitoring <strong>{siteCount}</strong> sites.
+              {t("dashboard.header.monitoring", {
+                defaultValue: "Monitoring",
+              })}{" "}
+              <strong>{siteCount}</strong>{" "}
+              {t("dashboard.header.sites", { defaultValue: "sites" })}.
             </div>
           )}
-          <div>Window: last 24 hours</div>
+          <div>
+            {t("dashboard.header.window", { defaultValue: "Window" })}:{" "}
+            {t("dashboard.header.last24h", { defaultValue: "last 24 hours" })}
+          </div>
+
           {lastUpdatedLabel && (
             <div style={{ marginTop: "0.15rem" }}>
-              Last updated:{" "}
+              {t("dashboard.header.lastUpdated", { defaultValue: "Last updated" })}:{" "}
               <span style={{ color: "var(--cei-text-accent)" }}>
                 {lastUpdatedLabel}
               </span>
             </div>
           )}
+
           {dataWindowLabel && (
             <div style={{ marginTop: "0.1rem", fontSize: "0.75rem" }}>
-              Data window: {dataWindowLabel}
+              {t("dashboard.header.dataWindow", { defaultValue: "Data window" })}:{" "}
+              {dataWindowLabel}
             </div>
           )}
         </div>
@@ -386,34 +424,30 @@ const Dashboard: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Energy – last 24 hours (all sites)
+            {t("dashboard.kpis.energy.title", {
+              defaultValue: "Energy – last 24 hours (all sites)",
+            })}
           </div>
-          <div
-            style={{
-              marginTop: "0.35rem",
-              fontSize: "1.8rem",
-              fontWeight: 600,
-            }}
-          >
+          <div style={{ marginTop: "0.35rem", fontSize: "1.8rem", fontWeight: 600 }}>
             {summaryLoading ? "…" : formattedKwh}
           </div>
-          <div
-            style={{
-              marginTop: "0.25rem",
-              fontSize: "0.8rem",
-              color: "var(--cei-text-muted)",
-            }}
-          >
+          <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
             {hasSummaryData ? (
               <>
-                Aggregated from{" "}
-                <strong>{summary!.points.toLocaleString()} readings</strong> in
-                the last {summary!.window_hours} hours across the fleet.
+                {t("dashboard.kpis.energy.aggregatedFrom", {
+                  defaultValue: "Aggregated from",
+                })}{" "}
+                <strong>{summary!.points.toLocaleString()} {t("dashboard.kpis.energy.readings", { defaultValue: "readings" })}</strong>{" "}
+                {t("dashboard.kpis.energy.inLast", { defaultValue: "in the last" })}{" "}
+                {summary!.window_hours} {t("dashboard.kpis.energy.hoursAcrossFleet", { defaultValue: "hours across the fleet." })}
               </>
             ) : summaryLoading ? (
-              "Loading energy data…"
+              t("dashboard.kpis.energy.loading", { defaultValue: "Loading energy data…" })
             ) : (
-              "No recent timeseries data yet. Upload a CSV or connect a source to light this up."
+              t("dashboard.kpis.energy.noData", {
+                defaultValue:
+                  "No recent timeseries data yet. Upload a CSV or connect a source to light this up.",
+              })
             )}
           </div>
         </div>
@@ -427,26 +461,16 @@ const Dashboard: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Data coverage (points)
+            {t("dashboard.kpis.coverage.title", { defaultValue: "Data coverage (points)" })}
           </div>
-          <div
-            style={{
-              marginTop: "0.35rem",
-              fontSize: "1.4rem",
-              fontWeight: 600,
-            }}
-          >
+          <div style={{ marginTop: "0.35rem", fontSize: "1.4rem", fontWeight: 600 }}>
             {hasSummaryData ? summary!.points.toLocaleString() : "—"}
           </div>
-          <div
-            style={{
-              marginTop: "0.25rem",
-              fontSize: "0.8rem",
-              color: "var(--cei-text-muted)",
-            }}
-          >
-            Total number of readings in the selected window. Use this as a quick
-            sense-check of how “complete” your dataset is.
+          <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+            {t("dashboard.kpis.coverage.body", {
+              defaultValue:
+                "Total number of readings in the selected window. Use this as a quick sense-check of how “complete” your dataset is.",
+            })}
           </div>
         </div>
 
@@ -459,30 +483,22 @@ const Dashboard: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Fleet status
+            {t("dashboard.kpis.fleetStatus.title", { defaultValue: "Fleet status" })}
           </div>
-          <div
-            style={{
-              marginTop: "0.35rem",
-              fontSize: "1.2rem",
-              fontWeight: 600,
-            }}
-          >
-            {hasSummaryData ? "Active" : "Waiting for data"}
+          <div style={{ marginTop: "0.35rem", fontSize: "1.2rem", fontWeight: 600 }}>
+            {hasSummaryData
+              ? t("dashboard.kpis.fleetStatus.active", { defaultValue: "Active" })
+              : t("dashboard.kpis.fleetStatus.waiting", { defaultValue: "Waiting for data" })}
           </div>
-          <div
-            style={{
-              marginTop: "0.25rem",
-              fontSize: "0.8rem",
-              color: "var(--cei-text-muted)",
-            }}
-          >
-            Simple heuristic based purely on whether any readings exist in the
-            last 24 hours.
+          <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+            {t("dashboard.kpis.fleetStatus.body", {
+              defaultValue:
+                "Simple heuristic based purely on whether any readings exist in the last 24 hours.",
+            })}
           </div>
         </div>
 
-        {/* NEW: Ingest health card */}
+        {/* Ingest health card */}
         <div className="cei-card">
           <div
             style={{
@@ -492,16 +508,10 @@ const Dashboard: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Ingest health (last 24h)
+            {t("dashboard.ingest.title", { defaultValue: "Ingest health (last 24h)" })}
           </div>
 
-          <div
-            style={{
-              marginTop: "0.35rem",
-              fontSize: "1.2rem",
-              fontWeight: 600,
-            }}
-          >
+          <div style={{ marginTop: "0.35rem", fontSize: "1.2rem", fontWeight: 600 }}>
             {ingestStatusLabel}
           </div>
 
@@ -514,21 +524,24 @@ const Dashboard: React.FC = () => {
             }}
           >
             {ingestLoading ? (
-              "Checking meter completeness…"
+              t("dashboard.ingest.loading", { defaultValue: "Checking meter completeness…" })
             ) : meterCount === 0 ? (
-              "No meters returned. Once data is ingested, this will show coverage by meter."
+              t("dashboard.ingest.noMetersBody", {
+                defaultValue:
+                  "No meters returned. Once data is ingested, this will show coverage by meter.",
+              })
             ) : (
               <>
-                Avg completeness:{" "}
-                <strong>
-                  {(avgCompleteness ?? 0).toFixed(1)}%
-                </strong>{" "}
-                · Meters under 90%: <strong>{missingMeters}</strong> · Meters:{" "}
+                {t("dashboard.ingest.avgCompleteness", { defaultValue: "Avg completeness" })}:{" "}
+                <strong>{(avgCompleteness ?? 0).toFixed(1)}%</strong>{" "}
+                · {t("dashboard.ingest.metersUnder90", { defaultValue: "Meters under 90%" })}:{" "}
+                <strong>{missingMeters}</strong> ·{" "}
+                {t("dashboard.ingest.meters", { defaultValue: "Meters" })}:{" "}
                 <strong>{meterCount}</strong>
                 {oldestLastSeenLabel && (
                   <>
                     {" "}
-                    · Oldest last seen:{" "}
+                    · {t("dashboard.ingest.oldestLastSeen", { defaultValue: "Oldest last seen" })}:{" "}
                     <span style={{ color: "var(--cei-text-accent)" }}>
                       {oldestLastSeenLabel}
                     </span>
@@ -540,57 +553,44 @@ const Dashboard: React.FC = () => {
         </div>
       </section>
 
-      {/* Main grid: trend + commentary */}
+      {/* Main grid */}
       <section className="dashboard-main-grid">
         {/* Trend card */}
         <div className="cei-card" style={{ maxWidth: "100%", overflow: "hidden" }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginBottom: "0.7rem",
-            }}
-          >
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.7rem" }}>
             <div>
               <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-                Portfolio energy trend – last 24 hours
+                {t("dashboard.trend.title", {
+                  defaultValue: "Portfolio energy trend – last 24 hours",
+                })}
               </div>
-              <div
-                style={{
-                  marginTop: "0.2rem",
-                  fontSize: "0.8rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
-                Hourly energy profile across all sites combined. Use this to
-                spot peaks, troughs, and suspiciously flat baselines.
+              <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+                {t("dashboard.trend.subtitle", {
+                  defaultValue:
+                    "Hourly energy profile across all sites combined. Use this to spot peaks, troughs, and suspiciously flat baselines.",
+                })}
               </div>
             </div>
             <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-              kWh · hourly
+              {t("dashboard.trend.unit", { defaultValue: "kWh · hourly" })}
             </div>
           </div>
 
           {seriesLoading && (
-            <div
-              style={{
-                padding: "1.2rem 0.5rem",
-                display: "flex",
-                justifyContent: "center",
-              }}
-            >
+            <div style={{ padding: "1.2rem 0.5rem", display: "flex", justifyContent: "center" }}>
               <LoadingSpinner />
             </div>
           )}
 
           {!seriesLoading && !hasTrend ? (
             <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              No recent series data. After you ingest CSV data or connect a live
-              feed, CEI will chart the last 24 hours here.
+              {t("dashboard.trend.noData", {
+                defaultValue:
+                  "No recent series data. After you ingest CSV data or connect a live feed, CEI will chart the last 24 hours here.",
+              })}
             </div>
           ) : (
             <>
-              {/* Local scroll container just for the chart */}
               <div
                 className="cei-trend-scroll"
                 style={{
@@ -626,7 +626,6 @@ const Dashboard: React.FC = () => {
                         const ratio = (val - minVal) / (maxVal - minVal || 1);
                         heightPx = baseBarHeightPx + ratio * maxBarHeightPx;
                       } else {
-                        // all equal > 0
                         heightPx = baseBarHeightPx + maxBarHeightPx;
                       }
                     }
@@ -644,7 +643,6 @@ const Dashboard: React.FC = () => {
                           gap: "0.25rem",
                         }}
                       >
-                        {/* numeric value for sanity check */}
                         <span
                           style={{
                             fontSize: "0.6rem",
@@ -681,13 +679,7 @@ const Dashboard: React.FC = () => {
               </div>
 
               {trendSummary && (
-                <div
-                  style={{
-                    marginTop: "0.75rem",
-                    fontSize: "0.8rem",
-                    color: "var(--cei-text-muted)",
-                  }}
-                >
+                <div style={{ marginTop: "0.75rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
                   {trendSummary}
                 </div>
               )}
@@ -695,21 +687,17 @@ const Dashboard: React.FC = () => {
           )}
         </div>
 
-        {/* Right-hand commentary / “what to look at today” */}
+        {/* Right-hand commentary */}
         <div className="cei-card">
           <div style={{ marginBottom: "0.6rem" }}>
             <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-              What to pay attention to today
+              {t("dashboard.focus.title", { defaultValue: "What to pay attention to today" })}
             </div>
-            <div
-              style={{
-                marginTop: "0.2rem",
-                fontSize: "0.8rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
-              A lightweight, qualitative layer on top of the raw charts. This is
-              where you turn charts into an action list for operations.
+            <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              {t("dashboard.focus.subtitle", {
+                defaultValue:
+                  "A lightweight, qualitative layer on top of the raw charts. This is where you turn charts into an action list for operations.",
+              })}
             </div>
           </div>
 
@@ -723,16 +711,23 @@ const Dashboard: React.FC = () => {
             }}
           >
             <li>
-              Check whether the overnight baseline looks flat and low. A rising
-              baseline over time usually hides idle losses.
+              {t("dashboard.focus.item1", {
+                defaultValue:
+                  "Check whether the overnight baseline looks flat and low. A rising baseline over time usually hides idle losses.",
+              })}
             </li>
             <li>
-              Compare this 24-hour profile with a known &quot;good&quot; day.
-              Look for new peaks or extended high-load zones.
+              {t("dashboard.focus.item2", {
+                defaultValue:
+                  "Compare this 24-hour profile with a known \"good\" day. Look for new peaks or extended high-load zones.",
+              })}
             </li>
             <li>
-              Use the <strong>Alerts</strong> page to see which sites are
-              driving any abnormal consumption.
+              {t("dashboard.focus.item3.prefix", { defaultValue: "Use the" })}{" "}
+              <strong>{t("nav.alerts", { defaultValue: "Alerts" })}</strong>{" "}
+              {t("dashboard.focus.item3.suffix", {
+                defaultValue: "page to see which sites are driving any abnormal consumption.",
+              })}
             </li>
           </ul>
         </div>

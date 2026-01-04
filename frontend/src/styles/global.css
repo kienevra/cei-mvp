@@ -431,6 +431,24 @@ button {
   background: rgba(15, 23, 42, 0.9);
 }
 
+/* NEW: pressed state for language toggle (and any ghost toggle buttons) */
+.cei-btn.cei-btn-ghost[aria-pressed="true"] {
+  background: rgba(56, 189, 248, 0.12); /* subtle sky fill */
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #e5e7eb;
+}
+
+.cei-btn.cei-btn-ghost[aria-pressed="true"]:hover {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.65);
+}
+
+/* Keep keyboard UX clean (additive, no regressions) */
+.cei-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35);
+}
+
 /* Danger variant for destructive actions */
 .cei-btn-danger {
   background: var(--cei-danger-soft);

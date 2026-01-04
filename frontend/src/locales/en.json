@@ -1,0 +1,959 @@
+{
+  "brand": {
+    "full": "CEI – Carbon Efficiency Intelligence"
+  },
+
+  "i18n": {
+    "language": "Language"
+  },
+
+  "common": {
+    "loading": "Loading…",
+    "saving": "Saving…",
+    "save": "Save",
+    "cancel": "Cancel",
+    "copy": "Copy",
+    "copied": "Copied",
+    "close": "Close",
+    "open": "Open",
+    "yes": "Yes",
+    "no": "No",
+    "vs": "vs"
+  },
+
+  "errors": {
+    "generic": "Something went wrong. Please try again.",
+    "forbiddenOwnerOnly": "Owner-only. Ask your org owner.",
+    "sessionExpired": "Your session expired. Please sign in again."
+  },
+
+  "nav": {
+    "navigation": "Navigation",
+    "dashboard": "Dashboard",
+    "sites": "Sites",
+    "alerts": "Alerts",
+    "uploadCsv": "Upload CSV",
+    "reports": "Reports",
+    "settings": "Settings",
+    "account": "Account"
+  },
+
+  "topnav": {
+    "goToDashboard": "Go to dashboard",
+    "logoAlt": "CEI logo",
+    "brandSubtitle": "Carbon Efficiency Intelligence",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu"
+  },
+
+  "env": {
+    "prod": "Production environment. Live tenant data – be careful with changes.",
+    "pilot": "Pilot / staging environment. Used for customer testing before full rollout.",
+    "dev": "Local development environment. Safe for experiments and test data."
+  },
+
+  "auth": {
+    "logout": "Log out",
+    "signedIn": "Signed in",
+
+    "hero": {
+      "title": "We use A.I to reduce your factorys carbon footprint.",
+      "subtitle": "CEI ingests your meter and SCADA data, builds statistical baselines for each site, and turns night, weekend, and process inefficiencies into actionable alerts and reports – without installing new hardware."
+    },
+
+    "actions": {
+      "signIn": "Sign in",
+      "createAccount": "Create account",
+      "signingInProgress": "Signing you in…",
+      "creatingAccountProgress": "Creating your account…",
+      "joiningViaInvite": "Joining via invite…",
+      "joinOrganization": "Join organization"
+    },
+
+    "invite": {
+      "notice": "You’re joining an organization via invite. Create your account to continue.",
+      "badgeTitle": "Invite detected.",
+      "badgeBody": "You’ll join an existing organization after account creation.",
+      "requiresSignup": "Invite flow requires account creation."
+    },
+
+    "sessionExpired": "Your session expired. Please sign in again.",
+    "authRequired": "Please sign in to continue.",
+
+    "fields": {
+      "fullName": {
+        "label": "Full name (optional)",
+        "placeholder": "e.g. Taylor Smith",
+        "help": "This is stored on your profile and used in audit logs."
+      },
+      "organizationName": {
+        "label": "Organization name",
+        "placeholder": "e.g. Dev Manufacturing",
+        "help": "This creates your org. Use an invite link to join an existing org."
+      },
+      "email": {
+        "label": "Work email",
+        "placeholder": "you@factory.com"
+      },
+      "password": {
+        "label": "Password",
+        "createLabel": "Create a password",
+        "placeholder": "••••••••",
+        "help": "Minimum 8 characters. Use a strong password."
+      },
+      "passwordConfirm": {
+        "label": "Confirm password",
+        "placeholder": "••••••••"
+      }
+    },
+
+    "errors": {
+      "generic": "Authentication failed. Please try again.",
+      "emailPasswordRequired": "Email and password are required.",
+      "passwordMinLength": "Password must be at least 8 characters.",
+      "passwordsNoMatch": "Passwords do not match.",
+      "inviteJoinNotLive": "Invite join isn’t live on this backend yet (missing /org/invites/accept-and-signup). Deploy the invites router, then retry.",
+      "inviteMissingAccessToken": "Invite signup succeeded but response missing access_token."
+    }
+  },
+
+  "dashboard": {
+    "errors": {
+      "summary": "Failed to load energy summary.",
+      "trend": "Failed to load energy trend.",
+      "sites": "Failed to load sites.",
+      "ingestHealth": "Failed to load ingest health."
+    },
+
+    "header": {
+      "title": "Portfolio overview",
+      "subtitle": "High-level energy view across all sites over the last 24 hours. Use this as your daily cockpit: is the fleet behaving as expected?",
+      "monitoring": "Monitoring",
+      "sites": "sites",
+      "window": "Window",
+      "last24h": "last 24 hours",
+      "lastUpdated": "Last updated",
+      "dataWindow": "Data window"
+    },
+
+    "kpis": {
+      "energy": {
+        "title": "Energy – last 24 hours (all sites)",
+        "aggregatedFrom": "Aggregated from",
+        "readings": "readings",
+        "inLast": "in the last",
+        "hoursAcrossFleet": "hours across the fleet.",
+        "loading": "Loading energy data…",
+        "noData": "No recent timeseries data yet. Upload a CSV or connect a source to light this up."
+      },
+      "coverage": {
+        "title": "Data coverage (points)",
+        "body": "Total number of readings in the selected window. Use this as a quick sense-check of how “complete” your dataset is."
+      },
+      "fleetStatus": {
+        "title": "Fleet status",
+        "active": "Active",
+        "waiting": "Waiting for data",
+        "body": "Simple heuristic based purely on whether any readings exist in the last 24 hours."
+      }
+    },
+
+    "ingest": {
+      "title": "Ingest health (last 24h)",
+      "loading": "Checking meter completeness…",
+      "noMetersBody": "No meters returned. Once data is ingested, this will show coverage by meter.",
+      "avgCompleteness": "Avg completeness",
+      "metersUnder90": "Meters under 90%",
+      "meters": "Meters",
+      "oldestLastSeen": "Oldest last seen",
+
+      "status": {
+        "na": "—",
+        "checking": "Checking…",
+        "noMeters": "No meters detected",
+        "green": "Green",
+        "amber": "Amber",
+        "red": "Red"
+      }
+    },
+
+    "trend": {
+      "title": "Portfolio energy trend – last 24 hours",
+      "subtitle": "Hourly energy profile across all sites combined. Use this to spot peaks, troughs, and suspiciously flat baselines.",
+      "unit": "kWh · hourly",
+      "noData": "No recent series data. After you ingest CSV data or connect a live feed, CEI will chart the last 24 hours here.",
+      "summary": "Peak hour: {{peakLabel}} at {{maxVal}} kWh · Average: {{avgVal}} kWh/h over {{windowHours}} hours · Min hourly: {{minVal}} kWh/h."
+    },
+
+    "focus": {
+      "title": "What to pay attention to today",
+      "subtitle": "A lightweight, qualitative layer on top of the raw charts. This is where you turn charts into an action list for operations.",
+      "item1": "Check whether the overnight baseline looks flat and low. A rising baseline over time usually hides idle losses.",
+      "item2": "Compare this 24-hour profile with a known \"good\" day. Look for new peaks or extended high-load zones.",
+      "item3": {
+        "prefix": "Use the",
+        "suffix": "page to see which sites are driving any abnormal consumption."
+      }
+    }
+  },
+
+  "sitesList": {
+    "errors": {
+      "load": "Failed to load sites.",
+      "create": "Failed to create site.",
+      "delete": "Failed to delete site. Please try again or check logs.",
+      "nameRequired": "Site name is required."
+    },
+
+    "header": {
+      "title": "Sites",
+      "subtitle": "Manage the plants, facilities, and lines you're monitoring. Sites are the anchor for dashboards, alerts, and reports."
+    },
+
+    "actions": {
+      "goToUpload": "Go to CSV upload"
+    },
+
+    "addCard": {
+      "title": "Add a site",
+      "body": "Create sites for your organization so that uploaded meters and alerts can be anchored to real facilities.",
+      "siteNameLabel": "Site name *",
+      "siteNamePlaceholder": "e.g. Lamborghini Bologna",
+      "locationLabel": "Location (optional)",
+      "locationPlaceholder": "e.g. Bologna, IT",
+      "creating": "Creating…",
+      "add": "Add site"
+    },
+
+    "table": {
+      "title": "Sites in your organization",
+      "subtitlePrefix": "Click the site ID or name to open its dashboard. Upload CSVs keyed to",
+      "subtitleSuffix": "to drive trends, alerts, and reports.",
+      "empty": "No sites yet. Use the form above to create your first site, then upload timeseries data linked to site-1, site-2, etc.",
+      "columns": {
+        "id": "ID",
+        "site": "Site",
+        "location": "Location",
+        "trend24h": "Last 24h trend"
+      }
+    },
+
+    "trend": {
+      "no24hDataYet": "No 24h data yet",
+      "nearBaseline24h": "● Near baseline (24h)",
+      "learningBaseline24h": "Learning baseline (24h)",
+      "learningBaselineWithHistory": "Learning baseline (24h{{daysLabel}})",
+      "historyDaysLabel": " · ~{{days}}d history",
+      "aboveBaseline24h": "▲ {{pct}} above baseline (24h)",
+      "belowBaseline24h": "▼ {{pct}} below baseline (24h)"
+    },
+
+    "row": {
+      "unknownLocation": "—",
+      "defaultSiteName": "Site {{id}}"
+    },
+
+    "buttons": {
+      "view": "View",
+      "delete": "Delete"
+    },
+
+    "confirmDelete": {
+      "title": "Delete {{label}}?",
+      "body": "This will permanently remove this site and its associated data in CEI.",
+      "full": "Delete {{label}}?\n\nThis will permanently remove this site and its associated data in CEI."
+    }
+  },
+
+ "settings": {
+    "header": {
+      "title": "Settings",
+      "subtitle": "Local preferences for your CEI experience, plus technical settings for data ingestion."
+    },
+
+    "notifications": {
+      "title": "Notifications",
+      "emailAlertsLabel": "Email me when new high-impact opportunities are detected."
+    },
+
+    "units": {
+      "title": "Units",
+      "subtitle": "Choose how energy and emissions metrics are displayed.",
+      "metric": "Metric (kWh, tCO₂e)",
+      "imperial": "Imperial (kBtu, lb CO₂)"
+    },
+
+    "energyTariffs": {
+      "title": "Energy & tariffs",
+      "ownerOnly": "Owner only",
+      "noTariffsConfigured": "No tariffs configured – showing kWh only",
+      "help": "Organization-level settings used by the cost engine in KPIs, alerts, and reports.",
+      "readOnlyNotice": "Owner only. You can view these settings, but editing is disabled.",
+
+      "loading": "Loading organization settings…",
+      "accountErrorFallback": "Failed to load account details.",
+      "accountNotReady": "Account details are not available yet. Once the org is ready, you can configure energy costs here.",
+      "noOrg": "No organization is attached to this account. Cost analytics stay disabled until an org exists.",
+
+      "fields": {
+        "primaryEnergySources": {
+          "label": "Primary energy sources",
+          "placeholder": "e.g. \"electricity\", \"electricity,gas\"",
+          "help": "Comma-separated list; currently used for labels and context."
+        },
+        "electricityPrice": {
+          "label": "Electricity price (per kWh)",
+          "placeholder": "e.g. 0.18"
+        },
+        "gasPrice": {
+          "label": "Gas price (per kWh, optional)",
+          "placeholder": "e.g. 0.06"
+        },
+        "currencyCode": {
+          "label": "Currency code",
+          "placeholder": "e.g. EUR"
+        }
+      },
+
+      "validation": {
+        "accountNotLoaded": "Account details are not loaded yet.",
+        "ownerOnlyEdit": "Owner only. Ask your organization owner to update tariffs.",
+        "noOrg": "No organization is attached to this account.",
+        "currencyCodeInvalid": "Currency code must be 3 letters (e.g. EUR).",
+        "electricityNonNegative": "Electricity price must be a non-negative number.",
+        "gasNonNegative": "Gas price must be a non-negative number."
+      },
+
+      "messages": {
+        "saved": "Settings saved. Cost analytics will now use these values.",
+        "fallbackKwhOnly": "Until tariffs are configured, CEI will run kWh-only analytics."
+      },
+
+      "actions": {
+        "saveEnergySettings": "Save energy settings",
+        "saving": "Saving..."
+      }
+    },
+
+    "integrationTokens": {
+      "title": "Integration tokens",
+      "ownerOnly": "Owner only",
+      "description": "Long-lived API tokens for SCADA/BMS/historian systems to push timeseries data directly into CEI via",
+      "endpoint": "POST /api/v1/timeseries/batch",
+
+      "noPermission": "You don’t have permission to view or manage integration tokens. Ask your organization owner.",
+
+      "createPlaceholder": "e.g. Plant 4 SCADA",
+      "createButton": "Create token",
+      "creatingButton": "Creating...",
+
+      "newTokenTitle": "New integration token (shown once)",
+      "newTokenHelp": "Store this token securely (vault, password manager). You won’t be able to view it again.",
+
+      "loading": "Loading integration tokens...",
+      "empty": "No integration tokens yet. Create one above to allow external systems to push data into CEI.",
+
+      "labels": {
+        "created": "Created",
+        "lastUsed": "Last used"
+      },
+
+      "status": {
+        "active": "Active",
+        "revoked": "Revoked"
+      },
+
+      "actions": {
+        "copy": "Copy",
+        "copied": "Copied",
+        "revoke": "Revoke",
+        "revoking": "Revoking..."
+      },
+
+      "errors": {
+        "load": "Failed to load integration tokens.",
+        "create": "Failed to create integration token.",
+        "revoke": "Failed to revoke integration token.",
+        "ownerOnlyCreate": "Owner only. Ask your organization owner to create a token.",
+        "ownerOnlyRevoke": "Owner only. Ask your organization owner to revoke tokens."
+      }
+    }
+  },
+
+
+  "account": {
+    "header": {
+      "title": "Account & Billing",
+      "subtitle": "Manage your CEI profile, organization, and subscription. This is the control panel for turning a single deployment into a real SaaS footprint.",
+      "orgLabel": "Org:",
+      "roleLabel": "Role:",
+      "planLabel": "Plan:"
+    },
+
+    "roles": {
+      "owner": "Owner",
+      "member": "Member"
+    },
+
+    "labels": {
+      "ownerOnly": "Owner-only",
+      "enabled": "Enabled",
+      "disabled": "Disabled"
+    },
+
+    "warnings": {
+      "accountUnavailable": "Pricing and plan details are temporarily unavailable. Core kWh analytics will still work."
+    },
+
+    "errors": {
+      "ownerOnlyBilling": "Owner-only. Only an org owner can manage subscriptions.",
+      "ownerOnlyDelete": "Owner-only. Only an org owner can delete the account in this deployment.",
+      "ownerOnlyOffboard": "Owner-only. Only an org owner can offboard the organization.",
+      "deleteFailed": "Failed to delete account.",
+      "leaveOrgFailed": "Failed to leave organization.",
+      "softOffboardFailed": "Soft offboard failed.",
+      "nukeFailed": "Nuke failed."
+    },
+
+    "confirm": {
+      "deleteAccount": "Really delete your account? This cannot be undone.",
+      "leaveOrg": "Leave this organization?\n\nThis detaches ONLY your user from the org.\nIf you are the last owner, the server will block this.",
+      "softOffboard": "Soft offboard this organization?\n\nThis will:\n- Revoke invites\n- Deactivate integration tokens\n- Detach ALL users (including you)\n- Clear org billing fields\n- KEEP the org record\n\nUse this when a company wants out.",
+      "nukePrompt": "NUKE MODE.\n\nThis permanently deletes the org and org-scoped data.\n\nType the org name EXACTLY to confirm:\n{{orgName}}",
+      "revokeInvite": "Revoke this invite?\n\nThis will:\n- Disable the invite link\n- Stop the invited user from logging in again (if already accepted)"
+    },
+
+    "plan": {
+      "labels": {
+        "starter": "CEI Starter",
+        "growth": "CEI Growth",
+        "custom": "Custom / Unspecified"
+      }
+    },
+
+    "profile": {
+      "title": "Profile",
+      "emailLabel": "Email:",
+      "nameLabel": "Name:",
+      "readOnlyNote": "For now this is read-only. In a production deployment, this is where you’d manage passwords, SSO, and org membership.",
+      "deleteButton": "Delete account",
+      "deleting": "Deleting…",
+      "deletedMessage": "Your account has been deleted on this environment. You may need to log out manually or clear your token in local storage."
+    },
+
+    "subscription": {
+      "title": "Subscription",
+      "currentPlan": "Current plan:",
+      "status": "Status:",
+      "alerts": "Alerts:",
+      "reports": "Reports:",
+      "ownerOnlyBlurb": "Ask your org owner to upgrade or manage billing.",
+      "upgrade": "Upgrade to CEI Starter",
+      "manage": "Manage subscription",
+      "redirecting": "Redirecting…",
+      "opening": "Opening…",
+      "status": {
+        "notConnected": "Not connected"
+      },
+      "bullets": {
+        "starter": "Starter includes alerts, reports, and multi-site analytics.",
+        "growth": "Growth (later) adds more orgs, longer history, and SLA-backed support."
+      }
+    },
+
+    "billing": {
+      "notConfiguredCheckout": "Billing is not fully configured for this environment. No live checkout page is available.",
+      "checkoutFailed": "Could not start checkout. Please retry or contact your CEI admin.",
+      "portalNotAvailable": "The billing portal is not available in this environment. Stripe is not fully configured.",
+      "portalFailed": "Could not open the billing portal. Please retry or contact your CEI admin."
+    },
+
+    "org": {
+      "noOrgAttached": "You are not attached to an organization.",
+      "leftOrg": "Left organization. Your account is now detached.",
+      "softOffboardComplete": "Soft offboard complete. Users detached; org record retained.",
+      "thisOrg": "this org",
+      "nukeCancelled": "Nuke cancelled (org name confirmation did not match).",
+      "nukeComplete": "Nuke complete. Org deleted."
+    },
+
+    "orgControls": {
+      "title": "Organization controls",
+      "subtitle": "Leave your org or offboard a customer.",
+      "currentOrg": "Current org:",
+      "role": "Role:",
+      "leave": "Leave Organization",
+      "leaving": "Leaving…",
+      "offboard": "Offboard Organization",
+      "offboarding": "Offboarding…",
+      "permanentDelete": "Permanently Delete",
+      "nuking": "Nuking…",
+      "noOrgAttachedTitle": "No organization attached",
+      "permanentDeleteTitle": "Danger: permanent delete",
+      "footer": "Offboard Organization detaches users and revokes invites/tokens, but keeps the org row. Permanently Delete deletes the org and org-scoped data. Leave Organization detaches only you (blocked if you’re the last owner)."
+    },
+
+    "invites": {
+      "title": "Organization invites",
+      "subtitle": "Owner-only. Generates join links for this org.",
+      "notOwnerBlurb": "You are not an org owner. Invite generation is restricted.",
+
+      "form": {
+        "emailLabel": "Invite email",
+        "emailPlaceholder": "user@company.com",
+        "roleLabel": "Role",
+        "expiresLabel": "Expires (days)",
+        "generate": "Generate invite link",
+        "creating": "Creating…",
+        "emailBoundNote": "Invites are email-bound. The recipient must sign up using this same email."
+      },
+
+      "created": {
+        "linkLabel": "Invite link:",
+        "copy": "Copy"
+      },
+
+      "list": {
+        "helper": "Active links should be short-lived. Revoke after onboarding is complete.",
+        "refresh": "Refresh",
+        "refreshing": "Refreshing…",
+        "empty": "No invites yet."
+      },
+
+      "table": {
+        "id": "ID",
+        "email": "Email",
+        "role": "Role",
+        "status": "Status",
+        "expires": "Expires",
+        "created": "Created",
+        "accepted": "Accepted",
+        "actions": "Actions"
+      },
+
+      "status": {
+        "active": "Active",
+        "revoked": "Revoked"
+      },
+
+      "actions": {
+        "revoke": "Revoke",
+        "revokeTitle": "Revoke invite and stop logins for the invited user",
+        "extend": "Extend",
+        "extendTitle": "Extend/reactivate this invite and re-enable user access",
+        "extending": "Extending…"
+      },
+
+      "errors": {
+        "ownerOnly": "Owner-only. Only an org owner can generate invite links.",
+        "invalidEmail": "Invite email is required and must be a valid email address.",
+        "loadFailed": "Failed to load invites.",
+        "createFailed": "Failed to create invite.",
+        "revokeFailed": "Failed to revoke invite.",
+        "extendFailed": "Failed to extend invite."
+      },
+
+      "notes": {
+        "linkGenerated": "Invite link generated. Copy it and send it to the user.",
+        "createdNoToken": "Invite created, but backend did not return a token. (Expected: token returned ONCE when invite is usable.)",
+        "extendedNewLink": "Extended. New invite link generated. Copy it and send it to the user.",
+        "extendedNoLink": "Extended. No invite link returned because this invite was already accepted. User access has been re-enabled.",
+        "copied": "Copied to clipboard.",
+        "copyFailed": "Copy failed in this browser. Select the link and copy manually."
+      }
+    },
+
+    "tariffs": {
+      "title": "Tariffs & energy mix",
+      "subtitle": "Read-only. Used for cost analytics and savings estimates.",
+      "accountUnavailable": "Account details are not available right now. Tariff and energy mix data will appear here once your account context loads successfully.",
+      "noOrg": "No organization is associated with this account yet. Tariff and energy mix data will appear here once your org is configured.",
+      "currency": "Currency:",
+      "electricity": "Electricity price (per kWh):",
+      "gas": "Gas price (per kWh):",
+      "primarySources": "Primary energy sources:",
+      "notSpecified": "Not specified",
+      "notConfigured": "Not configured",
+      "notConfiguredNote": "Tariffs and energy mix are not configured yet. CEI will use kWh-only analytics until these values are set."
+    },
+
+    "environment": {
+      "title": "Environment & safety",
+      "labels": {
+        "production": "Production",
+        "pilot": "Pilot / Staging",
+        "development": "Development"
+      },
+      "blurbs": {
+        "production": "Production data. Treat this as customer-facing and audit-ready.",
+        "pilot": "Pilot / staging data. Suitable for demos and friendly pilots, not for financial sign-off.",
+        "development": "Local / dev data. Safe to experiment, break things, and iterate quickly."
+      },
+      "bullets": {
+        "dev": {
+          "label": "DEV:",
+          "text": "point CSV uploads and tests here; break things safely before promoting changes."
+        },
+        "pilot": {
+          "label": "PILOT/STAGING:",
+          "text": "use for demos and early customer pilots; data should be realistic but not yet contract-critical."
+        },
+        "prod": {
+          "label": "PROD:",
+          "text": "treat as the system of record; align alerts, reports, and exports with contractual expectations."
+        }
+      }
+    },
+
+    "planControls": {
+      "title": "What your plan controls",
+      "core": {
+        "label": "Core (always on):",
+        "text": "CSV ingestion, per-site dashboards, basic trend charts."
+      },
+      "starter": {
+        "label": "Starter and above:",
+        "text": "Alerts, 7-day reports, and per-site insight cards."
+      },
+      "future": {
+        "label": "Future tiers:",
+        "text": "organization-level baselines, ML-based forecasting, and custom export pipelines."
+      }
+    }
+  },
+
+  "alerts": {
+    "title": "Alerts",
+    "subtitle": "Rule-based exceptions generated from your timeseries data. <strong>Critical</strong> alerts indicate high-confidence waste or abnormal baselines, while <strong>Warnings</strong> flag patterns worth a closer look.",
+
+    "window": {
+      "label": "Window:",
+      "24h": "24h",
+      "7d": "7d",
+      "last24h": "last 24 hours",
+      "last7d": "last 7 days"
+    },
+
+    "severity": {
+      "critical": "Critical",
+      "warning": "Warning",
+      "info": "Info"
+    },
+
+    "status": {
+      "open": "Open",
+      "ack": "Acknowledged",
+      "resolved": "Resolved",
+      "muted": "Muted"
+    },
+
+    "errors": {
+      "loadAlertsFailed": "Failed to load alerts.",
+      "loadHistoryFailed": "Failed to load alert history.",
+      "updateAlertFailed": "Failed to update alert."
+    },
+
+    "gating": {
+      "title": "Upgrade to unlock alerts",
+      "body": "Your current plan (<code>{{planKey}}</code>) does not include rule-based alerting. Upgrade to CEI Starter or above to see baseline deviations, weekend waste, and portfolio dominance patterns directly on this page.",
+      "cta": "View plans & billing",
+      "footer": "Alerts will light up automatically as soon as your subscription is active."
+    },
+
+    "summary": {
+      "totalTitle": "Total alerts – {{windowLabel}}",
+      "totalHelp": "Count of all critical, warning, and info-level alerts raised in the selected window.",
+      "severityMixTitle": "Severity mix",
+      "severityMixHelp": "Use this to understand whether the portfolio is mostly “noise” or if true exceptions are creeping in."
+    },
+
+    "playbook": {
+      "title": "Operational playbook",
+      "item1": "Work through <strong>critical</strong> alerts first.",
+      "item2": "Review warnings during daily/weekly ops meetings.",
+      "item3": "Use site links below to investigate trends directly."
+    },
+
+    "topSites": {
+      "title": "Sites most impacted by alerts",
+      "subtitle": "Ranked by count of current alerts in {{windowLabel}}. Use this as your daily triage list.",
+      "columns": {
+        "site": "Site",
+        "openAlerts": "Open alerts",
+        "critical": "Critical",
+        "warnings": "Warnings",
+        "info": "Info",
+        "navigate": "Navigate"
+      }
+    },
+
+    "current": {
+      "title": "Current alerts",
+      "subtitle": "Site-level exceptions for the selected window. Click through to the site dashboard to see the underlying trend.",
+      "empty": "No alerts raised in {{windowLabel}}. If you recently uploaded data, give CEI a moment to crunch baselines and reconverge on thresholds."
+    },
+
+    "history": {
+      "title": "Alert history & workflow",
+      "subtitle": "Append-only stream from <code>alert_events</code>. Use this to track who touched what, and when.",
+      "empty": "No historical alerts yet for this filter. As /alerts runs over time, events will accumulate here.",
+      "filters": {
+        "all": "All",
+        "open": "Open",
+        "ackShort": "Ack",
+        "resolved": "Resolved"
+      }
+    },
+
+    "labels": {
+      "site": "Site:",
+      "triggered": "Triggered:",
+      "updated": "Updated:",
+      "metric": "Metric:",
+      "window": "Window:",
+      "note": "Note:"
+    },
+
+    "actions": {
+      "viewSite": "View site →"
+    },
+
+    "export": {
+      "current": "Export current alerts (CSV)",
+      "history": "Export history (CSV)"
+    },
+
+    "defaults": {
+      "title": "Energy anomaly detected",
+      "message": "This site’s recent energy pattern deviates from its baseline. Review the dashboard for confirmation."
+    },
+
+    "stats": {
+      "deltaVsBaseline": "Δ vs baseline:",
+      "actualVsExpected": "Actual vs expected:",
+      "baselineWindow": "Baseline window: {{days}} days",
+      "hoursPrefix": "Hours –",
+      "hoursCritical": "critical:",
+      "hoursElevated": "elevated:",
+      "hoursBelowBaseline": "below baseline:",
+      "estCostImpact": "Est. cost impact:",
+      "statsLabel": "Stats:"
+    },
+
+    "cost": {
+      "overspend": "Overspend vs baseline",
+      "savings": "Savings vs baseline",
+      "onBaseline": "On baseline"
+    },
+
+    "workflow": {
+      "updateStatus": "Update status:",
+      "ack": "Ack",
+      "resolve": "Resolve",
+      "reopen": "Re-open"
+    }
+  },
+
+  "reports": {
+    "title": "Reports",
+    "subtitle": "Portfolio reporting for operations and leadership. Use this to quantify site-level waste vs baseline and track savings over time.",
+
+    "meta": {
+      "window": "Window: last 7 days (168 hours)",
+      "sitesCount": "Sites: <strong>{{count}}</strong>",
+      "noTariffs": "No tariffs configured – showing kWh only"
+    },
+
+    "alerts": {
+      "reportsDisabled": "Reports are not enabled for this plan.",
+      "noSiteData": "No site data available to export yet.",
+      "noOpportunityData": "No opportunity data available to export yet."
+    },
+
+    "window": {
+      "label": "Window:",
+      "7d": "7d",
+      "30d": "30d",
+      "last7d": "last 7 days",
+      "last30d": "last 30 days"
+    },
+
+    "gating": {
+      "title": "Upgrade to unlock reports",
+      "body": "Your current plan (<code>{{planKey}}</code>) does not include reporting. Upgrade to CEI Starter or above to export 7-day summaries, baseline deltas, and cost impact.",
+      "cta": "View plans & billing",
+      "note": "Reports will unlock automatically as soon as your subscription is active."
+    },
+
+    "kpis": {
+      "energy": {
+        "title": "Portfolio energy – last 7 days",
+        "subtitle": "Aggregated consumption across all sites over the last 168 hours. Points: <strong>{{points}}</strong>"
+      },
+      "sitesWithData": {
+        "title": "Sites with data",
+        "subtitle": "Sites reporting at least one timeseries point in the last week."
+      },
+      "avgEnergy": {
+        "title": "Avg energy per site – 7 days",
+        "subtitle": "Simple average of portfolio energy divided by monitored sites."
+      },
+      "cost": {
+        "title": "Portfolio energy cost – last 7 days",
+        "subtitleWithTariff": "Derived by applying your electricity tariff to portfolio kWh over the last 168 hours.",
+        "subtitleNoTariff": "Set your electricity tariff in Account & Settings to unlock portfolio cost analytics."
+      },
+      "avgCost": {
+        "title": "Avg cost per active site – 7 days",
+        "subtitleActiveSites": "Spread across {{count}} sites with actual data in the last week.",
+        "subtitleNoActiveSites": "No active sites with data yet – cost per site will appear once timeseries flows in."
+      },
+      "tariff": {
+        "title": "Tariff & €/MWh anchor",
+        "subtitleWithTariffPrefix": "Tariff:",
+        "primarySources": "primary sources:",
+        "subtitleNoTariff": "Configure your electricity price per kWh (and currency) in Account & Settings to get €/MWh anchors."
+      }
+    },
+
+    "summary": {
+      "title": "Portfolio summary – {{windowLabel}}",
+      "subtitle": "High-level rollup across all sites. Use this to spot which plants are driving overspend or savings.",
+      "totalActual": "Total actual",
+      "totalExpected": "Total expected",
+      "deltaVsBaseline": "Δ vs baseline",
+      "estCostImpact": "Est. cost impact"
+    },
+
+    "table": {
+      "title": "Site-level 7-day energy & cost",
+      "subtitle": "Per-site energy, cost, and deviation vs baseline over the last week. Sorted by € impact when tariffs are configured.",
+      "empty": "No sites available yet. Once sites and timeseries are configured, this table will populate with 7-day energy and cost metrics per site.",
+
+      "download": "Download CSV",
+      "preparing": "Preparing…",
+      "tip": "Tip: sort is cost-first when tariffs exist.",
+      "downloadTooltip": "Exports the 7-day per-site report table (kWh + baseline + cost if available).",
+
+      "viewSite": "View site →",
+      "baselineHoursValue": "Crit: {{c}}, Warn: {{w}}, Below: {{b}}",
+      "daysAbbrev": "d",
+
+      "columns": {
+        "site": "Site",
+        "location": "Location",
+        "energy7d": "Energy (7 days)",
+        "cost7d": "Cost (7 days)",
+        "expectedCost7d": "Expected cost (7 days)",
+        "costDelta": "Cost Δ vs baseline",
+        "points": "Points",
+        "energyPerPoint": "Energy / point",
+        "deviation": "Deviation vs baseline",
+        "expectedEnergy": "Expected (7 days)",
+        "baselineHours": "Baseline hours (crit / warn / below)",
+        "stats": "Stats"
+      }
+    },
+
+    "chart": {
+      "caption": "Bar height scales with each site’s 7-day energy. Bars are ordered by € impact when tariffs are configured."
+    },
+
+    "opps": {
+      "title": "Top efficiency opportunities (portfolio)",
+      "subtitle": "Highest-impact measures per site, ranked by estimated annual cost savings when tariffs are configured (fallback to kWh).",
+
+      "download": "Download opportunities CSV",
+      "downloadTooltip": "Exports the portfolio opportunity list (with cost estimates when available).",
+      "costRankingRequiresTariffs": "Cost ranking requires tariffs.",
+      "empty": "No opportunities surfaced yet. Once CEI has enough KPI context per site, the opportunity engine will start proposing measures here.",
+
+      "columns": {
+        "site": "Site",
+        "location": "Location",
+        "measure": "Measure",
+        "kwhSaved": "Est. kWh saved / year",
+        "costSaved": "Est. cost saved / year",
+        "co2Saved": "CO₂ saved (t / year)"
+      }
+    },
+
+    "errors": {
+      "loadReports": "Failed to load reports.",
+      "loadOpportunities": "Failed to load opportunity measures."
+    }
+  },
+
+
+  "csvUpload": {
+    "title": {
+      "global": "Upload timeseries data",
+      "perSite": "Upload timeseries data for this site"
+    },
+
+    "subtitle": {
+      "global": "Drag a CSV into CEI and we&apos;ll ingest energy readings into the timeseries engine. Column <code>order doesn&apos;t matter</code> as long as the headers include <code>timestamp</code>, <code>value</code>, <code>unit</code>, <code>site_id</code>, and <code>meter_id</code>.",
+      "perSite": "You&apos;re uploading data for <code>{{forcedSiteId}}</code>. CEI will ingest all rows into this site. Column <code>order</code> doesn&apos;t matter; the engine reads the header row. For this scoped upload, your CSV must include at least <code>timestamp</code>, <code>value</code>, <code>unit</code>, and <code>meter_id</code>. A <code>site_id</code> column is optional and will be ignored for routing."
+    },
+
+    "scopedMode": "Scoped mode: all ingested rows will use <code>site_id = {{forcedSiteId}}</code>.",
+
+    "meta": {
+      "endpoint": "Endpoint:",
+      "authRequired": "Auth: required",
+      "lastSuccessful": "Last successful upload",
+      "scopeSuffix": " (this scope)",
+      "ingestedSummary": "ingested <strong>{{ingested}}</strong> / {{received}} rows."
+    },
+
+    "form": {
+      "csvFileLabel": "CSV file",
+      "mappingIntro": "CEI will read the header row and map columns by name. The engine expects at least:",
+      "timestampHint": "ISO 8601 or <code>YYYY-MM-DD HH:MM:SS</code>",
+      "valueHint": "numeric reading",
+      "unitHint": "e.g. <code>kWh</code>",
+      "siteIdHint": "e.g. <code>site-1</code>",
+      "meterIdHint": "e.g. <code>meter-main-1</code> (if omitted, CEI will default to a generic meter id)"
+    },
+
+    "tips": {
+      "title": "Tips for smooth ingestion",
+      "item1": "Keep timestamps in a single timezone per file.",
+      "item2Base": "Use stable <code>site_id</code> values so dashboards can build trends over time.",
+      "item2Scoped": "For this scoped upload CEI will enforce <code>{{forcedSiteId}}</code> on every row.",
+      "item3": "If you backfill older data, it will not change the “last 24 hours” KPIs but will appear in broader windows later."
+    },
+
+    "button": {
+      "uploadCsv": "Upload CSV",
+      "uploadAgain": "Upload again",
+      "validating": "Validating & ingesting…",
+      "ingesting": "Ingesting…"
+    },
+
+    "status": {
+      "idle": "Waiting for a CSV file.",
+      "readyWithFile": "Ready to upload: {{name}}",
+      "validating": "Validating headers and preparing rows for ingestion…",
+      "ingesting": "Ingesting rows into the timeseries engine…",
+      "doneGlobal": "Upload complete. The latest data will feed Dashboard, SiteView, Alerts, and Reports.",
+      "donePerSite": "Upload complete. The latest data will feed this site’s charts, alerts, and reports.",
+      "error": "Upload failed. Review the error message and adjust the CSV."
+    },
+
+    "errors": {
+      "noFileSelected": "Please choose a CSV file to upload.",
+      "uploadFailedGeneric": "Upload failed. Please check the file and try again."
+    },
+
+    "result": {
+      "title": "Ingestion summary",
+      "summary": "CEI received <strong>{{received}}</strong> row{{pluralSuffix}}, ingested <strong>{{ingested}}</strong>, and skipped <strong>{{failed}}</strong>.",
+      "successRate": "Effective success rate: <strong>{{rate}}</strong>.",
+      "sampleSiteIds": "Sample site_ids",
+      "sampleMeterIds": "Sample meter_ids",
+      "noneDetected": "None detected",
+      "sampleIssues": "Sample row-level issues (first {{count}}):"
+    }
+  }
+}

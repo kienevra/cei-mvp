@@ -12,6 +12,7 @@ import {
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import { downloadCsv } from "../utils/csv";
+import { useTranslation, Trans } from "react-i18next";
 
 type SiteRecord = {
   id: number | string;
@@ -153,6 +154,8 @@ const formatTariffPerKwh = (value: number | null, code: string): string => {
 };
 
 const Reports: React.FC = () => {
+  const { t } = useTranslation();
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -534,12 +537,22 @@ const Reports: React.FC = () => {
           if (!isMounted) return;
           setTopOpportunities([]);
           setOpportunitiesError(
-            normalizeApiError(e, "Failed to load opportunity measures.")
+            normalizeApiError(
+              e,
+              t("reports.errors.loadOpportunities", {
+                defaultValue: "Failed to load opportunity measures.",
+              })
+            )
           );
         }
       } catch (e: any) {
         if (!isMounted) return;
-        setError(normalizeApiError(e, "Failed to load reports."));
+        setError(
+          normalizeApiError(
+            e,
+            t("reports.errors.loadReports", { defaultValue: "Failed to load reports." })
+          )
+        );
       } finally {
         if (!isMounted) return;
         setLoading(false);
@@ -551,7 +564,7 @@ const Reports: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [t]);
 
   const totalSites = sites.length;
   const totalKwh7d = portfolioSummary?.total_value || 0;
@@ -627,11 +640,19 @@ const Reports: React.FC = () => {
   // --- CSV export (7-day site reports) ---
   const handleDownloadCsv = () => {
     if (!enableReports) {
-      alert("Reports are not enabled for this plan.");
+      alert(
+        t("reports.alerts.reportsDisabled", {
+          defaultValue: "Reports are not enabled for this plan.",
+        })
+      );
       return;
     }
     if (!siteRows.length) {
-      alert("No site data available to export yet.");
+      alert(
+        t("reports.alerts.noSiteData", {
+          defaultValue: "No site data available to export yet.",
+        })
+      );
       return;
     }
 
@@ -722,11 +743,19 @@ const Reports: React.FC = () => {
   // --- CSV export for portfolio opportunities ---
   const handleDownloadOpportunitiesCsv = () => {
     if (!enableReports) {
-      alert("Reports are not enabled for this plan.");
+      alert(
+        t("reports.alerts.reportsDisabled", {
+          defaultValue: "Reports are not enabled for this plan.",
+        })
+      );
       return;
     }
     if (!topOpportunities.length) {
-      alert("No opportunity data available to export yet.");
+      alert(
+        t("reports.alerts.noOpportunityData", {
+          defaultValue: "No opportunity data available to export yet.",
+        })
+      );
       return;
     }
 
@@ -796,7 +825,7 @@ const Reports: React.FC = () => {
               letterSpacing: "-0.02em",
             }}
           >
-            Reports
+            {t("reports.title", { defaultValue: "Reports" })}
           </h1>
           <p
             style={{
@@ -805,8 +834,10 @@ const Reports: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Portfolio snapshot for the last 7 days. Built directly on top of the
-            CEI timeseries engine, learned baselines, and your configured tariffs.
+            {t("reports.subtitle", {
+              defaultValue:
+                "Portfolio snapshot for the last 7 days. Built directly on top of the CEI timeseries engine, learned baselines, and your configured tariffs.",
+            })}
           </p>
         </div>
 
@@ -821,15 +852,26 @@ const Reports: React.FC = () => {
             gap: "0.35rem",
           }}
         >
-          <div>Window: last 7 days (168 hours)</div>
+          <div>
+            {t("reports.meta.window", {
+              defaultValue: "Window: last 7 days (168 hours)",
+            })}
+          </div>
           {totalSites > 0 && (
             <div>
-              Sites: <strong>{totalSites}</strong>
+              <Trans
+                i18nKey="reports.meta.sitesCount"
+                defaults={"Sites: <strong>{{count}}</strong>"}
+                values={{ count: totalSites }}
+                components={{ strong: <strong /> }}
+              />
             </div>
           )}
           {!loading && enableReports && !hasTariff && (
             <span className="cei-pill cei-pill-neutral">
-              No tariffs configured – showing kWh only
+              {t("reports.meta.noTariffs", {
+                defaultValue: "No tariffs configured – showing kWh only",
+              })}
             </span>
           )}
         </div>
@@ -855,7 +897,9 @@ const Reports: React.FC = () => {
           >
             <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
               <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-                Upgrade to unlock portfolio reports
+                {t("reports.gating.title", {
+                  defaultValue: "Upgrade to unlock portfolio reports",
+                })}
               </div>
               <div
                 style={{
@@ -864,9 +908,14 @@ const Reports: React.FC = () => {
                   maxWidth: "40rem",
                 }}
               >
-                Your current plan (<code>{planKey}</code>) does not include the 7-day
-                portfolio reporting layer. Upgrade to CEI Starter or above to see
-                fleet-level kWh, cost KPIs, and export-ready summaries.
+                <Trans
+                  i18nKey="reports.gating.body"
+                  defaults={
+                    "Your current plan (<code>{{planKey}}</code>) does not include the 7-day portfolio reporting layer. Upgrade to CEI Starter or above to see fleet-level kWh, cost KPIs, and export-ready summaries."
+                  }
+                  values={{ planKey }}
+                  components={{ code: <code /> }}
+                />
               </div>
               <div
                 style={{
@@ -878,11 +927,14 @@ const Reports: React.FC = () => {
               >
                 <Link to="/account">
                   <button className="cei-btn cei-btn-primary">
-                    View plans &amp; billing
+                    {t("reports.gating.cta", { defaultValue: "View plans & billing" })}
                   </button>
                 </Link>
                 <span style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-                  Reports will light up automatically as soon as your subscription is active.
+                  {t("reports.gating.note", {
+                    defaultValue:
+                      "Reports will light up automatically as soon as your subscription is active.",
+                  })}
                 </span>
               </div>
             </div>
@@ -902,14 +954,22 @@ const Reports: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Portfolio energy – last 7 days
+              {t("reports.kpis.energy.title", {
+                defaultValue: "Portfolio energy – last 7 days",
+              })}
             </div>
             <div style={{ marginTop: "0.35rem", fontSize: "1.6rem", fontWeight: 600 }}>
               {loading ? "…" : formattedTotalKwh7d}
             </div>
             <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              Aggregated consumption across all sites over the last 168 hours. Points:{" "}
-              {loading ? "…" : totalPoints7d > 0 ? totalPoints7d : "—"}
+              <Trans
+                i18nKey="reports.kpis.energy.subtitle"
+                defaults={
+                  "Aggregated consumption across all sites over the last 168 hours. Points: <strong>{{points}}</strong>"
+                }
+                values={{ points: totalPoints7d > 0 ? totalPoints7d : "—" }}
+                components={{ strong: <strong /> }}
+              />
             </div>
           </div>
 
@@ -922,13 +982,17 @@ const Reports: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Sites with data
+              {t("reports.kpis.sitesWithData.title", {
+                defaultValue: "Sites with data",
+              })}
             </div>
             <div style={{ marginTop: "0.35rem", fontSize: "1.4rem", fontWeight: 600 }}>
               {loading ? "…" : sitesWithDataCount || "0"}
             </div>
             <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              Sites reporting at least one timeseries point in the last week.
+              {t("reports.kpis.sitesWithData.subtitle", {
+                defaultValue: "Sites reporting at least one timeseries point in the last week.",
+              })}
             </div>
           </div>
 
@@ -941,13 +1005,17 @@ const Reports: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Avg energy per site – 7 days
+              {t("reports.kpis.avgEnergy.title", {
+                defaultValue: "Avg energy per site – 7 days",
+              })}
             </div>
             <div style={{ marginTop: "0.35rem", fontSize: "1.4rem", fontWeight: 600 }}>
               {loading ? "…" : formattedAvgPerSite}
             </div>
             <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              Simple average of portfolio energy divided by monitored sites.
+              {t("reports.kpis.avgEnergy.subtitle", {
+                defaultValue: "Simple average of portfolio energy divided by monitored sites.",
+              })}
             </div>
           </div>
         </section>
@@ -965,7 +1033,9 @@ const Reports: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Portfolio energy cost – last 7 days
+              {t("reports.kpis.cost.title", {
+                defaultValue: "Portfolio energy cost – last 7 days",
+              })}
             </div>
             <div style={{ marginTop: "0.35rem", fontSize: "1.6rem", fontWeight: 600 }}>
               {loading
@@ -976,8 +1046,14 @@ const Reports: React.FC = () => {
             </div>
             <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
               {hasTariff
-                ? "Derived by applying your electricity tariff to portfolio kWh over the last 168 hours."
-                : "Set your electricity tariff in Account & Settings to unlock portfolio cost analytics."}
+                ? t("reports.kpis.cost.subtitleWithTariff", {
+                    defaultValue:
+                      "Derived by applying your electricity tariff to portfolio kWh over the last 168 hours.",
+                  })
+                : t("reports.kpis.cost.subtitleNoTariff", {
+                    defaultValue:
+                      "Set your electricity tariff in Account & Settings to unlock portfolio cost analytics.",
+                  })}
             </div>
           </div>
 
@@ -990,7 +1066,9 @@ const Reports: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Avg cost per active site – 7 days
+              {t("reports.kpis.avgCost.title", {
+                defaultValue: "Avg cost per active site – 7 days",
+              })}
             </div>
             <div style={{ marginTop: "0.35rem", fontSize: "1.4rem", fontWeight: 600 }}>
               {loading
@@ -1001,8 +1079,14 @@ const Reports: React.FC = () => {
             </div>
             <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
               {sitesWithDataCount > 0
-                ? `Spread across ${sitesWithDataCount} sites with actual data in the last week.`
-                : "No active sites with data yet – cost per site will appear once timeseries flows in."}
+                ? t("reports.kpis.avgCost.subtitleActiveSites", {
+                    defaultValue: "Spread across {{count}} sites with actual data in the last week.",
+                    count: sitesWithDataCount,
+                  })
+                : t("reports.kpis.avgCost.subtitleNoActiveSites", {
+                    defaultValue:
+                      "No active sites with data yet – cost per site will appear once timeseries flows in.",
+                  })}
             </div>
           </div>
 
@@ -1015,7 +1099,7 @@ const Reports: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Tariff & €/MWh anchor
+              {t("reports.kpis.tariff.title", { defaultValue: "Tariff & €/MWh anchor" })}
             </div>
             <div style={{ marginTop: "0.35rem", fontSize: "1.4rem", fontWeight: 600 }}>
               {hasTariff && pricePerMwh !== null
@@ -1025,20 +1109,30 @@ const Reports: React.FC = () => {
             <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
               {hasTariff ? (
                 <>
-                  Tariff:{" "}
+                  <Trans
+                    i18nKey="reports.kpis.tariff.subtitleWithTariffPrefix"
+                    defaults={"Tariff:"}
+                  />{" "}
                   <strong>
                     {formatTariffPerKwh(electricityPricePerKwh, currencyCode)} / kWh
                   </strong>
                   {primaryEnergySources && primaryEnergySources.length > 0 && (
                     <>
                       {" "}
-                      · primary sources: <span>{primaryEnergySources.join(" + ")}</span>
+                      ·{" "}
+                      {t("reports.kpis.tariff.primarySources", {
+                        defaultValue: "primary sources:",
+                      })}{" "}
+                      <span>{primaryEnergySources.join(" + ")}</span>
                     </>
                   )}
                 </>
               ) : (
                 <>
-                  Configure your electricity price per kWh (and currency) in Account &amp; Settings to get €/MWh anchors.
+                  {t("reports.kpis.tariff.subtitleNoTariff", {
+                    defaultValue:
+                      "Configure your electricity price per kWh (and currency) in Account & Settings to get €/MWh anchors.",
+                  })}
                 </>
               )}
             </div>
@@ -1061,10 +1155,15 @@ const Reports: React.FC = () => {
             >
               <div>
                 <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-                  Site-level 7-day energy & cost
+                  {t("reports.table.title", {
+                    defaultValue: "Site-level 7-day energy & cost",
+                  })}
                 </div>
                 <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-                  Per-site energy, cost, and deviation vs baseline over the last week. Sorted by € impact when tariffs are configured.
+                  {t("reports.table.subtitle", {
+                    defaultValue:
+                      "Per-site energy, cost, and deviation vs baseline over the last week. Sorted by € impact when tariffs are configured.",
+                  })}
                 </div>
               </div>
 
@@ -1074,12 +1173,17 @@ const Reports: React.FC = () => {
                   className="cei-btn cei-btn-ghost"
                   onClick={handleDownloadCsv}
                   disabled={loading || !siteRows.length}
-                  title="Exports the 7-day per-site report table (kWh + baseline + cost if available)."
+                  title={t("reports.table.downloadTooltip", {
+                    defaultValue:
+                      "Exports the 7-day per-site report table (kWh + baseline + cost if available).",
+                  })}
                 >
-                  {loading ? "Preparing…" : "Download CSV"}
+                  {loading
+                    ? t("reports.table.preparing", { defaultValue: "Preparing…" })
+                    : t("reports.table.download", { defaultValue: "Download CSV" })}
                 </button>
                 <span style={{ fontSize: "0.72rem", color: "var(--cei-text-muted)" }}>
-                  Tip: sort is cost-first when tariffs exist.
+                  {t("reports.table.tip", { defaultValue: "Tip: sort is cost-first when tariffs exist." })}
                 </span>
               </div>
             </div>
@@ -1092,7 +1196,10 @@ const Reports: React.FC = () => {
 
             {!loading && sortedSiteRows.length === 0 && (
               <div style={{ fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
-                No sites available yet. Once sites and timeseries are configured, this table will populate with 7-day energy and cost metrics per site.
+                {t("reports.table.empty", {
+                  defaultValue:
+                    "No sites available yet. Once sites and timeseries are configured, this table will populate with 7-day energy and cost metrics per site.",
+                })}
               </div>
             )}
 
@@ -1160,7 +1267,10 @@ const Reports: React.FC = () => {
                 </div>
 
                 <div style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-                  Bar height scales with each site’s 7-day energy. Bars are ordered by € impact when tariffs are configured.
+                  {t("reports.chart.caption", {
+                    defaultValue:
+                      "Bar height scales with each site’s 7-day energy. Bars are ordered by € impact when tariffs are configured.",
+                  })}
                 </div>
               </div>
             )}
@@ -1170,18 +1280,18 @@ const Reports: React.FC = () => {
                 <table>
                   <thead>
                     <tr>
-                      <th>Site</th>
-                      <th>Location</th>
-                      <th>Energy (7 days)</th>
-                      <th>Cost (7 days)</th>
-                      <th>Expected cost (7 days)</th>
-                      <th>Cost Δ vs baseline</th>
-                      <th>Points</th>
-                      <th>Energy / point</th>
-                      <th>Deviation vs baseline</th>
-                      <th>Expected (7 days)</th>
-                      <th>Baseline hours (crit / warn / below)</th>
-                      <th>Stats</th>
+                      <th>{t("reports.table.columns.site", { defaultValue: "Site" })}</th>
+                      <th>{t("reports.table.columns.location", { defaultValue: "Location" })}</th>
+                      <th>{t("reports.table.columns.energy7d", { defaultValue: "Energy (7 days)" })}</th>
+                      <th>{t("reports.table.columns.cost7d", { defaultValue: "Cost (7 days)" })}</th>
+                      <th>{t("reports.table.columns.expectedCost7d", { defaultValue: "Expected cost (7 days)" })}</th>
+                      <th>{t("reports.table.columns.costDelta", { defaultValue: "Cost Δ vs baseline" })}</th>
+                      <th>{t("reports.table.columns.points", { defaultValue: "Points" })}</th>
+                      <th>{t("reports.table.columns.energyPerPoint", { defaultValue: "Energy / point" })}</th>
+                      <th>{t("reports.table.columns.deviation", { defaultValue: "Deviation vs baseline" })}</th>
+                      <th>{t("reports.table.columns.expectedEnergy", { defaultValue: "Expected (7 days)" })}</th>
+                      <th>{t("reports.table.columns.baselineHours", { defaultValue: "Baseline hours (crit / warn / below)" })}</th>
+                      <th>{t("reports.table.columns.stats", { defaultValue: "Stats" })}</th>
                       <th />
                     </tr>
                   </thead>
@@ -1230,7 +1340,12 @@ const Reports: React.FC = () => {
                           <td>
                             {critLabel === 0 && elevLabel === 0 && belowLabel === 0
                               ? "—"
-                              : `Crit: ${critLabel}, Warn: ${elevLabel}, Below: ${belowLabel}`}
+                              : t("reports.table.baselineHoursValue", {
+                                  defaultValue: "Crit: {{c}}, Warn: {{w}}, Below: {{b}}",
+                                  c: critLabel,
+                                  w: elevLabel,
+                                  b: belowLabel,
+                                })}
                           </td>
                           <td>
                             {row.statsSource || row.baselineDays7d !== null ? (
@@ -1238,7 +1353,8 @@ const Reports: React.FC = () => {
                                 {row.statsSource && <code>{row.statsSource}</code>}
                                 {row.baselineDays7d !== null && (
                                   <span style={{ marginLeft: "0.25rem", opacity: 0.8 }}>
-                                    ({row.baselineDays7d} d)
+                                    ({row.baselineDays7d}{" "}
+                                    {t("reports.table.daysAbbrev", { defaultValue: "d" })})
                                   </span>
                                 )}
                               </>
@@ -1255,7 +1371,7 @@ const Reports: React.FC = () => {
                                 textDecoration: "none",
                               }}
                             >
-                              View site →
+                              {t("reports.table.viewSite", { defaultValue: "View site →" })}
                             </Link>
                           </td>
                         </tr>
@@ -1284,10 +1400,15 @@ const Reports: React.FC = () => {
             >
               <div>
                 <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-                  Top efficiency opportunities (portfolio)
+                  {t("reports.opps.title", {
+                    defaultValue: "Top efficiency opportunities (portfolio)",
+                  })}
                 </div>
                 <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-                  Highest-impact measures per site, ranked by estimated annual cost savings when tariffs are configured (fallback to kWh).
+                  {t("reports.opps.subtitle", {
+                    defaultValue:
+                      "Highest-impact measures per site, ranked by estimated annual cost savings when tariffs are configured (fallback to kWh).",
+                  })}
                 </div>
               </div>
 
@@ -1297,13 +1418,20 @@ const Reports: React.FC = () => {
                   className="cei-btn cei-btn-ghost"
                   onClick={handleDownloadOpportunitiesCsv}
                   disabled={loading || !topOpportunities.length}
-                  title="Exports the portfolio opportunity list (with cost estimates when available)."
+                  title={t("reports.opps.downloadTooltip", {
+                    defaultValue:
+                      "Exports the portfolio opportunity list (with cost estimates when available).",
+                  })}
                 >
-                  {loading ? "Preparing…" : "Download opportunities CSV"}
+                  {loading
+                    ? t("reports.table.preparing", { defaultValue: "Preparing…" })
+                    : t("reports.opps.download", { defaultValue: "Download opportunities CSV" })}
                 </button>
                 {!hasTariff && (
                   <span style={{ fontSize: "0.72rem", color: "var(--cei-text-muted)" }}>
-                    Cost ranking requires tariffs.
+                    {t("reports.opps.costRankingRequiresTariffs", {
+                      defaultValue: "Cost ranking requires tariffs.",
+                    })}
                   </span>
                 )}
               </div>
@@ -1323,7 +1451,10 @@ const Reports: React.FC = () => {
 
             {!loading && !opportunitiesError && topOpportunities.length === 0 && (
               <div style={{ fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
-                No opportunities surfaced yet. Once CEI has enough KPI context per site, the opportunity engine will start proposing measures here.
+                {t("reports.opps.empty", {
+                  defaultValue:
+                    "No opportunities surfaced yet. Once CEI has enough KPI context per site, the opportunity engine will start proposing measures here.",
+                })}
               </div>
             )}
 
@@ -1332,12 +1463,12 @@ const Reports: React.FC = () => {
                 <table>
                   <thead>
                     <tr>
-                      <th>Site</th>
-                      <th>Location</th>
-                      <th>Measure</th>
-                      <th>Est. kWh saved / year</th>
-                      <th>Est. cost saved / year</th>
-                      <th>CO₂ saved (t / year)</th>
+                      <th>{t("reports.opps.columns.site", { defaultValue: "Site" })}</th>
+                      <th>{t("reports.opps.columns.location", { defaultValue: "Location" })}</th>
+                      <th>{t("reports.opps.columns.measure", { defaultValue: "Measure" })}</th>
+                      <th>{t("reports.opps.columns.kwhSaved", { defaultValue: "Est. kWh saved / year" })}</th>
+                      <th>{t("reports.opps.columns.costSaved", { defaultValue: "Est. cost saved / year" })}</th>
+                      <th>{t("reports.opps.columns.co2Saved", { defaultValue: "CO₂ saved (t / year)" })}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1382,7 +1513,9 @@ const Reports: React.FC = () => {
                               : "—"}
                           </td>
                           <td>
-                            {hasTariff && row.est_annual_cost_saved !== null && Number.isFinite(row.est_annual_cost_saved)
+                            {hasTariff &&
+                            row.est_annual_cost_saved !== null &&
+                            Number.isFinite(row.est_annual_cost_saved)
                               ? formatCurrency(row.est_annual_cost_saved, currencyCode)
                               : "—"}
                           </td>

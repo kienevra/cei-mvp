@@ -1,5 +1,7 @@
+// frontend/src/pages/Signup.tsx
 import React, { useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { acceptInvite } from "../services/api";
 
 function safeStringify(val: unknown): string {
@@ -35,6 +37,7 @@ function useQuery() {
 }
 
 const Signup: React.FC = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const query = useQuery();
   const inviteToken = (query.get("invite") || "").trim();
@@ -56,18 +59,18 @@ const Signup: React.FC = () => {
     e.preventDefault();
 
     if (!inviteToken) {
-      setError("Missing invite token. Please use the invite link you received.");
+      setError(t("signup.errors.missingInviteToken"));
       return;
     }
 
     const emailNorm = email.trim().toLowerCase();
     if (!emailNorm) {
-      setError("Email is required.");
+      setError(t("signup.errors.emailRequired"));
       return;
     }
 
     if (password.trim().length < 6) {
-      setError("Password must be at least 6 characters.");
+      setError(t("signup.errors.passwordMinLength"));
       return;
     }
 
@@ -88,7 +91,7 @@ const Signup: React.FC = () => {
       // This ensures refresh-cookie flow continues to work via axios withCredentials.
       navigate("/", { replace: true });
     } catch (err: any) {
-      setError(toUiMessage(err, "Failed to accept invite."));
+      setError(toUiMessage(err, t("signup.errors.acceptInviteFailed")));
     } finally {
       setSubmitting(false);
     }
@@ -98,7 +101,9 @@ const Signup: React.FC = () => {
     <div className="login-page">
       <div className="login-card">
         <div style={{ marginBottom: "0.75rem" }}>
-          <h1 style={{ margin: 0, fontSize: "1.25rem" }}>Join organization</h1>
+          <h1 style={{ margin: 0, fontSize: "1.25rem" }}>
+            {t("signup.title")}
+          </h1>
           <p
             style={{
               marginTop: "0.35rem",
@@ -106,13 +111,13 @@ const Signup: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Enter your details to accept your invite.
+            {t("signup.subtitle")}
           </p>
         </div>
 
         {!inviteToken && (
           <div className="cei-pill-danger" style={{ marginBottom: "0.75rem" }}>
-            Missing invite token. Use the invite link your org owner sent you.
+            {t("signup.missingInviteBanner")}
           </div>
         )}
 
@@ -124,15 +129,15 @@ const Signup: React.FC = () => {
 
         <form onSubmit={handleSubmit} style={{ display: "grid", gap: "0.6rem" }}>
           <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-            Invite token:{" "}
+            {t("signup.inviteTokenLabel")}{" "}
             <span style={{ fontFamily: "monospace" }}>
-              {inviteToken ? inviteToken.slice(0, 18) + "…" : "(none)"}
+              {inviteToken ? inviteToken.slice(0, 18) + "…" : t("common.none")}
             </span>
           </div>
 
           <input
             type="email"
-            placeholder="Email"
+            placeholder={t("signup.fields.email.placeholder")}
             value={email}
             autoComplete="email"
             onChange={(e) => setEmail(e.target.value)}
@@ -142,7 +147,7 @@ const Signup: React.FC = () => {
 
           <input
             type="text"
-            placeholder="Full name (optional)"
+            placeholder={t("signup.fields.fullName.placeholder")}
             value={fullName}
             autoComplete="name"
             onChange={(e) => setFullName(e.target.value)}
@@ -151,7 +156,7 @@ const Signup: React.FC = () => {
 
           <input
             type="password"
-            placeholder="Password"
+            placeholder={t("signup.fields.password.placeholder")}
             value={password}
             autoComplete="new-password"
             onChange={(e) => setPassword(e.target.value)}
@@ -160,7 +165,7 @@ const Signup: React.FC = () => {
           />
 
           <button className="cei-btn" type="submit" disabled={!canSubmit}>
-            {submitting ? "Joining..." : "Join organization"}
+            {submitting ? t("signup.actions.joining") : t("signup.actions.join")}
           </button>
         </form>
 
@@ -171,7 +176,7 @@ const Signup: React.FC = () => {
             color: "var(--cei-text-muted)",
           }}
         >
-          Already have an account? <Link to="/login">Log in</Link>
+          {t("signup.footer.alreadyHaveAccount")} <Link to="/login">{t("signup.footer.loginLink")}</Link>
         </div>
       </div>
     </div>

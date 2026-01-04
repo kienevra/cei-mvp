@@ -1,6 +1,7 @@
 // frontend/src/components/Sidebar.tsx
-import React from "react";
+import React, { useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   FiHome,
   FiList,
@@ -8,23 +9,29 @@ import {
   FiFileText,
   FiUser,
   FiSettings,
+  FiUpload,
 } from "react-icons/fi";
 
 /**
  * Sidebar navigation for CEI app.
  * Uses button-like pills for each nav item.
  */
-const navItems = [
-  { label: "Dashboard", path: "/", icon: <FiHome /> },
-  { label: "Sites", path: "/sites", icon: <FiList /> },
-  { label: "Alerts", path: "/alerts", icon: <FiAlertTriangle /> },
-  { label: "Reports", path: "/reports", icon: <FiFileText /> },
-  { label: "Account", path: "/account", icon: <FiUser /> },
-  { label: "Settings", path: "/settings", icon: <FiSettings /> },
-];
-
 const Sidebar: React.FC = () => {
   const { pathname } = useLocation();
+  const { t } = useTranslation();
+
+  const navItems = useMemo(
+    () => [
+      { label: t("nav.dashboard", { defaultValue: "Dashboard" }), path: "/", icon: <FiHome /> },
+      { label: t("nav.sites", { defaultValue: "Sites" }), path: "/sites", icon: <FiList /> },
+      { label: t("nav.alerts", { defaultValue: "Alerts" }), path: "/alerts", icon: <FiAlertTriangle /> },
+      { label: t("nav.uploadCsv", { defaultValue: "Upload CSV" }), path: "/upload", icon: <FiUpload /> },
+      { label: t("nav.reports", { defaultValue: "Reports" }), path: "/reports", icon: <FiFileText /> },
+      { label: t("nav.account", { defaultValue: "Account" }), path: "/account", icon: <FiUser /> },
+      { label: t("nav.settings", { defaultValue: "Settings" }), path: "/settings", icon: <FiSettings /> },
+    ],
+    [t]
+  );
 
   return (
     <aside
@@ -49,7 +56,7 @@ const Sidebar: React.FC = () => {
           opacity: 0.8,
         }}
       >
-        Navigation
+        {t("nav.navigation", { defaultValue: "Navigation" })}
       </div>
 
       <nav
@@ -62,9 +69,7 @@ const Sidebar: React.FC = () => {
         }}
       >
         {navItems.map((item) => {
-          const active =
-            pathname === item.path ||
-            (item.path !== "/" && pathname.startsWith(item.path));
+          const active = pathname === item.path || (item.path !== "/" && pathname.startsWith(item.path));
 
           return (
             <Link
@@ -79,23 +84,20 @@ const Sidebar: React.FC = () => {
                 fontSize: "0.87rem",
                 textDecoration: "none",
                 color: active ? "#e5e7eb" : "var(--cei-text-muted)",
-                background: active
-                  ? "rgba(15, 23, 42, 0.98)"
-                  : "transparent",
-                border: active
-                  ? "1px solid rgba(148, 163, 184, 0.55)"
-                  : "1px solid transparent",
-                transition: "background 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out, transform 0.08s ease-out",
+                background: active ? "rgba(15, 23, 42, 0.98)" : "transparent",
+                border: active ? "1px solid rgba(148, 163, 184, 0.55)" : "1px solid transparent",
+                transition:
+                  "background 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out, transform 0.08s ease-out",
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLAnchorElement).style.background =
-                  active
-                    ? "rgba(15, 23, 42, 1)"
-                    : "rgba(15, 23, 42, 0.75)";
+                (e.currentTarget as HTMLAnchorElement).style.background = active
+                  ? "rgba(15, 23, 42, 1)"
+                  : "rgba(15, 23, 42, 0.75)";
               }}
               onMouseLeave={(e) => {
-                (e.currentTarget as HTMLAnchorElement).style.background =
-                  active ? "rgba(15, 23, 42, 0.98)" : "transparent";
+                (e.currentTarget as HTMLAnchorElement).style.background = active
+                  ? "rgba(15, 23, 42, 0.98)"
+                  : "transparent";
               }}
             >
               <span

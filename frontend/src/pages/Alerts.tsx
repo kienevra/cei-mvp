@@ -12,6 +12,7 @@ import type { AlertStatus, AlertEvent } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import { downloadCsv } from "../utils/csv";
+import { useTranslation, Trans } from "react-i18next";
 
 type AlertRecord = {
   id?: string | number;
@@ -71,6 +72,8 @@ function asNumber(v: any): number | null {
 }
 
 const Alerts: React.FC = () => {
+  const { t } = useTranslation();
+
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -225,7 +228,7 @@ const Alerts: React.FC = () => {
             (axios.isAxiosError(e) &&
               (e.response?.data as any)?.detail) ||
             e?.message ||
-            "Failed to load alerts.";
+            t("alerts.errors.loadAlertsFailed", { defaultValue: "Failed to load alerts." });
           setError(detail);
         }
       } finally {
@@ -239,7 +242,7 @@ const Alerts: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [windowHours, enableAlerts, planLoaded]);
+  }, [windowHours, enableAlerts, planLoaded, t]);
 
   // --- Load history whenever plan or status filter changes ---
   useEffect(() => {
@@ -278,7 +281,7 @@ const Alerts: React.FC = () => {
           (axios.isAxiosError(e) &&
             (e.response?.data as any)?.detail) ||
           e?.message ||
-          "Failed to load alert history.";
+          t("alerts.errors.loadHistoryFailed", { defaultValue: "Failed to load alert history." });
         setHistoryError(detail);
       } finally {
         if (!isMounted) return;
@@ -291,14 +294,17 @@ const Alerts: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [planLoaded, enableAlerts, historyStatusFilter]);
+  }, [planLoaded, enableAlerts, historyStatusFilter, t]);
 
   const totalAlerts = alerts.length;
   const criticalCount = alerts.filter((a) => a.severity === "critical").length;
   const warningCount = alerts.filter((a) => a.severity === "warning").length;
   const infoCount = alerts.filter((a) => a.severity === "info").length;
 
-  const windowLabel = windowHours === 24 ? "last 24 hours" : "last 7 days";
+  const windowLabel =
+    windowHours === 24
+      ? t("alerts.window.last24h", { defaultValue: "last 24 hours" })
+      : t("alerts.window.last7d", { defaultValue: "last 7 days" });
 
   // Pricing helpers
   const hasTariff =
@@ -434,26 +440,26 @@ const Alerts: React.FC = () => {
   function severityLabel(severity: string | undefined): string {
     switch (severity) {
       case "critical":
-        return "Critical";
+        return t("alerts.severity.critical", { defaultValue: "Critical" });
       case "warning":
-        return "Warning";
+        return t("alerts.severity.warning", { defaultValue: "Warning" });
       case "info":
       default:
-        return "Info";
+        return t("alerts.severity.info", { defaultValue: "Info" });
     }
   }
 
   function statusLabel(status?: AlertStatus): string {
     switch (status) {
       case "ack":
-        return "Acknowledged";
+        return t("alerts.status.ack", { defaultValue: "Acknowledged" });
       case "resolved":
-        return "Resolved";
+        return t("alerts.status.resolved", { defaultValue: "Resolved" });
       case "muted":
-        return "Muted";
+        return t("alerts.status.muted", { defaultValue: "Muted" });
       case "open":
       default:
-        return "Open";
+        return t("alerts.status.open", { defaultValue: "Open" });
     }
   }
 
@@ -480,7 +486,7 @@ const Alerts: React.FC = () => {
         (axios.isAxiosError(e) &&
           (e.response?.data as any)?.detail) ||
         e?.message ||
-        "Failed to update alert.";
+        t("alerts.errors.updateAlertFailed", { defaultValue: "Failed to update alert." });
       setHistoryError(detail);
     } finally {
       setUpdatingAlertId(null);
@@ -608,7 +614,7 @@ const Alerts: React.FC = () => {
               letterSpacing: "-0.02em",
             }}
           >
-            Alerts
+            {t("alerts.title", { defaultValue: "Alerts" })}
           </h1>
           <p
             style={{
@@ -617,10 +623,13 @@ const Alerts: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            Rule-based exceptions generated from your timeseries data.{" "}
-            <strong>Critical</strong> alerts indicate high-confidence waste
-            or abnormal baselines, while <strong>Warnings</strong> flag
-            patterns worth a closer look.
+            <Trans
+              i18nKey="alerts.subtitle"
+              defaults={
+                "Rule-based exceptions generated from your timeseries data. <strong>Critical</strong> alerts indicate high-confidence waste or abnormal baselines, while <strong>Warnings</strong> flag patterns worth a closer look."
+              }
+              components={{ strong: <strong /> }}
+            />
           </p>
         </div>
 
@@ -635,7 +644,9 @@ const Alerts: React.FC = () => {
             color: "var(--cei-text-muted)",
           }}
         >
-          <div>Window: {windowLabel}</div>
+          <div>
+            {t("alerts.window.label", { defaultValue: "Window:" })} {windowLabel}
+          </div>
           <div
             style={{
               display: "inline-flex",
@@ -664,7 +675,7 @@ const Alerts: React.FC = () => {
                     : "var(--cei-text-muted)",
               }}
             >
-              24h
+              {t("alerts.window.24h", { defaultValue: "24h" })}
             </button>
             <button
               type="button"
@@ -685,7 +696,7 @@ const Alerts: React.FC = () => {
                     : "var(--cei-text-muted)",
               }}
             >
-              7d
+              {t("alerts.window.7d", { defaultValue: "7d" })}
             </button>
           </div>
         </div>
@@ -722,7 +733,7 @@ const Alerts: React.FC = () => {
                   fontWeight: 600,
                 }}
               >
-                Upgrade to unlock alerts
+                {t("alerts.gating.title", { defaultValue: "Upgrade to unlock alerts" })}
               </div>
               <div
                 style={{
@@ -731,10 +742,14 @@ const Alerts: React.FC = () => {
                   maxWidth: "40rem",
                 }}
               >
-                Your current plan (<code>{planKey}</code>) does not include
-                rule-based alerting. Upgrade to CEI Starter or above to see
-                baseline deviations, weekend waste, and portfolio dominance
-                patterns directly on this page.
+                <Trans
+                  i18nKey="alerts.gating.body"
+                  defaults={
+                    "Your current plan (<code>{{planKey}}</code>) does not include rule-based alerting. Upgrade to CEI Starter or above to see baseline deviations, weekend waste, and portfolio dominance patterns directly on this page."
+                  }
+                  values={{ planKey }}
+                  components={{ code: <code /> }}
+                />
               </div>
               <div
                 style={{
@@ -746,7 +761,7 @@ const Alerts: React.FC = () => {
               >
                 <Link to="/account">
                   <button className="cei-btn cei-btn-primary">
-                    View plans &amp; billing
+                    {t("alerts.gating.cta", { defaultValue: "View plans & billing" })}
                   </button>
                 </Link>
                 <span
@@ -755,8 +770,10 @@ const Alerts: React.FC = () => {
                     color: "var(--cei-text-muted)",
                   }}
                 >
-                  Alerts will light up automatically as soon as your
-                  subscription is active.
+                  {t("alerts.gating.footer", {
+                    defaultValue:
+                      "Alerts will light up automatically as soon as your subscription is active.",
+                  })}
                 </span>
               </div>
             </div>
@@ -776,7 +793,10 @@ const Alerts: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Total alerts – {windowLabel}
+              {t("alerts.summary.totalTitle", {
+                defaultValue: "Total alerts – {{windowLabel}}",
+                windowLabel,
+              })}
             </div>
             <div
               style={{
@@ -794,8 +814,10 @@ const Alerts: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Count of all critical, warning, and info-level alerts raised in the
-              selected window.
+              {t("alerts.summary.totalHelp", {
+                defaultValue:
+                  "Count of all critical, warning, and info-level alerts raised in the selected window.",
+              })}
             </div>
           </div>
 
@@ -808,7 +830,7 @@ const Alerts: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Severity mix
+              {t("alerts.summary.severityMixTitle", { defaultValue: "Severity mix" })}
             </div>
             <div
               style={{
@@ -820,13 +842,13 @@ const Alerts: React.FC = () => {
               }}
             >
               <span className="cei-pill-critical">
-                Critical: {loading ? "…" : criticalCount}
+                {t("alerts.severity.critical", { defaultValue: "Critical" })}: {loading ? "…" : criticalCount}
               </span>
               <span className="cei-pill-warning">
-                Warning: {loading ? "…" : warningCount}
+                {t("alerts.severity.warning", { defaultValue: "Warning" })}: {loading ? "…" : warningCount}
               </span>
               <span className="cei-pill-info">
-                Info: {loading ? "…" : infoCount}
+                {t("alerts.severity.info", { defaultValue: "Info" })}: {loading ? "…" : infoCount}
               </span>
             </div>
             <div
@@ -836,8 +858,10 @@ const Alerts: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Use this to understand whether the portfolio is mostly “noise” or if
-              true exceptions are creeping in.
+              {t("alerts.summary.severityMixHelp", {
+                defaultValue:
+                  "Use this to understand whether the portfolio is mostly “noise” or if true exceptions are creeping in.",
+              })}
             </div>
           </div>
 
@@ -850,7 +874,7 @@ const Alerts: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              Operational playbook
+              {t("alerts.playbook.title", { defaultValue: "Operational playbook" })}
             </div>
             <div
               style={{
@@ -866,9 +890,15 @@ const Alerts: React.FC = () => {
                   lineHeight: 1.6,
                 }}
               >
-                <li>Work through <strong>critical</strong> alerts first.</li>
-                <li>Review warnings during daily/weekly ops meetings.</li>
-                <li>Use site links below to investigate trends directly.</li>
+                <li>
+                  <Trans
+                    i18nKey="alerts.playbook.item1"
+                    defaults={"Work through <strong>critical</strong> alerts first."}
+                    components={{ strong: <strong /> }}
+                  />
+                </li>
+                <li>{t("alerts.playbook.item2", { defaultValue: "Review warnings during daily/weekly ops meetings." })}</li>
+                <li>{t("alerts.playbook.item3", { defaultValue: "Use site links below to investigate trends directly." })}</li>
               </ul>
             </div>
           </div>
@@ -895,7 +925,7 @@ const Alerts: React.FC = () => {
                     fontWeight: 600,
                   }}
                 >
-                  Sites most impacted by alerts
+                  {t("alerts.topSites.title", { defaultValue: "Sites most impacted by alerts" })}
                 </div>
                 <div
                   style={{
@@ -904,8 +934,11 @@ const Alerts: React.FC = () => {
                     color: "var(--cei-text-muted)",
                   }}
                 >
-                  Ranked by count of current alerts in {windowLabel}. Use this as
-                  your daily triage list.
+                  {t("alerts.topSites.subtitle", {
+                    defaultValue:
+                      "Ranked by count of current alerts in {{windowLabel}}. Use this as your daily triage list.",
+                    windowLabel,
+                  })}
                 </div>
               </div>
             </div>
@@ -932,7 +965,7 @@ const Alerts: React.FC = () => {
                         color: "var(--cei-text-muted)",
                       }}
                     >
-                      Site
+                      {t("alerts.topSites.columns.site", { defaultValue: "Site" })}
                     </th>
                     <th
                       style={{
@@ -942,7 +975,7 @@ const Alerts: React.FC = () => {
                         color: "var(--cei-text-muted)",
                       }}
                     >
-                      Open alerts
+                      {t("alerts.topSites.columns.openAlerts", { defaultValue: "Open alerts" })}
                     </th>
                     <th
                       style={{
@@ -952,7 +985,7 @@ const Alerts: React.FC = () => {
                         color: "var(--cei-text-muted)",
                       }}
                     >
-                      Critical
+                      {t("alerts.topSites.columns.critical", { defaultValue: "Critical" })}
                     </th>
                     <th
                       style={{
@@ -962,7 +995,7 @@ const Alerts: React.FC = () => {
                         color: "var(--cei-text-muted)",
                       }}
                     >
-                      Warnings
+                      {t("alerts.topSites.columns.warnings", { defaultValue: "Warnings" })}
                     </th>
                     <th
                       style={{
@@ -972,7 +1005,7 @@ const Alerts: React.FC = () => {
                         color: "var(--cei-text-muted)",
                       }}
                     >
-                      Info
+                      {t("alerts.topSites.columns.info", { defaultValue: "Info" })}
                     </th>
                     <th
                       style={{
@@ -982,7 +1015,7 @@ const Alerts: React.FC = () => {
                         color: "var(--cei-text-muted)",
                       }}
                     >
-                      Navigate
+                      {t("alerts.topSites.columns.navigate", { defaultValue: "Navigate" })}
                     </th>
                   </tr>
                 </thead>
@@ -1070,7 +1103,7 @@ const Alerts: React.FC = () => {
                               fontSize: "0.78rem",
                             }}
                           >
-                            View site →
+                            {t("alerts.actions.viewSite", { defaultValue: "View site →" })}
                           </Link>
                         ) : (
                           <span
@@ -1111,7 +1144,7 @@ const Alerts: React.FC = () => {
                     fontWeight: 600,
                   }}
                 >
-                  Current alerts
+                  {t("alerts.current.title", { defaultValue: "Current alerts" })}
                 </div>
                 <div
                   style={{
@@ -1120,8 +1153,10 @@ const Alerts: React.FC = () => {
                     color: "var(--cei-text-muted)",
                   }}
                 >
-                  Site-level exceptions for the selected window. Click through to
-                  the site dashboard to see the underlying trend.
+                  {t("alerts.current.subtitle", {
+                    defaultValue:
+                      "Site-level exceptions for the selected window. Click through to the site dashboard to see the underlying trend.",
+                  })}
                 </div>
               </div>
 
@@ -1135,7 +1170,7 @@ const Alerts: React.FC = () => {
                     padding: "0.25rem 0.6rem",
                   }}
                 >
-                  Export current alerts (CSV)
+                  {t("alerts.export.current", { defaultValue: "Export current alerts (CSV)" })}
                 </button>
               )}
             </div>
@@ -1159,8 +1194,11 @@ const Alerts: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                No alerts raised in {windowLabel}. If you recently uploaded data,
-                give CEI a moment to crunch baselines and reconverge on thresholds.
+                {t("alerts.current.empty", {
+                  defaultValue:
+                    "No alerts raised in {{windowLabel}}. If you recently uploaded data, give CEI a moment to crunch baselines and reconverge on thresholds.",
+                  windowLabel,
+                })}
               </div>
             )}
 
@@ -1237,10 +1275,10 @@ const Alerts: React.FC = () => {
                     estCostImpact === null
                       ? null
                       : estCostImpact > 0
-                      ? "Overspend vs baseline"
+                      ? t("alerts.cost.overspend", { defaultValue: "Overspend vs baseline" })
                       : estCostImpact < 0
-                      ? "Savings vs baseline"
-                      : "On baseline";
+                      ? t("alerts.cost.savings", { defaultValue: "Savings vs baseline" })
+                      : t("alerts.cost.onBaseline", { defaultValue: "On baseline" });
 
                   const hasStatsBand =
                     dev !== null ||
@@ -1299,7 +1337,7 @@ const Alerts: React.FC = () => {
                                 color: "var(--cei-text-muted)",
                               }}
                             >
-                              Site:{" "}
+                              {t("alerts.labels.site", { defaultValue: "Site:" })}{" "}
                               <strong>{siteLabel}</strong>{" "}
                               {siteIdRaw && siteIdRaw !== siteLabel && (
                                 <span style={{ opacity: 0.7 }}>
@@ -1314,7 +1352,10 @@ const Alerts: React.FC = () => {
                               fontWeight: 500,
                             }}
                           >
-                            {alert.title || "Energy anomaly detected"}
+                            {alert.title ||
+                              t("alerts.defaults.title", {
+                                defaultValue: "Energy anomaly detected",
+                              })}
                           </div>
                           <div
                             style={{
@@ -1323,7 +1364,10 @@ const Alerts: React.FC = () => {
                             }}
                           >
                             {alert.message ||
-                              "This site’s recent energy pattern deviates from its baseline. Review the dashboard for confirmation."}
+                              t("alerts.defaults.message", {
+                                defaultValue:
+                                  "This site’s recent energy pattern deviates from its baseline. Review the dashboard for confirmation.",
+                              })}
                           </div>
                         </div>
 
@@ -1335,15 +1379,17 @@ const Alerts: React.FC = () => {
                             minWidth: "140px",
                           }}
                         >
-                          <div>Triggered: {triggeredLabel}</div>
+                          <div>
+                            {t("alerts.labels.triggered", { defaultValue: "Triggered:" })} {triggeredLabel}
+                          </div>
                           {alert.metric && (
                             <div style={{ marginTop: "0.15rem" }}>
-                              Metric: <code>{alert.metric}</code>
+                              {t("alerts.labels.metric", { defaultValue: "Metric:" })} <code>{alert.metric}</code>
                             </div>
                           )}
                           {alert.window_hours && (
                             <div style={{ marginTop: "0.15rem" }}>
-                              Window: {alert.window_hours}h
+                              {t("alerts.labels.window", { defaultValue: "Window:" })} {alert.window_hours}h
                             </div>
                           )}
                           {siteRouteId && (
@@ -1356,7 +1402,7 @@ const Alerts: React.FC = () => {
                                   textDecoration: "none",
                                 }}
                               >
-                                View site →
+                                {t("alerts.actions.viewSite", { defaultValue: "View site →" })}
                               </Link>
                             </div>
                           )}
@@ -1379,7 +1425,7 @@ const Alerts: React.FC = () => {
                         >
                           {dev !== null && (
                             <span>
-                              Δ vs baseline:{" "}
+                              {t("alerts.stats.deltaVsBaseline", { defaultValue: "Δ vs baseline:" })}{" "}
                               <strong>
                                 {dev > 0 ? "+" : ""}
                                 {dev.toFixed(1)}%
@@ -1389,11 +1435,11 @@ const Alerts: React.FC = () => {
                           {totalActual !== null &&
                             totalExpected !== null && (
                               <span>
-                                Actual vs expected:{" "}
+                                {t("alerts.stats.actualVsExpected", { defaultValue: "Actual vs expected:" })}{" "}
                                 <strong>
                                   {formatEnergyShort(totalActual)}
                                 </strong>{" "}
-                                vs{" "}
+                                {t("common.vs", { defaultValue: "vs" })}{" "}
                                 <strong>
                                   {formatEnergyShort(totalExpected)}
                                 </strong>
@@ -1401,24 +1447,29 @@ const Alerts: React.FC = () => {
                             )}
                           {baselineDays !== null && (
                             <span>
-                              Baseline window: {baselineDays} days
+                              {t("alerts.stats.baselineWindow", {
+                                defaultValue: "Baseline window: {{days}} days",
+                                days: baselineDays,
+                              })}
                             </span>
                           )}
                           {(critHours !== null ||
                             elevHours !== null ||
                             belowHours !== null) && (
                             <span>
-                              Hours – critical:{" "}
-                              <strong>{critHours ?? 0}</strong>, elevated:{" "}
-                              <strong>{elevHours ?? 0}</strong>, below
-                              baseline:{" "}
+                              {t("alerts.stats.hoursPrefix", { defaultValue: "Hours –" })}{" "}
+                              {t("alerts.stats.hoursCritical", { defaultValue: "critical:" })}{" "}
+                              <strong>{critHours ?? 0}</strong>,{" "}
+                              {t("alerts.stats.hoursElevated", { defaultValue: "elevated:" })}{" "}
+                              <strong>{elevHours ?? 0}</strong>,{" "}
+                              {t("alerts.stats.hoursBelowBaseline", { defaultValue: "below baseline:" })}{" "}
                               <strong>{belowHours ?? 0}</strong>
                             </span>
                           )}
                           {effectiveTariff !== null &&
                             estCostImpactAbs !== null && (
                               <span>
-                                Est. cost impact:{" "}
+                                {t("alerts.stats.estCostImpact", { defaultValue: "Est. cost impact:" })}{" "}
                                 <strong>
                                   {formatCurrency(
                                     estCostImpactAbs,
@@ -1426,7 +1477,7 @@ const Alerts: React.FC = () => {
                                   )}
                                 </strong>
                                 {costDirection &&
-                                  costDirection !== "On baseline" && (
+                                  costDirection !== t("alerts.cost.onBaseline", { defaultValue: "On baseline" }) && (
                                     <span
                                       style={{
                                         marginLeft: "0.25rem",
@@ -1444,7 +1495,7 @@ const Alerts: React.FC = () => {
                                 opacity: 0.9,
                               }}
                             >
-                              Stats:{" "}
+                              {t("alerts.stats.statsLabel", { defaultValue: "Stats:" })}{" "}
                               <code>{statsSource}</code>
                             </span>
                           )}
@@ -1479,7 +1530,7 @@ const Alerts: React.FC = () => {
                     fontWeight: 600,
                   }}
                 >
-                  Alert history & workflow
+                  {t("alerts.history.title", { defaultValue: "Alert history & workflow" })}
                 </div>
                 <div
                   style={{
@@ -1488,8 +1539,11 @@ const Alerts: React.FC = () => {
                     color: "var(--cei-text-muted)",
                   }}
                 >
-                  Append-only stream from <code>alert_events</code>. Use this to
-                  track who touched what, and when.
+                  <Trans
+                    i18nKey="alerts.history.subtitle"
+                    defaults={"Append-only stream from <code>alert_events</code>. Use this to track who touched what, and when."}
+                    components={{ code: <code /> }}
+                  />
                 </div>
               </div>
 
@@ -1517,12 +1571,12 @@ const Alerts: React.FC = () => {
                     const isActive = historyStatusFilter === k;
                     const label =
                       k === "all"
-                        ? "All"
+                        ? t("alerts.history.filters.all", { defaultValue: "All" })
                         : k === "ack"
-                        ? "Ack"
+                        ? t("alerts.history.filters.ackShort", { defaultValue: "Ack" })
                         : k === "resolved"
-                        ? "Resolved"
-                        : "Open";
+                        ? t("alerts.history.filters.resolved", { defaultValue: "Resolved" })
+                        : t("alerts.history.filters.open", { defaultValue: "Open" });
                     return (
                       <button
                         key={k}
@@ -1557,7 +1611,7 @@ const Alerts: React.FC = () => {
                       padding: "0.25rem 0.6rem",
                     }}
                   >
-                    Export history (CSV)
+                    {t("alerts.export.history", { defaultValue: "Export history (CSV)" })}
                   </button>
                 )}
               </div>
@@ -1591,8 +1645,10 @@ const Alerts: React.FC = () => {
                   color: "var(--cei-text-muted)",
                 }}
               >
-                No historical alerts yet for this filter. As /alerts runs over
-                time, events will accumulate here.
+                {t("alerts.history.empty", {
+                  defaultValue:
+                    "No historical alerts yet for this filter. As /alerts runs over time, events will accumulate here.",
+                })}
               </div>
             )}
 
@@ -1662,7 +1718,7 @@ const Alerts: React.FC = () => {
                                 color: "var(--cei-text-muted)",
                               }}
                             >
-                              Site:{" "}
+                              {t("alerts.labels.site", { defaultValue: "Site:" })}{" "}
                               <strong>{siteLabel}</strong>{" "}
                               {siteId && siteId !== siteLabel && (
                                 <span style={{ opacity: 0.7 }}>
@@ -1701,7 +1757,7 @@ const Alerts: React.FC = () => {
                                   marginRight: "0.25rem",
                                 }}
                               >
-                                Note:
+                                {t("alerts.labels.note", { defaultValue: "Note:" })}
                               </span>
                               {ev.note}
                             </div>
@@ -1743,10 +1799,10 @@ const Alerts: React.FC = () => {
                           </div>
 
                           <div style={{ marginTop: "0.25rem" }}>
-                            Triggered: {triggeredLabel}
+                            {t("alerts.labels.triggered", { defaultValue: "Triggered:" })} {triggeredLabel}
                           </div>
                           <div style={{ marginTop: "0.1rem" }}>
-                            Updated: {updatedLabel}
+                            {t("alerts.labels.updated", { defaultValue: "Updated:" })} {updatedLabel}
                           </div>
 
                           {siteRouteId && (
@@ -1759,7 +1815,7 @@ const Alerts: React.FC = () => {
                                   textDecoration: "none",
                                 }}
                               >
-                                View site →
+                                {t("alerts.actions.viewSite", { defaultValue: "View site →" })}
                               </Link>
                             </div>
                           )}
@@ -1779,7 +1835,7 @@ const Alerts: React.FC = () => {
                                 opacity: 0.7,
                               }}
                             >
-                              Update status:
+                              {t("alerts.workflow.updateStatus", { defaultValue: "Update status:" })}
                             </div>
                             <div
                               style={{
@@ -1810,7 +1866,7 @@ const Alerts: React.FC = () => {
                                       : 1,
                                 }}
                               >
-                                Ack
+                                {t("alerts.workflow.ack", { defaultValue: "Ack" })}
                               </button>
                               <button
                                 type="button"
@@ -1833,7 +1889,7 @@ const Alerts: React.FC = () => {
                                       : 1,
                                 }}
                               >
-                                Resolve
+                                {t("alerts.workflow.resolve", { defaultValue: "Resolve" })}
                               </button>
                               <button
                                 type="button"
@@ -1856,7 +1912,7 @@ const Alerts: React.FC = () => {
                                       : 1,
                                 }}
                               >
-                                Re-open
+                                {t("alerts.workflow.reopen", { defaultValue: "Re-open" })}
                               </button>
                             </div>
                           </div>

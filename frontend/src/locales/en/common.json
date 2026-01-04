@@ -1,0 +1,61 @@
+{
+  "brand": {
+    "full": "CEI – Carbon Efficiency Intelligence"
+  },
+  "auth": {
+    "authRequired": "Please sign in to continue.",
+    "sessionExpired": "Your session expired. Please sign in again.",
+    "hero": {
+      "title": "We use A.I to reduce your factorys carbon footprint.",
+      "subtitle": "CEI ingests your meter and SCADA data, builds statistical baselines for each site, and turns night, weekend, and process inefficiencies into actionable alerts and reports – without installing new hardware."
+    },
+    "invite": {
+      "notice": "You’re joining an organization via invite. Create your account to continue.",
+      "badgeTitle": "Invite detected.",
+      "badgeBody": "You’ll join an existing organization after account creation.",
+      "requiresSignup": "Invite flow requires account creation."
+    },
+    "actions": {
+      "signIn": "Sign in",
+      "createAccount": "Create account",
+      "joiningViaInvite": "Joining via invite…",
+      "creatingAccountProgress": "Creating your account…",
+      "signingInProgress": "Signing you in…",
+      "joinOrganization": "Join organization"
+    },
+    "fields": {
+      "fullName": {
+        "label": "Full name (optional)",
+        "placeholder": "e.g. Taylor Smith",
+        "help": "This is stored on your profile and used in audit logs."
+      },
+      "organizationName": {
+        "label": "Organization name",
+        "placeholder": "e.g. Dev Manufacturing",
+        "help": "This creates your org. Use an invite link to join an existing org."
+      },
+      "email": {
+        "label": "Work email",
+        "placeholder": "you@factory.com"
+      },
+      "password": {
+        "label": "Password",
+        "createLabel": "Create a password",
+        "placeholder": "••••••••",
+        "help": "Minimum 8 characters. Use a strong password."
+      },
+      "passwordConfirm": {
+        "label": "Confirm password",
+        "placeholder": "••••••••"
+      }
+    },
+    "errors": {
+      "generic": "Authentication failed. Please try again.",
+      "emailPasswordRequired": "Email and password are required.",
+      "passwordMinLength": "Password must be at least 8 characters.",
+      "passwordsNoMatch": "Passwords do not match.",
+      "inviteJoinNotLive": "Invite join isn’t live on this backend yet (missing /org/invites/accept-and-signup). Deploy the invites router, then retry.",
+      "inviteMissingAccessToken": "Invite signup succeeded but response missing access_token."
+    }
+  }
+}

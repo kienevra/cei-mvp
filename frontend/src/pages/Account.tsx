@@ -1,5 +1,6 @@
 // frontend/src/pages/Account.tsx
 import React, { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   getAccountMe,
   deleteAccount,
@@ -9,7 +10,7 @@ import {
   createOrgInvite,
   revokeOrgInvite,
   extendOrgInvite,
-  // ✅ NEW (required for Offboard + Leave UI wiring)
+  // ✅ Offboard + Leave UI wiring
   offboardOrg,
   leaveOrg,
 } from "../services/api";
@@ -23,22 +24,22 @@ const rawEnv = (import.meta as any).env || {};
 const appEnvironment: string =
   (rawEnv.VITE_ENVIRONMENT as string | undefined) || "dev";
 
-function getEnvironmentLabel(env: string): string {
+function getEnvironmentLabel(env: string, t: (k: string, o?: any) => string): string {
   const key = env.toLowerCase();
-  if (key === "prod" || key === "production") return "Production";
-  if (key === "pilot" || key === "staging") return "Pilot / Staging";
-  return "Development";
+  if (key === "prod" || key === "production") return t("account.environment.labels.production");
+  if (key === "pilot" || key === "staging") return t("account.environment.labels.pilot");
+  return t("account.environment.labels.development");
 }
 
-function getEnvironmentBlurb(env: string): string {
+function getEnvironmentBlurb(env: string, t: (k: string, o?: any) => string): string {
   const key = env.toLowerCase();
   if (key === "prod" || key === "production") {
-    return "Production data. Treat this as customer-facing and audit-ready.";
+    return t("account.environment.blurbs.production");
   }
   if (key === "pilot" || key === "staging") {
-    return "Pilot / staging data. Suitable for demos and friendly pilots, not for financial sign-off.";
+    return t("account.environment.blurbs.pilot");
   }
-  return "Local / dev data. Safe to experiment, break things, and iterate quickly.";
+  return t("account.environment.blurbs.development");
 }
 
 function normalizeRole(raw: any): "owner" | "member" | null {
@@ -48,18 +49,19 @@ function normalizeRole(raw: any): "owner" | "member" | null {
   return null;
 }
 
-function roleLabel(role: string | null | undefined): string {
+function roleLabel(
+  t: (k: string, o?: any) => string,
+  role: string | null | undefined
+): string {
   const r = normalizeRole(role);
-  if (r === "owner") return "Owner";
-  if (r === "member") return "Member";
+  if (r === "owner") return t("account.roles.owner");
+  if (r === "member") return t("account.roles.member");
   return "—";
 }
 
 function parsePrimarySources(value: any): string[] {
   if (Array.isArray(value)) {
-    return value
-      .map((x) => String(x).trim())
-      .filter((x) => x.length > 0);
+    return value.map((x) => String(x).trim()).filter((x) => x.length > 0);
   }
   if (typeof value === "string") {
     return value
@@ -69,6 +71,16 @@ function parsePrimarySources(value: any): string[] {
   }
   return [];
 }
+
+// Decimal/string-safe numeric parsing (align with Reports.tsx behavior)
+const asNumber = (v: any): number | null => {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+};
 
 type UiAccount = AccountMe & {
   role?: string | null;
@@ -80,9 +92,9 @@ type UiAccount = AccountMe & {
   enable_reports?: boolean | null;
 
   currency_code?: string | null;
-  electricity_price_per_kwh?: number | null;
-  gas_price_per_kwh?: number | null;
-  primary_energy_sources?: string[] | null;
+  electricity_price_per_kwh?: number | string | null;
+  gas_price_per_kwh?: number | string | null;
+  primary_energy_sources?: string[] | string | null;
 };
 
 // ---- Invites (owner-only) ----
@@ -149,7 +161,7 @@ function buildInviteLink(token: string): string {
 type InviteUiStatus = "Active" | "Revoked";
 
 /**
- * ✅ Stop using is_active as the “active vs revoked” source of truth.
+ * Stop using is_active as the “active vs revoked” source of truth.
  * Server is canonical: use status + can_revoke when present.
  */
 function inviteUiStatus(inv: OrgInvite): InviteUiStatus {
@@ -167,6 +179,7 @@ function inviteUiStatus(inv: OrgInvite): InviteUiStatus {
 }
 
 function statusPillClass(status: InviteUiStatus): string {
+  // Preserve your existing class names
   if (status === "Active") return "cei-pill cei-pill-good"; // green
   return "cei-pill cei-pill-danger"; // red
 }
@@ -176,7 +189,28 @@ function normalizeInviteRole(v: any): "owner" | "member" {
   return s === "owner" ? "owner" : "member";
 }
 
+// --------- Small refactor helpers (keep behavior identical) ----------
+function getOrgFromAccount(data: any): OrganizationSummary | null {
+  return (data as any)?.org ?? (data as any)?.organization ?? null;
+}
+
+function getRoleFromAccount(data: any): any {
+  return (data as any)?.role ?? (data as any)?.user_role ?? null;
+}
+
+function toUiError(e: any, fallback: string): string {
+  const detail = e?.response?.data?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (detail && typeof detail === "object" && typeof detail.message === "string") {
+    return detail.message;
+  }
+  if (typeof e?.message === "string" && e.message.trim()) return e.message;
+  return fallback;
+}
+
 const Account: React.FC = () => {
+  const { t } = useTranslation();
+
   const [account, setAccount] = useState<UiAccount | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -189,7 +223,7 @@ const Account: React.FC = () => {
   const [deleting, setDeleting] = useState(false);
   const [deleteSuccess, setDeleteSuccess] = useState(false);
 
-  // ✅ NEW: Org actions state (Offboard + Leave)
+  // Org actions state (Offboard + Leave)
   const [orgActionMessage, setOrgActionMessage] = useState<string | null>(null);
   const [offboardingSoft, setOffboardingSoft] = useState(false);
   const [offboardingNuke, setOffboardingNuke] = useState(false);
@@ -210,6 +244,9 @@ const Account: React.FC = () => {
   // Track Extend per-row
   const [extendingInviteId, setExtendingInviteId] = useState<number | null>(null);
 
+  const envLabel = getEnvironmentLabel(appEnvironment, t);
+  const envBlurb = getEnvironmentBlurb(appEnvironment, t);
+
   const refreshAccount = async () => {
     setLoading(true);
     setError(null);
@@ -217,10 +254,8 @@ const Account: React.FC = () => {
     try {
       const data = await getAccountMe();
 
-      const org: OrganizationSummary | null =
-        (data as any)?.org ?? (data as any)?.organization ?? null;
-
-      const roleRaw = (data as any)?.role ?? (data as any)?.user_role ?? null;
+      const org = getOrgFromAccount(data);
+      const roleRaw = getRoleFromAccount(data);
 
       setAccount({
         ...(data as UiAccount),
@@ -230,16 +265,17 @@ const Account: React.FC = () => {
     } catch (e: any) {
       setAccount(null);
       setAccountWarning(
-        e?.response?.data?.detail ||
-          e?.message ||
-          "Pricing and plan details are temporarily unavailable. Core kWh analytics will still work."
+        toUiError(
+          e,
+          t("account.warnings.accountUnavailable")
+        )
       );
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ NEW: hard reset owner-only org UI state (invites + messages)
+  // Hard reset owner-only org UI state (invites + messages)
   const resetOrgScopedUi = () => {
     setInvites([]);
     setInvitesError(null);
@@ -266,10 +302,8 @@ const Account: React.FC = () => {
         const data = await getAccountMe();
         if (!isMounted) return;
 
-        const org: OrganizationSummary | null =
-          (data as any)?.org ?? (data as any)?.organization ?? null;
-
-        const roleRaw = (data as any)?.role ?? (data as any)?.user_role ?? null;
+        const org = getOrgFromAccount(data);
+        const roleRaw = getRoleFromAccount(data);
 
         setAccount({
           ...(data as UiAccount),
@@ -281,9 +315,10 @@ const Account: React.FC = () => {
 
         setAccount(null);
         setAccountWarning(
-          e?.response?.data?.detail ||
-            e?.message ||
-            "Pricing and plan details are temporarily unavailable. Core kWh analytics will still work."
+          toUiError(
+            e,
+            t("account.warnings.accountUnavailable")
+          )
         );
       } finally {
         if (!isMounted) return;
@@ -296,10 +331,8 @@ const Account: React.FC = () => {
     return () => {
       isMounted = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const envLabel = getEnvironmentLabel(appEnvironment);
-  const envBlurb = getEnvironmentBlurb(appEnvironment);
 
   const org: OrganizationSummary | null = account?.org ?? null;
 
@@ -315,16 +348,18 @@ const Account: React.FC = () => {
   const planLabel = (() => {
     switch (planKey) {
       case "cei-starter":
-        return "CEI Starter";
+        return t("account.plan.labels.starter");
       case "cei-growth":
-        return "CEI Growth";
+        return t("account.plan.labels.growth");
       default:
-        return "Custom / Unspecified";
+        return t("account.plan.labels.custom");
     }
   })();
 
   const subscriptionStatus =
-    orgLike?.subscription_status || accountAny.subscription_status || "Not connected";
+    orgLike?.subscription_status ||
+    accountAny.subscription_status ||
+    t("account.subscription.status.notConnected");
 
   const alertsEnabled =
     typeof accountAny.enable_alerts === "boolean"
@@ -345,12 +380,12 @@ const Account: React.FC = () => {
     [account?.role]
   );
 
-  // ✅ Owner-only: subscription management
+  // Owner-only: subscription management
   const handleStartStarterCheckout = async () => {
     setBillingMessage(null);
 
     if (!isOwner) {
-      setBillingMessage("Owner-only. Only an org owner can manage subscriptions.");
+      setBillingMessage(t("account.errors.ownerOnlyBilling"));
       return;
     }
 
@@ -363,23 +398,21 @@ const Account: React.FC = () => {
         return;
       }
 
-      setBillingMessage(
-        "Billing is not fully configured for this environment. No live checkout page is available."
-      );
+      setBillingMessage(t("account.billing.notConfiguredCheckout"));
     } catch (err) {
       console.error("Failed to start checkout:", err);
-      setBillingMessage("Could not start checkout. Please retry or contact your CEI admin.");
+      setBillingMessage(t("account.billing.checkoutFailed"));
     } finally {
       setStartingCheckout(false);
     }
   };
 
-  // ✅ Owner-only: subscription management
+  // Owner-only: subscription management
   const handleOpenPortal = async () => {
     setBillingMessage(null);
 
     if (!isOwner) {
-      setBillingMessage("Owner-only. Only an org owner can manage subscriptions.");
+      setBillingMessage(t("account.errors.ownerOnlyBilling"));
       return;
     }
 
@@ -392,25 +425,23 @@ const Account: React.FC = () => {
         return;
       }
 
-      setBillingMessage(
-        "The billing portal is not available in this environment. Stripe is not fully configured."
-      );
+      setBillingMessage(t("account.billing.portalNotAvailable"));
     } catch (err) {
       console.error("Failed to open billing portal:", err);
-      setBillingMessage("Could not open the billing portal. Please retry or contact your CEI admin.");
+      setBillingMessage(t("account.billing.portalFailed"));
     } finally {
       setOpeningPortal(false);
     }
   };
 
-  // ✅ Owner-only: delete account
+  // Owner-only: delete account
   const handleDeleteAccount = async () => {
     if (!isOwner) {
-      setError("Owner-only. Only an org owner can delete the account in this deployment.");
+      setError(t("account.errors.ownerOnlyDelete"));
       return;
     }
 
-    if (!window.confirm("Really delete your account? This cannot be undone.")) return;
+    if (!window.confirm(t("account.confirm.deleteAccount"))) return;
 
     setDeleting(true);
     setError(null);
@@ -418,25 +449,23 @@ const Account: React.FC = () => {
       await deleteAccount();
       setDeleteSuccess(true);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || "Failed to delete account.");
+      setError(toUiError(e, t("account.errors.deleteFailed")));
     } finally {
       setDeleting(false);
     }
   };
 
-  // ✅ NEW: Leave org (detaches only YOU)
+  // Leave org (detaches only YOU)
   const handleLeaveOrg = async () => {
     setOrgActionMessage(null);
     setError(null);
 
     if (!orgLike?.id) {
-      setOrgActionMessage("You are not attached to an organization.");
+      setOrgActionMessage(t("account.org.noOrgAttached"));
       return;
     }
 
-    const ok = window.confirm(
-      "Leave this organization?\n\nThis detaches ONLY your user from the org.\nIf you are the last owner, the server will block this."
-    );
+    const ok = window.confirm(t("account.confirm.leaveOrg"));
     if (!ok) return;
 
     setLeavingOrg(true);
@@ -447,39 +476,29 @@ const Account: React.FC = () => {
       resetOrgScopedUi();
       await refreshAccount();
 
-      // Optional: if detached, clean break (prevents weird auth state)
-      const afterOrgId = (account as any)?.organization_id ?? (orgLike?.id ?? null);
-      // We can't rely on stale `account` here; check localStorage token presence and just keep UX stable
-      setOrgActionMessage("Left organization. Your account is now detached.");
+      setOrgActionMessage(t("account.org.leftOrg"));
     } catch (e: any) {
-      const detail = e?.response?.data?.detail;
-      const msg =
-        (typeof detail === "string" ? detail : detail?.message) ||
-        e?.message ||
-        "Failed to leave organization.";
-      setOrgActionMessage(msg);
+      setOrgActionMessage(toUiError(e, t("account.errors.leaveOrgFailed")));
     } finally {
       setLeavingOrg(false);
     }
   };
 
-  // ✅ NEW: Soft offboard (company wants out, keep org record)
+  // Soft offboard (company wants out, keep org record)
   const handleSoftOffboard = async () => {
     setOrgActionMessage(null);
     setError(null);
 
     if (!isOwner) {
-      setOrgActionMessage("Owner-only. Only an org owner can offboard the organization.");
+      setOrgActionMessage(t("account.errors.ownerOnlyOffboard"));
       return;
     }
     if (!orgLike?.id) {
-      setOrgActionMessage("You are not attached to an organization.");
+      setOrgActionMessage(t("account.org.noOrgAttached"));
       return;
     }
 
-    const ok = window.confirm(
-      "Soft offboard this organization?\n\nThis will:\n- Revoke invites\n- Deactivate integration tokens\n- Detach ALL users (including you)\n- Clear org billing fields\n- KEEP the org record\n\nUse this when a company wants out."
-    );
+    const ok = window.confirm(t("account.confirm.softOffboard"));
     if (!ok) return;
 
     setOffboardingSoft(true);
@@ -489,44 +508,40 @@ const Account: React.FC = () => {
       resetOrgScopedUi();
       await refreshAccount();
 
-      setOrgActionMessage("Soft offboard complete. Users detached; org record retained.");
+      setOrgActionMessage(t("account.org.softOffboardComplete"));
 
       // Clean break: you are likely detached; avoid zombie UI
       localStorage.removeItem("cei_token");
       window.location.href = "/login?reason=org_offboarded";
     } catch (e: any) {
-      const detail = e?.response?.data?.detail;
-      const msg =
-        (typeof detail === "string" ? detail : detail?.message) ||
-        e?.message ||
-        "Soft offboard failed.";
-      setOrgActionMessage(msg);
+      setOrgActionMessage(toUiError(e, t("account.errors.softOffboardFailed")));
     } finally {
       setOffboardingSoft(false);
     }
   };
 
-  // ✅ NEW: Nuke offboard (delete org + org-scoped data)
+  // Nuke offboard (delete org + org-scoped data)
   const handleNukeOffboard = async () => {
     setOrgActionMessage(null);
     setError(null);
 
     if (!isOwner) {
-      setOrgActionMessage("Owner-only. Only an org owner can nuke the organization.");
+      setOrgActionMessage(t("account.errors.ownerOnlyOffboard"));
       return;
     }
+
     const orgId = orgLike?.id;
-    const orgName = safeString(orgLike?.name) || "this org";
+    const orgName = safeString(orgLike?.name) || t("account.org.thisOrg");
     if (!orgId) {
-      setOrgActionMessage("You are not attached to an organization.");
+      setOrgActionMessage(t("account.org.noOrgAttached"));
       return;
     }
 
     const typed = window.prompt(
-      `NUKE MODE.\n\nThis permanently deletes the org and org-scoped data.\n\nType the org name EXACTLY to confirm:\n${orgName}`
+      t("account.confirm.nukePrompt", { orgName })
     );
     if ((typed || "").trim() !== orgName) {
-      setOrgActionMessage("Nuke cancelled (org name confirmation did not match).");
+      setOrgActionMessage(t("account.org.nukeCancelled"));
       return;
     }
 
@@ -537,18 +552,13 @@ const Account: React.FC = () => {
       resetOrgScopedUi();
       await refreshAccount();
 
-      setOrgActionMessage("Nuke complete. Org deleted.");
+      setOrgActionMessage(t("account.org.nukeComplete"));
 
       // Clean break: token is not meaningful after destructive delete
       localStorage.removeItem("cei_token");
       window.location.href = "/login?reason=org_offboarded";
     } catch (e: any) {
-      const detail = e?.response?.data?.detail;
-      const msg =
-        (typeof detail === "string" ? detail : detail?.message) ||
-        e?.message ||
-        "Nuke failed.";
-      setOrgActionMessage(msg);
+      setOrgActionMessage(toUiError(e, t("account.errors.nukeFailed")));
     } finally {
       setOffboardingNuke(false);
     }
@@ -562,32 +572,30 @@ const Account: React.FC = () => {
       ? accountAny.currency_code
       : "—";
 
+  // Decimal-safe: accept number OR string from backend
   const electricityPrice: number | null =
-    typeof orgLike?.electricity_price_per_kwh === "number"
-      ? orgLike.electricity_price_per_kwh
-      : typeof accountAny.electricity_price_per_kwh === "number"
-      ? accountAny.electricity_price_per_kwh
-      : null;
+    asNumber(orgLike?.electricity_price_per_kwh) ??
+    asNumber(accountAny.electricity_price_per_kwh) ??
+    null;
 
   const gasPrice: number | null =
-    typeof orgLike?.gas_price_per_kwh === "number"
-      ? orgLike.gas_price_per_kwh
-      : typeof accountAny.gas_price_per_kwh === "number"
-      ? accountAny.gas_price_per_kwh
-      : null;
+    asNumber(orgLike?.gas_price_per_kwh) ??
+    asNumber(accountAny.gas_price_per_kwh) ??
+    null;
 
   const primarySources: string[] = parsePrimarySources(
     orgLike?.primary_energy_sources ?? accountAny.primary_energy_sources
   );
 
+  // Make tariff config detection reliable (avoid false negatives)
   const hasTariffConfig =
-    typeof electricityPrice === "number" ||
-    typeof gasPrice === "number" ||
+    (electricityPrice !== null && Number.isFinite(electricityPrice)) ||
+    (gasPrice !== null && Number.isFinite(gasPrice)) ||
     (currencyCode && currencyCode !== "—") ||
     (primarySources && primarySources.length > 0);
 
   const formatPrice = (value: number | null) =>
-    typeof value === "number" ? value.toFixed(4) : "Not configured";
+    typeof value === "number" ? value.toFixed(4) : t("account.tariffs.notConfigured");
 
   // ---- Invites actions (owner-only) ----
   const loadInvites = async () => {
@@ -596,18 +604,14 @@ const Account: React.FC = () => {
     try {
       const res = await listOrgInvites();
 
-      // ✅ 1) Make list parsing resilient:
+      // Make list parsing resilient:
       // - backend returns array
-      // - backend returns { value: [...], Count: n } (as seen in PS output)
+      // - backend returns { value: [...], Count: n }
       const list = Array.isArray(res) ? res : (res as any)?.value;
 
-      setInvites(Array.isArray(list) ? (list as any as OrgInvite[]) : []);
+      setInvites(Array.isArray(list) ? ((list as any) as OrgInvite[]) : []);
     } catch (e: any) {
-      const msg =
-        typeof e?.message === "string"
-          ? e.message
-          : e?.response?.data?.detail || e?.message || "Failed to load invites.";
-      setInvitesError(msg);
+      setInvitesError(toUiError(e, t("account.invites.errors.loadFailed")));
       setInvites([]);
     } finally {
       setInvitesLoading(false);
@@ -620,13 +624,13 @@ const Account: React.FC = () => {
     setCreatedInviteNote(null);
 
     if (!isOwner) {
-      setInvitesError("Owner-only. Only an org owner can generate invite links.");
+      setInvitesError(t("account.invites.errors.ownerOnly"));
       return;
     }
 
     const email = inviteEmail.trim();
     if (!email || !email.includes("@")) {
-      setInvitesError("Invite email is required and must be a valid email address.");
+      setInvitesError(t("account.invites.errors.invalidEmail"));
       return;
     }
 
@@ -643,23 +647,17 @@ const Account: React.FC = () => {
 
       const token = safeString((res as any)?.token);
       if (!token) {
-        setCreatedInviteNote(
-          "Invite created, but backend did not return a token. (Expected: token returned ONCE when invite is usable.)"
-        );
+        setCreatedInviteNote(t("account.invites.notes.createdNoToken"));
       } else {
         const link = buildInviteLink(token);
         setCreatedInviteLink(link);
-        setCreatedInviteNote("Invite link generated. Copy it and send it to the user.");
+        setCreatedInviteNote(t("account.invites.notes.linkGenerated"));
       }
 
       await loadInvites();
       setInviteEmail("");
     } catch (e: any) {
-      const msg =
-        typeof e?.message === "string"
-          ? e.message
-          : e?.response?.data?.detail || e?.message || "Failed to create invite.";
-      setInvitesError(msg);
+      setInvitesError(toUiError(e, t("account.invites.errors.createFailed")));
     } finally {
       setCreatingInvite(false);
     }
@@ -668,24 +666,18 @@ const Account: React.FC = () => {
   const handleRevokeInvite = async (inviteId: number) => {
     setInvitesError(null);
     if (!isOwner) {
-      setInvitesError("Owner-only. Only an org owner can revoke invites.");
+      setInvitesError(t("account.invites.errors.ownerOnly"));
       return;
     }
 
-    const ok = window.confirm(
-      "Revoke this invite?\n\nThis will:\n- Disable the invite link\n- Stop the invited user from logging in again (if already accepted)"
-    );
+    const ok = window.confirm(t("account.confirm.revokeInvite"));
     if (!ok) return;
 
     try {
       await revokeOrgInvite(inviteId);
       await loadInvites();
     } catch (e: any) {
-      const msg =
-        typeof e?.message === "string"
-          ? e.message
-          : e?.response?.data?.detail || e?.message || "Failed to revoke invite.";
-      setInvitesError(msg);
+      setInvitesError(toUiError(e, t("account.invites.errors.revokeFailed")));
     }
   };
 
@@ -700,7 +692,7 @@ const Account: React.FC = () => {
     setCreatedInviteNote(null);
 
     if (!isOwner) {
-      setInvitesError("Owner-only. Only an org owner can extend invites.");
+      setInvitesError(t("account.invites.errors.ownerOnly"));
       return;
     }
 
@@ -718,22 +710,14 @@ const Account: React.FC = () => {
       if (token) {
         const link = buildInviteLink(token);
         setCreatedInviteLink(link);
-        setCreatedInviteNote(
-          "Extended. New invite link generated. Copy it and send it to the user."
-        );
+        setCreatedInviteNote(t("account.invites.notes.extendedNewLink"));
       } else {
-        setCreatedInviteNote(
-          "Extended. No invite link returned because this invite was already accepted. User access has been re-enabled."
-        );
+        setCreatedInviteNote(t("account.invites.notes.extendedNoLink"));
       }
 
       await loadInvites();
     } catch (e: any) {
-      const msg =
-        typeof e?.message === "string"
-          ? e.message
-          : e?.response?.data?.detail || e?.message || "Failed to extend invite.";
-      setInvitesError(msg);
+      setInvitesError(toUiError(e, t("account.invites.errors.extendFailed")));
     } finally {
       setExtendingInviteId(null);
     }
@@ -742,14 +726,10 @@ const Account: React.FC = () => {
   const handleCopy = async (textToCopy: string) => {
     try {
       await navigator.clipboard.writeText(textToCopy);
-      setCreatedInviteNote("Copied to clipboard.");
-      setTimeout(
-        () =>
-          setCreatedInviteNote("Invite link generated. Copy it and send it to the user."),
-        1500
-      );
+      setCreatedInviteNote(t("account.invites.notes.copied"));
+      setTimeout(() => setCreatedInviteNote(t("account.invites.notes.linkGenerated")), 1500);
     } catch {
-      setCreatedInviteNote("Copy failed in this browser. Select the link and copy manually.");
+      setCreatedInviteNote(t("account.invites.notes.copyFailed"));
     }
   };
 
@@ -773,26 +753,25 @@ const Account: React.FC = () => {
       >
         <div>
           <h1 style={{ fontSize: "1.3rem", fontWeight: 600, letterSpacing: "-0.02em" }}>
-            Account & Billing
+            {t("account.header.title")}
           </h1>
           <p style={{ marginTop: "0.3rem", fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
-            Manage your CEI profile, organization, and subscription. This is the control panel for
-            turning a single deployment into a real SaaS footprint.
+            {t("account.header.subtitle")}
           </p>
         </div>
 
         <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", textAlign: "right" }}>
           {org?.name && (
             <div>
-              Org: <strong>{org.name}</strong>
+              {t("account.header.orgLabel")} <strong>{org.name}</strong>
             </div>
           )}
           <div>
-            Role: <strong>{roleLabel(account?.role)}</strong>
+            {t("account.header.roleLabel")} <strong>{roleLabel(t, account?.role)}</strong>
           </div>
           <div style={{ marginTop: "0.2rem" }}>
             <span>
-              Plan: <strong>{planLabel}</strong>
+              {t("account.header.planLabel")} <strong>{planLabel}</strong>
             </span>
           </div>
         </div>
@@ -814,7 +793,7 @@ const Account: React.FC = () => {
         </section>
       )}
 
-      {/* ✅ NEW: Org actions message */}
+      {/* Org actions message */}
       {orgActionMessage && (
         <section style={{ marginTop: "0.75rem" }}>
           <div
@@ -837,7 +816,7 @@ const Account: React.FC = () => {
         {/* Profile card */}
         <div className="cei-card">
           <div style={{ fontSize: "0.9rem", fontWeight: 600, marginBottom: "0.4rem" }}>
-            Profile
+            {t("account.profile.title")}
           </div>
           {loading ? (
             <div style={{ padding: "0.8rem 0.2rem", display: "flex", justifyContent: "center" }}>
@@ -845,17 +824,17 @@ const Account: React.FC = () => {
             </div>
           ) : deleteSuccess ? (
             <div style={{ fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
-              Your account has been deleted on this environment. You may need to log out manually
-              or clear your token in local storage.
+              {t("account.profile.deletedMessage")}
             </div>
           ) : (
             <>
               <div style={{ fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
                 <div>
-                  <strong>Email:</strong> {account?.email || <span>—</span>}
+                  <strong>{t("account.profile.emailLabel")}</strong> {account?.email || <span>—</span>}
                 </div>
                 <div style={{ marginTop: "0.2rem" }}>
-                  <strong>Name:</strong> {account?.full_name || <span>—</span>}
+                  <strong>{t("account.profile.nameLabel")}</strong>{" "}
+                  {account?.full_name || <span>—</span>}
                 </div>
               </div>
 
@@ -871,24 +850,23 @@ const Account: React.FC = () => {
                 }}
               >
                 <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-                  For now this is read-only. In a production deployment, this is where you’d manage
-                  passwords, SSO, and org membership.
+                  {t("account.profile.readOnlyNote")}
                 </div>
 
-                {/* ✅ Owner-only delete */}
+                {/* Owner-only delete */}
                 {isOwner ? (
                   <button
                     type="button"
                     className="cei-pill-danger"
                     onClick={handleDeleteAccount}
                     disabled={deleting || deleteSuccess}
-                    title="Owner-only"
+                    title={t("account.labels.ownerOnly")}
                   >
-                    {deleting ? "Deleting…" : "Delete account"}
+                    {deleting ? t("account.profile.deleting") : t("account.profile.deleteButton")}
                   </button>
                 ) : (
-                  <span className="cei-pill cei-pill-neutral" title="Owner-only">
-                    Owner-only
+                  <span className="cei-pill cei-pill-neutral" title={t("account.labels.ownerOnly")}>
+                    {t("account.labels.ownerOnly")}
                   </span>
                 )}
               </div>
@@ -899,35 +877,37 @@ const Account: React.FC = () => {
         {/* Subscription card */}
         <div className="cei-card">
           <div style={{ fontSize: "0.9rem", fontWeight: 600, marginBottom: "0.4rem" }}>
-            Subscription
+            {t("account.subscription.title")}
           </div>
 
           <div style={{ fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
             <div>
-              <strong>Current plan:</strong> {planLabel}
+              <strong>{t("account.subscription.currentPlan")}</strong> {planLabel}
             </div>
             <div style={{ marginTop: "0.2rem" }}>
-              <strong>Status:</strong> {subscriptionStatus}
+              <strong>{t("account.subscription.status")}</strong> {subscriptionStatus}
             </div>
           </div>
 
           <div style={{ marginTop: "0.4rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
             <div>
-              <strong>Alerts:</strong> {alertsEnabled ? "Enabled" : "Disabled"}
+              <strong>{t("account.subscription.alerts")}</strong>{" "}
+              {alertsEnabled ? t("account.labels.enabled") : t("account.labels.disabled")}
             </div>
             <div style={{ marginTop: "0.1rem" }}>
-              <strong>Reports:</strong> {reportsEnabled ? "Enabled" : "Disabled"}
+              <strong>{t("account.subscription.reports")}</strong>{" "}
+              {reportsEnabled ? t("account.labels.enabled") : t("account.labels.disabled")}
             </div>
           </div>
 
           <div style={{ marginTop: "0.8rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
             <ul style={{ margin: 0, paddingLeft: "1.1rem", lineHeight: 1.6 }}>
-              <li>Starter includes alerts, reports, and multi-site analytics.</li>
-              <li>Growth (later) adds more orgs, longer history, and SLA-backed support.</li>
+              <li>{t("account.subscription.bullets.starter")}</li>
+              <li>{t("account.subscription.bullets.growth")}</li>
             </ul>
           </div>
 
-          {/* ✅ Owner-only subscription management */}
+          {/* Owner-only subscription management */}
           {!isOwner && (
             <div
               style={{
@@ -940,8 +920,10 @@ const Account: React.FC = () => {
                 color: "var(--cei-text-muted)",
               }}
             >
-              <strong style={{ color: "var(--cei-text-main)" }}>Owner-only:</strong> Ask your org owner to
-              upgrade or manage billing.
+              <strong style={{ color: "var(--cei-text-main)" }}>
+                {t("account.labels.ownerOnly")}:
+              </strong>{" "}
+              {t("account.subscription.ownerOnlyBlurb")}
             </div>
           )}
 
@@ -951,26 +933,26 @@ const Account: React.FC = () => {
               className="cei-btn cei-btn-primary"
               onClick={handleStartStarterCheckout}
               disabled={!isOwner || startingCheckout}
-              title={!isOwner ? "Owner-only" : undefined}
+              title={!isOwner ? t("account.labels.ownerOnly") : undefined}
               style={{
                 cursor: !isOwner ? "not-allowed" : "pointer",
                 opacity: !isOwner ? 0.55 : 1,
               }}
             >
-              {startingCheckout ? "Redirecting…" : "Upgrade to CEI Starter"}
+              {startingCheckout ? t("account.subscription.redirecting") : t("account.subscription.upgrade")}
             </button>
             <button
               type="button"
               className="cei-btn cei-btn-ghost"
               onClick={handleOpenPortal}
               disabled={!isOwner || openingPortal}
-              title={!isOwner ? "Owner-only" : undefined}
+              title={!isOwner ? t("account.labels.ownerOnly") : undefined}
               style={{
                 cursor: !isOwner ? "not-allowed" : "pointer",
                 opacity: !isOwner ? 0.55 : 1,
               }}
             >
-              {openingPortal ? "Opening…" : "Manage subscription"}
+              {openingPortal ? t("account.subscription.opening") : t("account.subscription.manage")}
             </button>
           </div>
 
@@ -992,7 +974,7 @@ const Account: React.FC = () => {
         </div>
       </section>
 
-      {/* ✅ NEW: Organization controls (Offboard + Leave) */}
+      {/* Organization controls (Offboard + Leave) */}
       <section>
         <div className="cei-card">
           <div
@@ -1006,15 +988,15 @@ const Account: React.FC = () => {
               gap: "0.75rem",
             }}
           >
-            <span>Organization controls</span>
+            <span>{t("account.orgControls.title")}</span>
             <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-              Leave your org or offboard a customer.
+              {t("account.orgControls.subtitle")}
             </span>
           </div>
 
           <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", lineHeight: 1.6 }}>
             <div>
-              <strong>Current org:</strong>{" "}
+              <strong>{t("account.orgControls.currentOrg")}</strong>{" "}
               {safeString(orgLike?.name) ? (
                 <span>
                   {String(orgLike.name)} (id={String(orgLike.id)})
@@ -1024,7 +1006,7 @@ const Account: React.FC = () => {
               )}
             </div>
             <div style={{ marginTop: "0.2rem" }}>
-              <strong>Role:</strong> {roleLabel(account?.role)}
+              <strong>{t("account.orgControls.role")}</strong> {roleLabel(t, account?.role)}
             </div>
           </div>
 
@@ -1034,28 +1016,27 @@ const Account: React.FC = () => {
               className="cei-btn cei-btn-ghost"
               onClick={handleLeaveOrg}
               disabled={leavingOrg || !orgLike?.id}
-              title={!orgLike?.id ? "No organization attached" : undefined}
+              title={!orgLike?.id ? t("account.orgControls.noOrgAttachedTitle") : undefined}
               style={{
                 cursor: leavingOrg || !orgLike?.id ? "not-allowed" : "pointer",
                 opacity: leavingOrg || !orgLike?.id ? 0.55 : 1,
               }}
             >
-              {leavingOrg ? "Leaving…" : "Leave Organization"}
+              {leavingOrg ? t("account.orgControls.leaving") : t("account.orgControls.leave")}
             </button>
 
-            {/* Keep your Offboard button color as-is (cei-pill-danger) */}
             <button
               type="button"
               className="cei-pill-danger"
               onClick={handleSoftOffboard}
               disabled={!isOwner || offboardingSoft || !orgLike?.id}
-              title={!isOwner ? "Owner-only" : undefined}
+              title={!isOwner ? t("account.labels.ownerOnly") : undefined}
               style={{
                 cursor: !isOwner || offboardingSoft || !orgLike?.id ? "not-allowed" : "pointer",
                 opacity: !isOwner || offboardingSoft || !orgLike?.id ? 0.55 : 1,
               }}
             >
-              {offboardingSoft ? "Offboarding…" : "Offboard Organization"}
+              {offboardingSoft ? t("account.orgControls.offboarding") : t("account.orgControls.offboard")}
             </button>
 
             <button
@@ -1063,20 +1044,18 @@ const Account: React.FC = () => {
               className="cei-pill-danger"
               onClick={handleNukeOffboard}
               disabled={!isOwner || offboardingNuke || !orgLike?.id}
-              title={!isOwner ? "Owner-only" : "Danger: permanent delete"}
+              title={!isOwner ? t("account.labels.ownerOnly") : t("account.orgControls.permanentDeleteTitle")}
               style={{
                 cursor: !isOwner || offboardingNuke || !orgLike?.id ? "not-allowed" : "pointer",
                 opacity: !isOwner || offboardingNuke || !orgLike?.id ? 0.55 : 1,
               }}
             >
-              {offboardingNuke ? "Nuking…" : "Permanently Delete"}
+              {offboardingNuke ? t("account.orgControls.nuking") : t("account.orgControls.permanentDelete")}
             </button>
           </div>
 
           <div style={{ marginTop: "0.65rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-            Offboard Organization detaches users and revokes invites/tokens, but keeps the org row.
-            Permanently Delete deletes the org and org-scoped data. Leave Organization detaches only
-            you (blocked if you’re the last owner).
+            {t("account.orgControls.footer")}
           </div>
         </div>
       </section>
@@ -1095,15 +1074,15 @@ const Account: React.FC = () => {
               gap: "0.75rem",
             }}
           >
-            <span>Organization invites</span>
+            <span>{t("account.invites.title")}</span>
             <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-              Owner-only. Generates join links for this org.
+              {t("account.invites.subtitle")}
             </span>
           </div>
 
           {!isOwner ? (
             <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              You are not an org owner. Invite generation is restricted.
+              {t("account.invites.notOwnerBlurb")}
             </div>
           ) : (
             <>
@@ -1124,11 +1103,11 @@ const Account: React.FC = () => {
               >
                 <div>
                   <label style={{ display: "block", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-                    Invite email
+                    {t("account.invites.form.emailLabel")}
                   </label>
                   <input
                     type="email"
-                    placeholder="user@company.com"
+                    placeholder={t("account.invites.form.emailPlaceholder")}
                     value={inviteEmail}
                     onChange={(e) => setInviteEmail(e.target.value)}
                     style={{ width: "100%" }}
@@ -1137,21 +1116,21 @@ const Account: React.FC = () => {
 
                 <div>
                   <label style={{ display: "block", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-                    Role
+                    {t("account.invites.form.roleLabel")}
                   </label>
                   <select
                     value={inviteRole}
-                    onChange={(e) => setInviteRole((e.target.value as any) || "member")}
+                    onChange={(e) => setInviteRole(((e.target.value as any) || "member") as any)}
                     style={{ width: "100%" }}
                   >
-                    <option value="member">Member</option>
-                    <option value="owner">Owner</option>
+                    <option value="member">{t("account.roles.member")}</option>
+                    <option value="owner">{t("account.roles.owner")}</option>
                   </select>
                 </div>
 
                 <div>
                   <label style={{ display: "block", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-                    Expires (days)
+                    {t("account.invites.form.expiresLabel")}
                   </label>
                   <input
                     type="number"
@@ -1171,7 +1150,7 @@ const Account: React.FC = () => {
                     disabled={creatingInvite}
                     style={{ height: "2.35rem" }}
                   >
-                    {creatingInvite ? "Creating…" : "Generate invite link"}
+                    {creatingInvite ? t("account.invites.form.creating") : t("account.invites.form.generate")}
                   </button>
                 </div>
 
@@ -1183,7 +1162,7 @@ const Account: React.FC = () => {
                     color: "var(--cei-text-muted)",
                   }}
                 >
-                  Invites are email-bound. The recipient must sign up using this same email.
+                  {t("account.invites.form.emailBoundNote")}
                 </div>
               </div>
 
@@ -1201,7 +1180,9 @@ const Account: React.FC = () => {
                   {createdInviteLink && (
                     <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
                       <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-                        <strong style={{ color: "var(--cei-text-main)" }}>Invite link:</strong>{" "}
+                        <strong style={{ color: "var(--cei-text-main)" }}>
+                          {t("account.invites.created.linkLabel")}
+                        </strong>{" "}
                         <span style={{ wordBreak: "break-all" }}>{createdInviteLink}</span>
                       </div>
                       <button
@@ -1209,7 +1190,7 @@ const Account: React.FC = () => {
                         className="cei-btn cei-btn-ghost"
                         onClick={() => handleCopy(createdInviteLink)}
                       >
-                        Copy
+                        {t("account.invites.created.copy")}
                       </button>
                     </div>
                   )}
@@ -1230,7 +1211,7 @@ const Account: React.FC = () => {
               {/* Invite list */}
               <div style={{ marginTop: "0.9rem", display: "flex", justifyContent: "space-between", gap: "0.75rem" }}>
                 <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-                  Active links should be short-lived. Revoke after onboarding is complete.
+                  {t("account.invites.list.helper")}
                 </div>
                 <button
                   type="button"
@@ -1238,7 +1219,7 @@ const Account: React.FC = () => {
                   onClick={loadInvites}
                   disabled={invitesLoading}
                 >
-                  {invitesLoading ? "Refreshing…" : "Refresh"}
+                  {invitesLoading ? t("account.invites.list.refreshing") : t("account.invites.list.refresh")}
                 </button>
               </div>
 
@@ -1249,29 +1230,29 @@ const Account: React.FC = () => {
                   </div>
                 ) : invites.length === 0 ? (
                   <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-                    No invites yet.
+                    {t("account.invites.list.empty")}
                   </div>
                 ) : (
                   <div style={{ overflowX: "auto" }}>
                     <table className="cei-table" style={{ width: "100%" }}>
                       <thead>
                         <tr>
-                          <th>ID</th>
-                          <th>Email</th>
-                          <th>Role</th>
-                          <th>Status</th>
-                          <th>Expires</th>
-                          <th>Created</th>
-                          <th>Accepted</th>
-                          <th style={{ textAlign: "right" }}>Actions</th>
+                          <th>{t("account.invites.table.id")}</th>
+                          <th>{t("account.invites.table.email")}</th>
+                          <th>{t("account.invites.table.role")}</th>
+                          <th>{t("account.invites.table.status")}</th>
+                          <th>{t("account.invites.table.expires")}</th>
+                          <th>{t("account.invites.table.created")}</th>
+                          <th>{t("account.invites.table.accepted")}</th>
+                          <th style={{ textAlign: "right" }}>{t("account.invites.table.actions")}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {invites.map((inv) => {
                           const status = inviteUiStatus(inv);
 
-                          // ✅ 3) Make Actions follow can_revoke (not is_active)
-                          const canRevoke = inv.can_revoke === true;
+                          // Actions are strictly driven by Active vs Revoked.
+                          const canRevoke = status === "Active";
 
                           const acceptedTs =
                             safeString(inv.accepted_at) ||
@@ -1290,11 +1271,10 @@ const Account: React.FC = () => {
 
                               {/* Status: ONLY Active/Revoked */}
                               <td>
-                                <span
-                                  className={statusPillClass(status)}
-                                  style={{ cursor: "default" }}
-                                >
-                                  {status}
+                                <span className={statusPillClass(status)} style={{ cursor: "default" }}>
+                                  {status === "Active"
+                                    ? t("account.invites.status.active")
+                                    : t("account.invites.status.revoked")}
                                 </span>
                               </td>
 
@@ -1310,10 +1290,10 @@ const Account: React.FC = () => {
                                       type="button"
                                       className="cei-pill-danger"
                                       onClick={() => handleRevokeInvite(inv.id)}
-                                      title="Revoke invite and stop logins for the invited user"
+                                      title={t("account.invites.actions.revokeTitle")}
                                       style={{ minWidth: 92 }}
                                     >
-                                      Revoke
+                                      {t("account.invites.actions.revoke")}
                                     </button>
                                   ) : (
                                     <button
@@ -1321,13 +1301,15 @@ const Account: React.FC = () => {
                                       className="cei-pill cei-pill-good"
                                       onClick={() => handleExtendInvite(inv)}
                                       disabled={extendingInviteId === inv.id}
-                                      title="Extend/reactivate this invite and re-enable user access"
+                                      title={t("account.invites.actions.extendTitle")}
                                       style={{
                                         minWidth: 92,
                                         cursor: extendingInviteId === inv.id ? "not-allowed" : "pointer",
                                       }}
                                     >
-                                      {extendingInviteId === inv.id ? "Extending…" : "Extend"}
+                                      {extendingInviteId === inv.id
+                                        ? t("account.invites.actions.extending")
+                                        : t("account.invites.actions.extend")}
                                     </button>
                                   )}
                                 </div>
@@ -1359,48 +1341,45 @@ const Account: React.FC = () => {
               gap: "0.75rem",
             }}
           >
-            <span>Tariffs & energy mix</span>
+            <span>{t("account.tariffs.title")}</span>
             <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-              Read-only. Used for cost analytics and savings estimates.
+              {t("account.tariffs.subtitle")}
             </span>
           </div>
 
           {!account && !hasTariffConfig ? (
             <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              Account details are not available right now. Tariff and energy mix data will appear here
-              once your account context loads successfully.
+              {t("account.tariffs.accountUnavailable")}
             </div>
           ) : !org && !hasTariffConfig ? (
             <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              No organization is associated with this account yet. Tariff and energy mix data will
-              appear here once your org is configured.
+              {t("account.tariffs.noOrg")}
             </div>
           ) : (
             <>
               <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", lineHeight: 1.6 }}>
                 <div>
-                  <strong>Currency:</strong> {currencyCode}
+                  <strong>{t("account.tariffs.currency")}</strong> {currencyCode}
                 </div>
                 <div style={{ marginTop: "0.2rem" }}>
-                  <strong>Electricity price (per kWh):</strong> {formatPrice(electricityPrice)}
+                  <strong>{t("account.tariffs.electricity")}</strong> {formatPrice(electricityPrice)}
                 </div>
                 <div style={{ marginTop: "0.2rem" }}>
-                  <strong>Gas price (per kWh):</strong> {formatPrice(gasPrice)}
+                  <strong>{t("account.tariffs.gas")}</strong> {formatPrice(gasPrice)}
                 </div>
                 <div style={{ marginTop: "0.2rem" }}>
-                  <strong>Primary energy sources:</strong>{" "}
+                  <strong>{t("account.tariffs.primarySources")}</strong>{" "}
                   {primarySources && primarySources.length > 0 ? (
                     primarySources.join(", ")
                   ) : (
-                    <span>Not specified</span>
+                    <span>{t("account.tariffs.notSpecified")}</span>
                   )}
                 </div>
               </div>
 
               {!hasTariffConfig && (
                 <div style={{ marginTop: "0.7rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-                  Tariffs and energy mix are not configured yet. CEI will use kWh-only analytics until
-                  these values are set.
+                  {t("account.tariffs.notConfiguredNote")}
                 </div>
               )}
             </>
@@ -1422,7 +1401,7 @@ const Account: React.FC = () => {
               gap: "0.75rem",
             }}
           >
-            <span>Environment & safety</span>
+            <span>{t("account.environment.title")}</span>
             <span className="cei-pill cei-pill-neutral">
               {envLabel} ({appEnvironment})
             </span>
@@ -1433,16 +1412,16 @@ const Account: React.FC = () => {
           <div style={{ marginTop: "0.6rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
             <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
               <li>
-                <strong>DEV:</strong> point CSV uploads and tests here; break things safely before
-                promoting changes.
+                <strong>{t("account.environment.bullets.dev.label")}</strong>{" "}
+                {t("account.environment.bullets.dev.text")}
               </li>
               <li>
-                <strong>PILOT/STAGING:</strong> use for demos and early customer pilots; data should be
-                realistic but not yet contract-critical.
+                <strong>{t("account.environment.bullets.pilot.label")}</strong>{" "}
+                {t("account.environment.bullets.pilot.text")}
               </li>
               <li>
-                <strong>PROD:</strong> treat as the system of record; align alerts, reports, and exports
-                with contractual expectations.
+                <strong>{t("account.environment.bullets.prod.label")}</strong>{" "}
+                {t("account.environment.bullets.prod.text")}
               </li>
             </ul>
           </div>
@@ -1453,19 +1432,21 @@ const Account: React.FC = () => {
       <section>
         <div className="cei-card">
           <div style={{ fontSize: "0.9rem", fontWeight: 600, marginBottom: "0.4rem" }}>
-            What your plan controls
+            {t("account.planControls.title")}
           </div>
           <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", lineHeight: 1.7 }}>
             <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
               <li>
-                <strong>Core (always on):</strong> CSV ingestion, per-site dashboards, basic trend charts.
+                <strong>{t("account.planControls.core.label")}</strong>{" "}
+                {t("account.planControls.core.text")}
               </li>
               <li>
-                <strong>Starter and above:</strong> Alerts, 7-day reports, and per-site insight cards.
+                <strong>{t("account.planControls.starter.label")}</strong>{" "}
+                {t("account.planControls.starter.text")}
               </li>
               <li>
-                <strong>Future tiers:</strong> organization-level baselines, ML-based forecasting, and custom
-                export pipelines.
+                <strong>{t("account.planControls.future.label")}</strong>{" "}
+                {t("account.planControls.future.text")}
               </li>
             </ul>
           </div>

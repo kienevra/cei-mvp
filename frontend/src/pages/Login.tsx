@@ -1,7 +1,8 @@
 // frontend/src/pages/Login.tsx
 import React, { useEffect, useMemo, useState, FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import useAuth from "../hooks/useAuth";
+import { useTranslation } from "react-i18next";
+import { useAuth } from "../hooks/useAuth";
 import ErrorBanner from "../components/ErrorBanner";
 import api, { acceptInvite } from "../services/api";
 
@@ -24,7 +25,8 @@ function getRequestIdFromError(err: any): string | null {
   if (!err) return null;
 
   // Preferred: stamped by api.ts interceptor
-  const stamped = typeof err?.cei_request_id === "string" ? err.cei_request_id : null;
+  const stamped =
+    typeof err?.cei_request_id === "string" ? err.cei_request_id : null;
   if (stamped && stamped.trim()) return stamped.trim();
 
   // Axios response headers (browser normalizes to lowercase)
@@ -61,6 +63,7 @@ function appendSupportCode(msg: string, rid: string | null): string {
 }
 
 const Login: React.FC = () => {
+  const { t } = useTranslation();
   const { login, isAuthenticated } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -89,28 +92,50 @@ const Login: React.FC = () => {
     }
   }, [isAuthenticated, navigate]);
 
-  // Handle ?reason=session_expired etc. (do not regress)
+  // Notice logic (invite + session expired + auth required)
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const reason = params.get("reason");
-    if (reason === "session_expired") {
-      setNotice("Your session expired. Please sign in again.");
-    } else {
-      setNotice(null);
-    }
-  }, [location.search]);
+    // Priority:
+    // 1) Invite token present -> invite notice
+    // 2) ?reason=session_expired -> session expired notice (do not regress)
+    // 3) router state reason=auth_required -> gentle sign-in required notice
+    // 4) otherwise none
 
-  // If user lands with an invite token, default to signup and hide org-name creation.
-  useEffect(() => {
     if (inviteToken) {
       setMode("signup");
       setOrganizationName(""); // invite flow joins an existing org
       setNotice(
-        "You’re joining an organization via invite. Create your account to continue."
+        t("auth.invite.notice", {
+          defaultValue:
+            "You’re joining an organization via invite. Create your account to continue.",
+        })
       );
+      return;
     }
-    // NOTE: do not include `mode` here; we intentionally force signup when invite exists.
-  }, [inviteToken]);
+
+    const params = new URLSearchParams(location.search);
+    const reason = params.get("reason");
+    if (reason === "session_expired") {
+      setNotice(
+        t("auth.sessionExpired", {
+          defaultValue: "Your session expired. Please sign in again.",
+        })
+      );
+      return;
+    }
+
+    const stateReason =
+      (location.state as any)?.reason && String((location.state as any).reason);
+    if (stateReason === "auth_required") {
+      setNotice(
+        t("auth.authRequired", {
+          defaultValue: "Please sign in to continue.",
+        })
+      );
+      return;
+    }
+
+    setNotice(null);
+  }, [inviteToken, location.search, location.state, t]);
 
   function toErrorString(err: any): string {
     const rid = getRequestIdFromError(err);
@@ -139,7 +164,11 @@ const Login: React.FC = () => {
         const base =
           code && msg
             ? `${code}: ${msg}`
-            : msg || code || "Authentication failed. Please try again.";
+            : msg ||
+              code ||
+              t("auth.errors.generic", {
+                defaultValue: "Authentication failed. Please try again.",
+              });
         return appendSupportCode(base, rid);
       }
 
@@ -152,11 +181,20 @@ const Login: React.FC = () => {
       try {
         return appendSupportCode(JSON.stringify(backendDetail), rid);
       } catch {
-        return appendSupportCode("Authentication failed. Please try again.", rid);
+        return appendSupportCode(
+          t("auth.errors.generic", {
+            defaultValue: "Authentication failed. Please try again.",
+          }),
+          rid
+        );
       }
     }
 
-    const fallback = err?.message || "Authentication failed. Please try again.";
+    const fallback =
+      err?.message ||
+      t("auth.errors.generic", {
+        defaultValue: "Authentication failed. Please try again.",
+      });
     return appendSupportCode(fallback, rid);
   }
 
@@ -172,15 +210,27 @@ const Login: React.FC = () => {
       } else {
         // ---------- SIGNUP FLOW ----------
         if (!email || !password) {
-          throw new Error("Email and password are required.");
+          throw new Error(
+            t("auth.errors.emailPasswordRequired", {
+              defaultValue: "Email and password are required.",
+            })
+          );
         }
 
         if (password.length < 8) {
-          throw new Error("Password must be at least 8 characters.");
+          throw new Error(
+            t("auth.errors.passwordMinLength", {
+              defaultValue: "Password must be at least 8 characters.",
+            })
+          );
         }
 
         if (password !== passwordConfirm) {
-          throw new Error("Passwords do not match.");
+          throw new Error(
+            t("auth.errors.passwordsNoMatch", {
+              defaultValue: "Passwords do not match.",
+            })
+          );
         }
 
         if (inviteToken) {
@@ -199,7 +249,10 @@ const Login: React.FC = () => {
             const status = err?.response?.status;
             if (status === 404) {
               throw new Error(
-                "Invite join isn’t live on this backend yet (missing /org/invites/accept-and-signup). Deploy the invites router, then retry."
+                t("auth.errors.inviteJoinNotLive", {
+                  defaultValue:
+                    "Invite join isn’t live on this backend yet (missing /org/invites/accept-and-signup). Deploy the invites router, then retry.",
+                })
               );
             }
             throw err;
@@ -208,7 +261,10 @@ const Login: React.FC = () => {
           const accessToken = (res as any)?.access_token;
           if (!accessToken) {
             throw new Error(
-              "Invite signup succeeded but response missing access_token."
+              t("auth.errors.inviteMissingAccessToken", {
+                defaultValue:
+                  "Invite signup succeeded but response missing access_token.",
+              })
             );
           }
 
@@ -272,7 +328,9 @@ const Login: React.FC = () => {
         >
           <img
             src={encodeURI("/ChatGPT Image Dec 5, 2025, 10_47_03 PM.png")}
-            alt="CEI – Carbon Efficiency Intelligence"
+            alt={t("brand.full", {
+              defaultValue: "CEI – Carbon Efficiency Intelligence",
+            })}
             style={{
               height: "320px",
               width: "auto",
@@ -281,12 +339,17 @@ const Login: React.FC = () => {
             }}
           />
 
-          <div className="auth-title">We use A.I to reduce your factorys carbon footprint.</div>
+          <div className="auth-title">
+            {t("auth.hero.title", {
+              defaultValue: "We use A.I to reduce your factorys carbon footprint.",
+            })}
+          </div>
 
           <div className="auth-subtitle">
-            CEI ingests your meter and SCADA data, builds statistical baselines for
-            each site, and turns night, weekend, and process inefficiencies into
-            actionable alerts and reports – without installing new hardware.
+            {t("auth.hero.subtitle", {
+              defaultValue:
+                "CEI ingests your meter and SCADA data, builds statistical baselines for each site, and turns night, weekend, and process inefficiencies into actionable alerts and reports – without installing new hardware.",
+            })}
           </div>
         </div>
 
@@ -303,8 +366,13 @@ const Login: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            <strong style={{ color: "var(--cei-text)" }}>Invite detected.</strong>{" "}
-            You’ll join an existing organization after account creation.
+            <strong style={{ color: "var(--cei-text)" }}>
+              {t("auth.invite.badgeTitle", { defaultValue: "Invite detected." })}
+            </strong>{" "}
+            {t("auth.invite.badgeBody", {
+              defaultValue:
+                "You’ll join an existing organization after account creation.",
+            })}
           </div>
         )}
 
@@ -338,9 +406,15 @@ const Login: React.FC = () => {
               fontWeight: mode === "login" ? 600 : 400,
               cursor: inviteToken ? "not-allowed" : "pointer",
             }}
-            title={inviteToken ? "Invite flow requires account creation." : undefined}
+            title={
+              inviteToken
+                ? t("auth.invite.requiresSignup", {
+                    defaultValue: "Invite flow requires account creation.",
+                  })
+                : undefined
+            }
           >
-            Sign in
+            {t("auth.actions.signIn", { defaultValue: "Sign in" })}
           </button>
           <button
             type="button"
@@ -361,7 +435,7 @@ const Login: React.FC = () => {
               cursor: "pointer",
             }}
           >
-            Create account
+            {t("auth.actions.createAccount", { defaultValue: "Create account" })}
           </button>
         </div>
 
@@ -394,12 +468,18 @@ const Login: React.FC = () => {
           {/* Invite onboarding: full name (optional) */}
           {isSignup && inviteToken && (
             <div>
-              <label htmlFor="fullName">Full name (optional)</label>
+              <label htmlFor="fullName">
+                {t("auth.fields.fullName.label", {
+                  defaultValue: "Full name (optional)",
+                })}
+              </label>
               <input
                 id="fullName"
                 type="text"
                 autoComplete="name"
-                placeholder="e.g. Taylor Smith"
+                placeholder={t("auth.fields.fullName.placeholder", {
+                  defaultValue: "e.g. Taylor Smith",
+                })}
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
               />
@@ -410,19 +490,28 @@ const Login: React.FC = () => {
                   marginTop: "0.25rem",
                 }}
               >
-                This is stored on your profile and used in audit logs.
+                {t("auth.fields.fullName.help", {
+                  defaultValue:
+                    "This is stored on your profile and used in audit logs.",
+                })}
               </div>
             </div>
           )}
 
           {isSignup && !inviteToken && (
             <div>
-              <label htmlFor="organizationName">Organization name</label>
+              <label htmlFor="organizationName">
+                {t("auth.fields.organizationName.label", {
+                  defaultValue: "Organization name",
+                })}
+              </label>
               <input
                 id="organizationName"
                 type="text"
                 autoComplete="organization"
-                placeholder="e.g. Dev Manufacturing"
+                placeholder={t("auth.fields.organizationName.placeholder", {
+                  defaultValue: "e.g. Dev Manufacturing",
+                })}
                 value={organizationName}
                 onChange={(e) => setOrganizationName(e.target.value)}
                 required
@@ -434,18 +523,25 @@ const Login: React.FC = () => {
                   marginTop: "0.25rem",
                 }}
               >
-                This creates your org. Use an invite link to join an existing org.
+                {t("auth.fields.organizationName.help", {
+                  defaultValue:
+                    "This creates your org. Use an invite link to join an existing org.",
+                })}
               </div>
             </div>
           )}
 
           <div>
-            <label htmlFor="email">Work email</label>
+            <label htmlFor="email">
+              {t("auth.fields.email.label", { defaultValue: "Work email" })}
+            </label>
             <input
               id="email"
               type="email"
               autoComplete="username"
-              placeholder="you@factory.com"
+              placeholder={t("auth.fields.email.placeholder", {
+                defaultValue: "you@factory.com",
+              })}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -453,12 +549,20 @@ const Login: React.FC = () => {
           </div>
 
           <div>
-            <label htmlFor="password">{isSignup ? "Create a password" : "Password"}</label>
+            <label htmlFor="password">
+              {isSignup
+                ? t("auth.fields.password.createLabel", {
+                    defaultValue: "Create a password",
+                  })
+                : t("auth.fields.password.label", { defaultValue: "Password" })}
+            </label>
             <input
               id="password"
               type="password"
               autoComplete={isSignup ? "new-password" : "current-password"}
-              placeholder="••••••••"
+              placeholder={t("auth.fields.password.placeholder", {
+                defaultValue: "••••••••",
+              })}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -471,19 +575,27 @@ const Login: React.FC = () => {
                   marginTop: "0.25rem",
                 }}
               >
-                Minimum 8 characters. Use a strong password.
+                {t("auth.fields.password.help", {
+                  defaultValue: "Minimum 8 characters. Use a strong password.",
+                })}
               </div>
             )}
           </div>
 
           {isSignup && (
             <div>
-              <label htmlFor="passwordConfirm">Confirm password</label>
+              <label htmlFor="passwordConfirm">
+                {t("auth.fields.passwordConfirm.label", {
+                  defaultValue: "Confirm password",
+                })}
+              </label>
               <input
                 id="passwordConfirm"
                 type="password"
                 autoComplete="new-password"
-                placeholder="••••••••"
+                placeholder={t("auth.fields.passwordConfirm.placeholder", {
+                  defaultValue: "••••••••",
+                })}
                 value={passwordConfirm}
                 onChange={(e) => setPasswordConfirm(e.target.value)}
                 required
@@ -504,14 +616,24 @@ const Login: React.FC = () => {
             {submitting
               ? isSignup
                 ? inviteToken
-                  ? "Joining via invite…"
-                  : "Creating your account…"
-                : "Signing you in…"
+                  ? t("auth.actions.joiningViaInvite", {
+                      defaultValue: "Joining via invite…",
+                    })
+                  : t("auth.actions.creatingAccountProgress", {
+                      defaultValue: "Creating your account…",
+                    })
+                : t("auth.actions.signingInProgress", {
+                    defaultValue: "Signing you in…",
+                  })
               : isSignup
               ? inviteToken
-                ? "Join organization"
-                : "Create account"
-              : "Sign in"}
+                ? t("auth.actions.joinOrganization", {
+                    defaultValue: "Join organization",
+                  })
+                : t("auth.actions.createAccount", {
+                    defaultValue: "Create account",
+                  })
+              : t("auth.actions.signIn", { defaultValue: "Sign in" })}
           </button>
         </form>
       </div>
