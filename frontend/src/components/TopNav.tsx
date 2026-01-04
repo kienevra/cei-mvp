@@ -4,26 +4,6 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useTranslation } from "react-i18next";
 
-// Read environment flag from Vite
-const rawEnv = (import.meta as any).env || {};
-const rawEnvName =
-  rawEnv.VITE_ENVIRONMENT ||
-  rawEnv.MODE || // fallback to Vite mode if set
-  "dev";
-
-const envName = String(rawEnvName).toLowerCase();
-
-let envLabel = "DEV";
-let envClass = "cei-pill cei-pill-neutral";
-
-if (envName.startsWith("prod")) {
-  envLabel = "PROD";
-  envClass = "cei-pill cei-pill-negative";
-} else if (envName.startsWith("pilot") || envName.startsWith("stage")) {
-  envLabel = envName.startsWith("pilot") ? "PILOT" : "STAGING";
-  envClass = "cei-pill cei-pill-warning";
-}
-
 const TopNav: React.FC = () => {
   const { user, logout } = useAuth();
   const location = useLocation();
@@ -62,25 +42,6 @@ const TopNav: React.FC = () => {
       // non-fatal; keep UX stable even if i18n isn't fully wired yet
     }
   };
-
-  // i18n env tooltip (no hardcoded English)
-  const envTitle = useMemo(() => {
-    if (envName.startsWith("prod")) {
-      return t("env.prod", {
-        defaultValue:
-          "Production environment. Live tenant data – be careful with changes.",
-      });
-    }
-    if (envName.startsWith("pilot") || envName.startsWith("stage")) {
-      return t("env.pilot", {
-        defaultValue:
-          "Pilot / staging environment. Used for customer testing before full rollout.",
-      });
-    }
-    return t("env.dev", {
-      defaultValue: "Local development environment. Safe for experiments and test data.",
-    });
-  }, [t]);
 
   const handleNavClick = (path: string) => {
     navigate(path);
@@ -137,21 +98,6 @@ const TopNav: React.FC = () => {
 
         {/* Desktop user info (hidden on mobile) */}
         <div className="cei-topnav-right hide-on-mobile">
-          {/* Environment badge */}
-          <span
-            className={envClass}
-            title={envTitle}
-            style={{
-              marginRight: "0.75rem",
-              fontSize: "0.72rem",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              padding: "0.15rem 0.5rem",
-            }}
-          >
-            {envLabel}
-          </span>
-
           {/* Language switcher (desktop) */}
           <div
             style={{
@@ -266,21 +212,6 @@ const TopNav: React.FC = () => {
 
             <div className="cei-mobile-menu-footer">
               <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-                {/* Environment badge on mobile */}
-                <span
-                  className={envClass}
-                  title={envTitle}
-                  style={{
-                    alignSelf: "flex-start",
-                    fontSize: "0.7rem",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    padding: "0.15rem 0.45rem",
-                  }}
-                >
-                  {envLabel}
-                </span>
-
                 {/* Language switcher (mobile) */}
                 <div
                   style={{

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/useAuth";
 import ErrorBanner from "../components/ErrorBanner";
 import api, { acceptInvite } from "../services/api";
+import LanguageToggle from "../components/LanguageToggle";
 
 type AuthMode = "login" | "signup";
 
@@ -314,328 +315,336 @@ const Login: React.FC = () => {
 
   return (
     <div className="auth-page">
-      <div className="auth-card">
-        {/* Brand / header */}
+      <div style={{ position: "relative" }}>
         <div
-          style={{
-            marginBottom: "0.05rem",
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.05rem",
-            alignItems: "center",
-            textAlign: "center",
-          }}
+          style={{ position: "absolute", top: "1rem", right: "1rem", zIndex: 5 }}
         >
-          <img
-            src={encodeURI("/ChatGPT Image Dec 5, 2025, 10_47_03 PM.png")}
-            alt={t("brand.full", {
-              defaultValue: "CEI – Carbon Efficiency Intelligence",
-            })}
+          <LanguageToggle variant="pill" />
+        </div>
+
+        <div className="auth-card">
+          {/* Brand / header */}
+          <div
             style={{
-              height: "320px",
-              width: "auto",
-              display: "block",
               marginBottom: "0.05rem",
-            }}
-          />
-
-          <div className="auth-title">
-            {t("auth.hero.title", {
-              defaultValue: "We use A.I to reduce your factorys carbon footprint.",
-            })}
-          </div>
-
-          <div className="auth-subtitle">
-            {t("auth.hero.subtitle", {
-              defaultValue:
-                "CEI ingests your meter and SCADA data, builds statistical baselines for each site, and turns night, weekend, and process inefficiencies into actionable alerts and reports – without installing new hardware.",
-            })}
-          </div>
-        </div>
-
-        {/* Invite badge */}
-        {inviteToken && (
-          <div
-            style={{
-              marginBottom: "0.75rem",
-              fontSize: "0.8rem",
-              padding: "0.5rem 0.7rem",
-              borderRadius: "0.6rem",
-              border: "1px solid rgba(56, 189, 248, 0.4)",
-              background: "rgba(15, 23, 42, 0.8)",
-              color: "var(--cei-text-muted)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.05rem",
+              alignItems: "center",
+              textAlign: "center",
             }}
           >
-            <strong style={{ color: "var(--cei-text)" }}>
-              {t("auth.invite.badgeTitle", { defaultValue: "Invite detected." })}
-            </strong>{" "}
-            {t("auth.invite.badgeBody", {
-              defaultValue:
-                "You’ll join an existing organization after account creation.",
-            })}
+            <img
+              src={encodeURI("/ChatGPT Image Dec 5, 2025, 10_47_03 PM.png")}
+              alt={t("brand.full", {
+                defaultValue: "CEI – Carbon Efficiency Intelligence",
+              })}
+              style={{
+                height: "320px",
+                width: "auto",
+                display: "block",
+                marginBottom: "0.05rem",
+              }}
+            />
+
+            <div className="auth-title">
+              {t("auth.hero.title", {
+                defaultValue: "We use A.I to reduce your factorys carbon footprint.",
+              })}
+            </div>
+
+            <div className="auth-subtitle">
+              {t("auth.hero.subtitle", {
+                defaultValue:
+                  "CEI ingests your meter and SCADA data, builds statistical baselines for each site, and turns night, weekend, and process inefficiencies into actionable alerts and reports – without installing new hardware.",
+              })}
+            </div>
           </div>
-        )}
 
-        {/* Mode toggle */}
-        <div
-          style={{
-            display: "flex",
-            marginBottom: "0.9rem",
-            borderRadius: "999px",
-            background: "rgba(15, 23, 42, 0.7)",
-            padding: "0.15rem",
-            opacity: inviteToken ? 0.9 : 1,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => toggleMode("login")}
-            className="cei-btn"
-            disabled={!!inviteToken}
-            style={{
-              flex: 1,
-              borderRadius: "999px",
-              fontSize: "0.85rem",
-              padding: "0.4rem 0.75rem",
-              border: "none",
-              background:
-                mode === "login"
-                  ? "linear-gradient(135deg, #22d3ee, #0ea5e9)"
-                  : "transparent",
-              color: mode === "login" ? "#0f172a" : "var(--cei-text-muted)",
-              fontWeight: mode === "login" ? 600 : 400,
-              cursor: inviteToken ? "not-allowed" : "pointer",
-            }}
-            title={
-              inviteToken
-                ? t("auth.invite.requiresSignup", {
-                    defaultValue: "Invite flow requires account creation.",
-                  })
-                : undefined
-            }
-          >
-            {t("auth.actions.signIn", { defaultValue: "Sign in" })}
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleMode("signup")}
-            className="cei-btn"
-            style={{
-              flex: 1,
-              borderRadius: "999px",
-              fontSize: "0.85rem",
-              padding: "0.4rem 0.75rem",
-              border: "none",
-              background:
-                mode === "signup"
-                  ? "linear-gradient(135deg, #22d3ee, #0ea5e9)"
-                  : "transparent",
-              color: mode === "signup" ? "#0f172a" : "var(--cei-text-muted)",
-              fontWeight: mode === "signup" ? 600 : 400,
-              cursor: "pointer",
-            }}
-          >
-            {t("auth.actions.createAccount", { defaultValue: "Create account" })}
-          </button>
-        </div>
-
-        {/* Session / invite notice */}
-        {notice && (
-          <div
-            style={{
-              marginBottom: "0.75rem",
-              fontSize: "0.8rem",
-              padding: "0.5rem 0.7rem",
-              borderRadius: "0.6rem",
-              border: "1px solid rgba(56, 189, 248, 0.4)",
-              background: "rgba(15, 23, 42, 0.8)",
-              color: "var(--cei-text-muted)",
-            }}
-          >
-            {notice}
-          </div>
-        )}
-
-        {/* Error banner */}
-        {error && (
-          <div style={{ marginBottom: "0.75rem" }}>
-            <ErrorBanner message={error} onClose={() => setError(null)} />
-          </div>
-        )}
-
-        {/* Auth form */}
-        <form className="auth-form" onSubmit={handleSubmit}>
-          {/* Invite onboarding: full name (optional) */}
-          {isSignup && inviteToken && (
-            <div>
-              <label htmlFor="fullName">
-                {t("auth.fields.fullName.label", {
-                  defaultValue: "Full name (optional)",
-                })}
-              </label>
-              <input
-                id="fullName"
-                type="text"
-                autoComplete="name"
-                placeholder={t("auth.fields.fullName.placeholder", {
-                  defaultValue: "e.g. Taylor Smith",
-                })}
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-              />
-              <div
-                style={{
-                  fontSize: "0.75rem",
-                  color: "var(--cei-text-muted)",
-                  marginTop: "0.25rem",
-                }}
-              >
-                {t("auth.fields.fullName.help", {
-                  defaultValue:
-                    "This is stored on your profile and used in audit logs.",
-                })}
-              </div>
+          {/* Invite badge */}
+          {inviteToken && (
+            <div
+              style={{
+                marginBottom: "0.75rem",
+                fontSize: "0.8rem",
+                padding: "0.5rem 0.7rem",
+                borderRadius: "0.6rem",
+                border: "1px solid rgba(56, 189, 248, 0.4)",
+                background: "rgba(15, 23, 42, 0.8)",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              <strong style={{ color: "var(--cei-text)" }}>
+                {t("auth.invite.badgeTitle", { defaultValue: "Invite detected." })}
+              </strong>{" "}
+              {t("auth.invite.badgeBody", {
+                defaultValue:
+                  "You’ll join an existing organization after account creation.",
+              })}
             </div>
           )}
 
-          {isSignup && !inviteToken && (
-            <div>
-              <label htmlFor="organizationName">
-                {t("auth.fields.organizationName.label", {
-                  defaultValue: "Organization name",
-                })}
-              </label>
-              <input
-                id="organizationName"
-                type="text"
-                autoComplete="organization"
-                placeholder={t("auth.fields.organizationName.placeholder", {
-                  defaultValue: "e.g. Dev Manufacturing",
-                })}
-                value={organizationName}
-                onChange={(e) => setOrganizationName(e.target.value)}
-                required
-              />
-              <div
-                style={{
-                  fontSize: "0.75rem",
-                  color: "var(--cei-text-muted)",
-                  marginTop: "0.25rem",
-                }}
-              >
-                {t("auth.fields.organizationName.help", {
-                  defaultValue:
-                    "This creates your org. Use an invite link to join an existing org.",
-                })}
-              </div>
+          {/* Mode toggle */}
+          <div
+            style={{
+              display: "flex",
+              marginBottom: "0.9rem",
+              borderRadius: "999px",
+              background: "rgba(15, 23, 42, 0.7)",
+              padding: "0.15rem",
+              opacity: inviteToken ? 0.9 : 1,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => toggleMode("login")}
+              className="cei-btn"
+              disabled={!!inviteToken}
+              style={{
+                flex: 1,
+                borderRadius: "999px",
+                fontSize: "0.85rem",
+                padding: "0.4rem 0.75rem",
+                border: "none",
+                background:
+                  mode === "login"
+                    ? "linear-gradient(135deg, #22d3ee, #0ea5e9)"
+                    : "transparent",
+                color: mode === "login" ? "#0f172a" : "var(--cei-text-muted)",
+                fontWeight: mode === "login" ? 600 : 400,
+                cursor: inviteToken ? "not-allowed" : "pointer",
+              }}
+              title={
+                inviteToken
+                  ? t("auth.invite.requiresSignup", {
+                      defaultValue: "Invite flow requires account creation.",
+                    })
+                  : undefined
+              }
+            >
+              {t("auth.actions.signIn", { defaultValue: "Sign in" })}
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleMode("signup")}
+              className="cei-btn"
+              style={{
+                flex: 1,
+                borderRadius: "999px",
+                fontSize: "0.85rem",
+                padding: "0.4rem 0.75rem",
+                border: "none",
+                background:
+                  mode === "signup"
+                    ? "linear-gradient(135deg, #22d3ee, #0ea5e9)"
+                    : "transparent",
+                color: mode === "signup" ? "#0f172a" : "var(--cei-text-muted)",
+                fontWeight: mode === "signup" ? 600 : 400,
+                cursor: "pointer",
+              }}
+            >
+              {t("auth.actions.createAccount", { defaultValue: "Create account" })}
+            </button>
+          </div>
+
+          {/* Session / invite notice */}
+          {notice && (
+            <div
+              style={{
+                marginBottom: "0.75rem",
+                fontSize: "0.8rem",
+                padding: "0.5rem 0.7rem",
+                borderRadius: "0.6rem",
+                border: "1px solid rgba(56, 189, 248, 0.4)",
+                background: "rgba(15, 23, 42, 0.8)",
+                color: "var(--cei-text-muted)",
+              }}
+            >
+              {notice}
             </div>
           )}
 
-          <div>
-            <label htmlFor="email">
-              {t("auth.fields.email.label", { defaultValue: "Work email" })}
-            </label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="username"
-              placeholder={t("auth.fields.email.placeholder", {
-                defaultValue: "you@factory.com",
-              })}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
+          {/* Error banner */}
+          {error && (
+            <div style={{ marginBottom: "0.75rem" }}>
+              <ErrorBanner message={error} onClose={() => setError(null)} />
+            </div>
+          )}
 
-          <div>
-            <label htmlFor="password">
-              {isSignup
-                ? t("auth.fields.password.createLabel", {
-                    defaultValue: "Create a password",
-                  })
-                : t("auth.fields.password.label", { defaultValue: "Password" })}
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete={isSignup ? "new-password" : "current-password"}
-              placeholder={t("auth.fields.password.placeholder", {
-                defaultValue: "••••••••",
-              })}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-            {isSignup && (
-              <div
-                style={{
-                  fontSize: "0.75rem",
-                  color: "var(--cei-text-muted)",
-                  marginTop: "0.25rem",
-                }}
-              >
-                {t("auth.fields.password.help", {
-                  defaultValue: "Minimum 8 characters. Use a strong password.",
-                })}
+          {/* Auth form */}
+          <form className="auth-form" onSubmit={handleSubmit}>
+            {/* Invite onboarding: full name (optional) */}
+            {isSignup && inviteToken && (
+              <div>
+                <label htmlFor="fullName">
+                  {t("auth.fields.fullName.label", {
+                    defaultValue: "Full name (optional)",
+                  })}
+                </label>
+                <input
+                  id="fullName"
+                  type="text"
+                  autoComplete="name"
+                  placeholder={t("auth.fields.fullName.placeholder", {
+                    defaultValue: "e.g. Taylor Smith",
+                  })}
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                />
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "var(--cei-text-muted)",
+                    marginTop: "0.25rem",
+                  }}
+                >
+                  {t("auth.fields.fullName.help", {
+                    defaultValue:
+                      "This is stored on your profile and used in audit logs.",
+                  })}
+                </div>
               </div>
             )}
-          </div>
 
-          {isSignup && (
+            {isSignup && !inviteToken && (
+              <div>
+                <label htmlFor="organizationName">
+                  {t("auth.fields.organizationName.label", {
+                    defaultValue: "Organization name",
+                  })}
+                </label>
+                <input
+                  id="organizationName"
+                  type="text"
+                  autoComplete="organization"
+                  placeholder={t("auth.fields.organizationName.placeholder", {
+                    defaultValue: "e.g. Dev Manufacturing",
+                  })}
+                  value={organizationName}
+                  onChange={(e) => setOrganizationName(e.target.value)}
+                  required
+                />
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "var(--cei-text-muted)",
+                    marginTop: "0.25rem",
+                  }}
+                >
+                  {t("auth.fields.organizationName.help", {
+                    defaultValue:
+                      "This creates your org. Use an invite link to join an existing org.",
+                  })}
+                </div>
+              </div>
+            )}
+
             <div>
-              <label htmlFor="passwordConfirm">
-                {t("auth.fields.passwordConfirm.label", {
-                  defaultValue: "Confirm password",
-                })}
+              <label htmlFor="email">
+                {t("auth.fields.email.label", { defaultValue: "Work email" })}
               </label>
               <input
-                id="passwordConfirm"
-                type="password"
-                autoComplete="new-password"
-                placeholder={t("auth.fields.passwordConfirm.placeholder", {
-                  defaultValue: "••••••••",
+                id="email"
+                type="email"
+                autoComplete="username"
+                placeholder={t("auth.fields.email.placeholder", {
+                  defaultValue: "you@factory.com",
                 })}
-                value={passwordConfirm}
-                onChange={(e) => setPasswordConfirm(e.target.value)}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 required
               />
             </div>
-          )}
 
-          <button
-            type="submit"
-            className="cei-btn cei-btn-primary"
-            disabled={submitting}
-            style={{
-              width: "100%",
-              marginTop: "0.4rem",
-              opacity: submitting ? 0.85 : 1,
-            }}
-          >
-            {submitting
-              ? isSignup
+            <div>
+              <label htmlFor="password">
+                {isSignup
+                  ? t("auth.fields.password.createLabel", {
+                      defaultValue: "Create a password",
+                    })
+                  : t("auth.fields.password.label", { defaultValue: "Password" })}
+              </label>
+              <input
+                id="password"
+                type="password"
+                autoComplete={isSignup ? "new-password" : "current-password"}
+                placeholder={t("auth.fields.password.placeholder", {
+                  defaultValue: "••••••••",
+                })}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              {isSignup && (
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "var(--cei-text-muted)",
+                    marginTop: "0.25rem",
+                  }}
+                >
+                  {t("auth.fields.password.help", {
+                    defaultValue: "Minimum 8 characters. Use a strong password.",
+                  })}
+                </div>
+              )}
+            </div>
+
+            {isSignup && (
+              <div>
+                <label htmlFor="passwordConfirm">
+                  {t("auth.fields.passwordConfirm.label", {
+                    defaultValue: "Confirm password",
+                  })}
+                </label>
+                <input
+                  id="passwordConfirm"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={t("auth.fields.passwordConfirm.placeholder", {
+                    defaultValue: "••••••••",
+                  })}
+                  value={passwordConfirm}
+                  onChange={(e) => setPasswordConfirm(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="cei-btn cei-btn-primary"
+              disabled={submitting}
+              style={{
+                width: "100%",
+                marginTop: "0.4rem",
+                opacity: submitting ? 0.85 : 1,
+              }}
+            >
+              {submitting
+                ? isSignup
+                  ? inviteToken
+                    ? t("auth.actions.joiningViaInvite", {
+                        defaultValue: "Joining via invite…",
+                      })
+                    : t("auth.actions.creatingAccountProgress", {
+                        defaultValue: "Creating your account…",
+                      })
+                  : t("auth.actions.signingInProgress", {
+                      defaultValue: "Signing you in…",
+                    })
+                : isSignup
                 ? inviteToken
-                  ? t("auth.actions.joiningViaInvite", {
-                      defaultValue: "Joining via invite…",
+                  ? t("auth.actions.joinOrganization", {
+                      defaultValue: "Join organization",
                     })
-                  : t("auth.actions.creatingAccountProgress", {
-                      defaultValue: "Creating your account…",
+                  : t("auth.actions.createAccount", {
+                      defaultValue: "Create account",
                     })
-                : t("auth.actions.signingInProgress", {
-                    defaultValue: "Signing you in…",
-                  })
-              : isSignup
-              ? inviteToken
-                ? t("auth.actions.joinOrganization", {
-                    defaultValue: "Join organization",
-                  })
-                : t("auth.actions.createAccount", {
-                    defaultValue: "Create account",
-                  })
-              : t("auth.actions.signIn", { defaultValue: "Sign in" })}
-          </button>
-        </form>
+                : t("auth.actions.signIn", { defaultValue: "Sign in" })}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );
