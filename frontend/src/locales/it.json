@@ -2,14 +2,15 @@
   "brand": {
     "full": "CEI – Carbon Efficiency Intelligence"
   },
-
   "i18n": {
     "language": "Lingua"
   },
-
   "common": {
     "loading": "Caricamento…",
+    "loadingEllipsis": "Caricamento…",
+    "updatingEllipsis": "Aggiornamento…",
     "saving": "Salvataggio…",
+    "savingEllipsis": "Salvataggio…",
     "save": "Salva",
     "cancel": "Annulla",
     "copy": "Copia",
@@ -20,13 +21,11 @@
     "no": "No",
     "vs": "vs"
   },
-
   "errors": {
     "generic": "Qualcosa è andato storto. Riprova.",
     "forbiddenOwnerOnly": "Solo owner. Chiedi al proprietario dell’organizzazione.",
     "sessionExpired": "La sessione è scaduta. Accedi di nuovo."
   },
-
   "nav": {
     "navigation": "Navigazione",
     "dashboard": "Dashboard",
@@ -37,7 +36,6 @@
     "settings": "Impostazioni",
     "account": "Account"
   },
-
   "topnav": {
     "goToDashboard": "Vai alla dashboard",
     "logoAlt": "Logo CEI",
@@ -45,22 +43,18 @@
     "openMenu": "Apri menu",
     "closeMenu": "Chiudi menu"
   },
-
   "env": {
     "prod": "Ambiente di produzione. Dati reali dei tenant – attenzione alle modifiche.",
     "pilot": "Ambiente pilot / staging. Usato per test cliente prima del rilascio completo.",
     "dev": "Ambiente di sviluppo locale. Sicuro per esperimenti e dati di test."
   },
-
   "auth": {
     "logout": "Esci",
     "signedIn": "Accesso effettuato",
-
     "hero": {
       "title": "Usiamo l’A.I. per ridurre l’impronta di carbonio della tua fabbrica.",
       "subtitle": "CEI acquisisce i dati dei contatori e SCADA, costruisce baseline statistiche per ogni sito e trasforma inefficienze notturne, del weekend e di processo in avvisi e report azionabili – senza installare nuovo hardware."
     },
-
     "actions": {
       "signIn": "Accedi",
       "createAccount": "Crea account",
@@ -69,17 +63,14 @@
       "joiningViaInvite": "Accesso tramite invito…",
       "joinOrganization": "Unisciti all’organizzazione"
     },
-
     "invite": {
       "notice": "Stai entrando in un’organizzazione tramite invito. Crea il tuo account per continuare.",
       "badgeTitle": "Invito rilevato.",
       "badgeBody": "Dopo la creazione dell’account, entrerai in un’organizzazione esistente.",
       "requiresSignup": "Il flusso invito richiede la creazione dell’account."
     },
-
     "sessionExpired": "La sessione è scaduta. Accedi di nuovo.",
     "authRequired": "Effettua l’accesso per continuare.",
-
     "fields": {
       "fullName": {
         "label": "Nome completo (facoltativo)",
@@ -106,7 +97,6 @@
         "placeholder": "••••••••"
       }
     },
-
     "errors": {
       "generic": "Autenticazione fallita. Riprova.",
       "emailPasswordRequired": "Email e password sono obbligatorie.",
@@ -116,7 +106,6 @@
       "inviteMissingAccessToken": "Registrazione tramite invito riuscita ma manca access_token nella risposta."
     }
   },
-
   "dashboard": {
     "errors": {
       "summary": "Impossibile caricare il riepilogo energia.",
@@ -124,7 +113,6 @@
       "sites": "Impossibile caricare i siti.",
       "ingestHealth": "Impossibile caricare lo stato di ingestione."
     },
-
     "header": {
       "title": "Panoramica portfolio",
       "subtitle": "Vista energia di alto livello su tutti i siti nelle ultime 24 ore. Usalo come cockpit giornaliero: la flotta si comporta come previsto?",
@@ -135,7 +123,6 @@
       "lastUpdated": "Ultimo aggiornamento",
       "dataWindow": "Intervallo dati"
     },
-
     "kpis": {
       "energy": {
         "title": "Energia – ultime 24 ore (tutti i siti)",
@@ -157,7 +144,6 @@
         "body": "Euristica semplice basata solo sulla presenza di letture nelle ultime 24 ore."
       }
     },
-
     "ingest": {
       "title": "Stato ingestione (ultime 24h)",
       "loading": "Verifica completezza contatori…",
@@ -166,7 +152,6 @@
       "metersUnder90": "Contatori sotto 90%",
       "meters": "Contatori",
       "oldestLastSeen": "Ultimo visto più vecchio",
-
       "status": {
         "na": "—",
         "checking": "Controllo…",
@@ -176,7 +161,6 @@
         "red": "Rosso"
       }
     },
-
     "trend": {
       "title": "Andamento energia portfolio – ultime 24 ore",
       "subtitle": "Profilo orario dell’energia su tutti i siti combinati. Usalo per individuare picchi, minimi e baseline sospettosamente piatte.",
@@ -184,7 +168,6 @@
       "noData": "Nessun dato di serie recente. Dopo l’ingestione CSV o un feed live, CEI mostrerà qui le ultime 24 ore.",
       "summary": "Ora di picco: {{peakLabel}} a {{maxVal}} kWh · Media: {{avgVal}} kWh/h su {{windowHours}} ore · Minimo orario: {{minVal}} kWh/h."
     },
-
     "focus": {
       "title": "Cosa controllare oggi",
       "subtitle": "Uno strato qualitativo leggero sopra i grafici grezzi. Qui trasformi i grafici in una lista di azioni operative.",
@@ -196,7 +179,6 @@
       }
     }
   },
-
   "sitesList": {
     "errors": {
       "load": "Impossibile caricare i siti.",
@@ -204,16 +186,13 @@
       "delete": "Impossibile eliminare il sito. Riprova o controlla i log.",
       "nameRequired": "Il nome del sito è obbligatorio."
     },
-
     "header": {
       "title": "Siti",
       "subtitle": "Gestisci stabilimenti, impianti e linee che stai monitorando. I siti sono l’ancora per dashboard, avvisi e report."
     },
-
     "actions": {
       "goToUpload": "Vai al caricamento CSV"
     },
-
     "addCard": {
       "title": "Aggiungi un sito",
       "body": "Crea siti per la tua organizzazione così che contatori caricati e avvisi siano ancorati a strutture reali.",
@@ -224,7 +203,6 @@
       "creating": "Creazione…",
       "add": "Aggiungi sito"
     },
-
     "table": {
       "title": "Siti nella tua organizzazione",
       "subtitlePrefix": "Clicca sull’ID o sul nome del sito per aprire la sua dashboard. Carica CSV con chiave",
@@ -237,7 +215,6 @@
         "trend24h": "Trend ultime 24h"
       }
     },
-
     "trend": {
       "no24hDataYet": "Nessun dato 24h ancora",
       "nearBaseline24h": "● Vicino alla baseline (24h)",
@@ -247,54 +224,303 @@
       "aboveBaseline24h": "▲ {{pct}} sopra baseline (24h)",
       "belowBaseline24h": "▼ {{pct}} sotto baseline (24h)"
     },
-
     "row": {
       "unknownLocation": "—",
       "defaultSiteName": "Sito {{id}}"
     },
-
     "buttons": {
       "view": "Apri",
       "delete": "Elimina"
     },
-
     "confirmDelete": {
       "title": "Eliminare {{label}}?",
       "body": "Questo rimuoverà definitivamente questo sito e i dati associati in CEI.",
       "full": "Eliminare {{label}}?\n\nQuesto rimuoverà definitivamente questo sito e i dati associati in CEI."
     }
   },
-
+  "siteView": {
+    "errors": {
+      "site": "Impossibile caricare il sito.",
+      "summary": "Impossibile caricare il riepilogo energia.",
+      "series": "Impossibile caricare la serie energia.",
+      "insights": "Impossibile caricare gli insight.",
+      "kpi": "Impossibile caricare il riepilogo KPI.",
+      "forecast": "Impossibile caricare il forecast.",
+      "loadSite": "Impossibile caricare il sito.",
+      "loadSummary": "Impossibile caricare il riepilogo energia.",
+      "loadTrend": "Impossibile caricare l’andamento energia.",
+      "loadInsights": "Impossibile caricare gli insight analytics.",
+      "loadForecast": "Impossibile caricare il forecast in questo momento.",
+      "loadKpi": "Impossibile caricare il confronto KPI.",
+      "loadOpportunities": "Impossibile caricare i suggerimenti opportunità.",
+      "deleteSite": "Impossibile eliminare il sito. Riprova o controlla i log."
+    },
+    "nav": {
+      "backToSites": "← Torna ai siti"
+    },
+    "title": {
+      "fallback": "Sito"
+    },
+    "header": {
+      "backToSites": "Torna ai siti",
+      "title": "Dashboard sito",
+      "siteLabel": "Sito:",
+      "locationLabel": "Località:",
+      "siteIdLabel": "Site ID:",
+      "subtitle": "Vista performance per sito. Le metriche energia sono filtrate da",
+      "subtitleTail": "nella tabella timeseries."
+    },
+    "meta": {
+      "locationLabel": "Località:",
+      "siteIdLabel": "Site ID:",
+      "lastUpdated": "Ultimo aggiornamento:",
+      "dataWindow": "Intervallo dati:"
+    },
+    "actions": {
+      "uploadCsvForSite": "Carica CSV per questo sito",
+      "viewAlerts": "Vedi avvisi",
+      "export24hTrendCsv": "Esporta trend 24h (CSV)",
+      "exportForecastCsv": "Esporta forecast (CSV)",
+      "deleteSite": "Elimina sito",
+      "deleteConfirm": "Questo eliminerà definitivamente questo sito e i dati associati in CEI. Sei sicuro?",
+      "deleteSuccess": "Sito eliminato."
+    },
+    "export": {
+      "preparing": "Preparazione…",
+      "downloadCsv": "Scarica CSV",
+      "downloadKpiCsv": "Scarica CSV KPI",
+      "missingSiteId": "Identificatore sito mancante; impossibile esportare il CSV KPI.",
+      "noKpi": "Nessun dato KPI disponibile da esportare.",
+      "noTimeseries": "Nessun dato timeseries disponibile da esportare."
+    },
+    "status": {
+      "na": "—",
+      "loading": "Caricamento…",
+      "noData": "Nessun dato timeseries recente."
+    },
+    "window": {
+      "label": "Finestra:",
+      "24h": "24h",
+      "7d": "7g",
+      "30d": "30g",
+      "last24h": "ultime 24 ore",
+      "last7d": "ultimi 7 giorni",
+      "last30d": "ultimi 30 giorni"
+    },
+    "kpis": {
+      "title": "Snapshot performance",
+      "subtitle": "Metriche di alto livello per questo sito. Il confronto baseline usa il profilo baseline corrente.",
+      "last24h": "Ultime 24h",
+      "baseline24h": "Baseline 24h",
+      "deviation24h": "Deviazione (24h)",
+      "last7d": "Ultimi 7g",
+      "noTariffs": "Nessuna tariffa configurata – mostro solo kWh",
+      "costActual": "Costo reale",
+      "costExpected": "Costo atteso",
+      "costDelta": "Δ costo vs baseline",
+      "energy24h": {
+        "title": "Energia – ultime 24 ore",
+        "bodyA": "Aggregato da",
+        "readings": "letture",
+        "bodyB": "nelle ultime",
+        "hours": "ore",
+        "bodyC": "per questo sito.",
+        "loading": "Caricamento dati energia per sito…",
+        "noDataA": "Nessun dato recente per questo sito. Assicurati che l’upload timeseries includa",
+        "noDataB": ", oppure usa il pulsante “Carica CSV per questo sito” così CEI instrada automaticamente le righe qui quando il CSV non ha la colonna site_id."
+      },
+      "coverage": {
+        "title": "Copertura dati",
+        "subtitle": "Numero di record per questo sito nella finestra selezionata."
+      },
+      "status": {
+        "title": "Stato",
+        "active": "Attivo",
+        "noRecentData": "Nessun dato recente",
+        "subtitle": "Euristica semplice basata sulla presenza di timeseries recenti per questo sito."
+      }
+    },
+    "snapshot": {
+      "title": "Snapshot performance",
+      "subtitle": "Ultime 24h vs baseline, e ultimi 7 giorni vs i 7 precedenti per questo sito. Le metriche costo usano le tariffe configurate della tua org.",
+      "noTariffsTooltip": "Configura le tariffe in Impostazioni per abilitare KPI in €.",
+      "noTariffs": "Nessuna tariffa configurata – mostro solo kWh",
+      "last24hVsBaseline": "Ultime 24h vs baseline",
+      "baselinePrefix": "/ baseline",
+      "vsBaseline": "vs baseline",
+      "last7dVsPrev7d": "Ultimi 7 giorni vs 7 precedenti",
+      "prevPrefix": "/ prec",
+      "vsPrev7d": "vs 7g precedenti",
+      "headlineTitle": "Headline",
+      "headline": {
+        "above": "Il consumo energia sta andando sopra la settimana precedente. Vale la pena approfondire questo sito.",
+        "below": "Il consumo energia sta andando sotto la settimana precedente. Cattura cosa funziona e standardizzalo.",
+        "flat": "Il consumo energia è grosso modo in linea con la settimana scorsa. Concentrati su avvisi spike e finestre anomale."
+      }
+    },
+    "cost": {
+      "snapshotTitle": "Snapshot costi (ultime 24h)",
+      "howCalculated": "Come vengono calcolati i risparmi 24h?",
+      "tooltip": "Risparmio/sovracosto 24h = (kWh reali 24h − kWh baseline 24h) × tariffa elettricità della tua org. Valore negativo = risparmio; positivo = sovracosto.",
+      "actual24h": "Costo 24h (reale)",
+      "expected24h": "Costo 24h (atteso)",
+      "expectedHelp": "Basato sui kWh baseline per questo sito.",
+      "delta24h": "Risparmio / sovracosto 24h",
+      "energyBasis": "{{pct}} vs baseline su base energia.",
+      "disabled": "Le analisi costi per questo sito si attiveranno quando saranno configurate le tariffe per la tua organizzazione. Puoi rivederle in Account e Impostazioni.",
+      "directionUnknown": "Risparmio / sovracosto vs baseline",
+      "savingsVsBaseline": "Risparmio vs baseline",
+      "overspendVsBaseline": "Sovracosto vs baseline",
+      "onBaseline": "In linea con baseline"
+    },
+    "trend": {
+      "title": "Trend energia sito – ultime 24 ore",
+      "subtitle": "Serie per sito aggregata per ora. Usa",
+      "subtitleTail": "dalla tabella timeseries.",
+      "units": "kWh · orario",
+      "summary": "Ora di picco per questo sito: {{peakLabel}} con {{maxKwh}} kWh · Media: {{avgKwh}} kWh/h su {{windowHours}} ore · Minimo orario: {{minKwh}} kWh/h.",
+      "unit": "kWh · orario",
+      "noData": "Nessun dato di serie recente per questo sito. Quando la timeseries ha site_id coerente, oppure fai upload via “Carica CSV per questo sito” senza colonna site_id, questo grafico si attiverà."
+    },
+    "metaCard": {
+      "title": "Metadati sito",
+      "subtitle": "Informazioni descrittive di base per questo sito. Lo estenderemo con tag, baseline e altri campi più avanti.",
+      "name": "Nome:",
+      "location": "Località:",
+      "internalId": "ID interno:",
+      "notFound": "Sito non trovato."
+    },
+    "notes": {
+      "title": "Aggiungi nota sito",
+      "subtitle": "Registra cambi operativi, decisioni o osservazioni. Questi eventi popolano la timeline attività per questo sito.",
+      "titlePlaceholder": "Titolo breve (facoltativo)",
+      "bodyPlaceholder": "Cosa è cambiato in questo sito? Es. 'Orari HVAC aggiornati', 'Linea 2 su turno ridotto', 'Audit notturno eseguito'.",
+      "save": "Salva nota",
+      "errors": {
+        "empty": "Aggiungi un titolo o del testo prima di salvare.",
+        "saveFailed": "Impossibile salvare la nota. Riprova."
+      }
+    },
+    "forecast": {
+      "title": "Forecast prossime 24h",
+      "subtitle": "Energia oraria attesa per le prossime 24 ore basata sul modello baseline corrente. Interpretalo come indicativo finché non arriva il forecasting ML.",
+      "unit": "kWh · orario",
+      "noData": "Nessun forecast disponibile.",
+      "kpiChips": {
+        "expected24h": "Atteso 24h",
+        "peakHour": "Ora di picco",
+        "avgPerHour": "Media / ora"
+      },
+      "building": "Costruzione forecast basato su baseline per questo sito…",
+      "stub": "Stub: {{method}}",
+      "expected24h": "Atteso prossime 24h",
+      "peakHour": "Ora di picco (forecast)",
+      "footer": "Basato su una baseline di {{lookback}} giorni e una finestra performance recente di {{history}} ore. Usa questa striscia come specchio forward-looking del grafico trend ultime 24h sopra."
+    },
+    "hybrid": {
+      "title": "Vista ibrida CEI"
+    },
+    "narrative": {
+      "title": "Narrativa ibrida CEI",
+      "subtitle": "Sintesi operativa compatta che combina deviazione baseline + pattern recenti + outlook 24h."
+    },
+    "opps": {
+      "title": "Opportunità di efficienza e insight baseline",
+      "subtitle": "Idee mirate basate sulle ultime 24 ore di energia in questo sito. Usalo per allineare le operations locali su dove focalizzarsi.",
+      "loadingBaseline": "Caricamento profilo baseline per questo sito…",
+      "baselineSummary": "Baseline (ultimi {{days}} giorni): media globale circa {{mean}} kWh/ora, mediana oraria circa {{p50}} kWh e p90 ad alto carico vicino a {{p90}} kWh. Le ultime {{window}} ore sono state {{deviation}} vs questa baseline appresa.",
+      "underTheHood": "Sotto il cofano, CEI confronta baseline notte vs giorno, weekend vs giorni feriali e picchi brevi vs carico orario tipico — la stessa logica che alimenta la pagina Avvisi. Usa entrambe le viste per separare rumore quotidiano da sprechi strutturali.",
+      "scanning": "Analisi KPI del sito per misure opportunità concrete…",
+      "fallback": "Ripiego su linee guida generiche sotto.",
+      "modelledMeasures": "Misure modellate per questo sito",
+      "manualTag": "[Manuale] ",
+      "saved": "risparmiato",
+      "roi": "ROI semplice",
+      "co2Cut": "Riduzione CO₂"
+    },
+    "manualOpp": {
+      "title": "Aggiungi opportunità manuale",
+      "add": "Aggiungi opportunità",
+      "defaultName": "Opportunità",
+      "namePlaceholder": "Nome breve opportunità (es. 'Retrofit LED in magazzino')",
+      "descPlaceholder": "Dettagli opzionali (es. capex, risparmio atteso, owner, data target)…",
+      "errors": {
+        "empty": "Inserisci un nome o una descrizione.",
+        "missingSiteId": "ID numerico sito mancante.",
+        "createFailed": "Impossibile creare l’opportunità."
+      }
+    },
+    "suggestions": {
+      "thisSite": "questo sito",
+      "none": "Nessuna opportunità specifica rilevata ancora. Quando questo sito avrà un profilo dati più stabile, CEI mostrerà pattern su cui intervenire qui.",
+      "noData": {
+        "1": "Verifica che gli upload per {{name}} includano (a) una colonna site_id coerente, oppure (b) siano inviati tramite il pulsante “Carica CSV per questo sito” così CEI instrada automaticamente le righe.",
+        "2": "Controlla che i timestamp per questo sito ricadano davvero nelle ultime 24 ore – i backfill più vecchi non alimentano questa vista.",
+        "3": "Inizia con uno o due contatori chiave per questo sito (es. incomer principale, compressori) e valida che i profili siano realistici."
+      },
+      "high": {
+        "1": "Identifica quali ore in {{name}} mostrano i kWh più alti e coordina con la produzione per spostare carichi non critici lontano da quei picchi.",
+        "2": "Rivedi consumi notturni e del weekend in {{name}} – cerca linee, compressori o HVAC che restano energizzati senza produzione.",
+        "3": "Confronta il profilo kWh di oggi per {{name}} con una giornata “buona” di riferimento per individuare picchi anomali o periodi prolungati ad alto carico."
+      },
+      "medium": {
+        "1": "Controlla se i processi batch in {{name}} si sovrappongono più del necessario e valuta se gli avvii possono essere scaglionati.",
+        "2": "Cerca una baseline notturna piatta ed elevata in {{name}}; spesso nasconde perdite a impianti ausiliari e utility.",
+        "3": "Usa CEI per annotare cambi operativi in {{name}} (setpoint, manutenzione) e confrontare prima/dopo sui kWh giornalieri."
+      },
+      "low": {
+        "1": "{{name}} sta girando con consumi giornalieri relativamente modesti. Focalizzati sul prevenire l’aumento graduale delle perdite in standby nelle prossime settimane.",
+        "2": "Usa questo sito come sandbox a basso rischio: testa piccoli cambi (illuminazione, modalità idle, scheduling) e cattura l’impatto prima/dopo."
+      },
+      "common": {
+        "1": "Lavora con il team locale in {{name}} per taggare i contatori per processo (es. \"compressori\", \"HVAC\", \"forni\") così le analytics future possono evidenziare sprechi per processo.",
+        "2": "Aggiungi un breve stand-up settimanale per {{name}} in cui rivedi questa pagina con operations e concordi un’azione concreta.",
+        "3": "Documenta con foto o note qualsiasi modifica fisica (isolamento, setpoint, procedure di spegnimento) così i risparmi sono auditabili, non solo aneddotici."
+      }
+    },
+    "insights": {
+      "title": "Insight (baseline vs reale)",
+      "subtitle": "Insight guidati dalla baseline per questo sito nella finestra selezionata.",
+      "headline": "Headline",
+      "bullets": "Punti chiave",
+      "baselineProfile": "Profilo baseline",
+      "stats": {
+        "deltaVsBaseline": "Δ vs baseline:",
+        "actualVsExpected": "Reale vs atteso:",
+        "baselineWindow": "Storico baseline: {{days}} giorni",
+        "hoursPrefix": "Ore –",
+        "hoursCritical": "critiche:",
+        "hoursElevated": "elevate:",
+        "hoursBelowBaseline": "sotto baseline:"
+      },
+      "empty": "Nessun insight ancora. Quando esiste abbastanza storico, CEI calcolerà deviazioni dalla baseline e spiegherà cosa le guida."
+    }
+  },
   "settings": {
     "header": {
       "title": "Impostazioni",
       "subtitle": "Preferenze locali per la tua esperienza CEI, più impostazioni tecniche per l’ingestione dati."
     },
-
     "notifications": {
       "title": "Notifiche",
       "emailAlertsLabel": "Inviami un’email quando vengono rilevate nuove opportunità ad alto impatto."
     },
-
     "units": {
       "title": "Unità",
       "subtitle": "Scegli come vengono visualizzate le metriche di energia ed emissioni.",
       "metric": "Metriche (kWh, tCO₂e)",
       "imperial": "Imperiali (kBtu, lb CO₂)"
     },
-
     "energyTariffs": {
       "title": "Energia e tariffe",
       "ownerOnly": "Solo owner",
       "noTariffsConfigured": "Nessuna tariffa configurata – mostro solo kWh",
       "help": "Impostazioni a livello organizzazione usate dal motore costi in KPI, avvisi e report.",
       "readOnlyNotice": "Solo owner. Puoi visualizzare le impostazioni, ma la modifica è disabilitata.",
-
       "loading": "Caricamento impostazioni organizzazione…",
       "accountErrorFallback": "Impossibile caricare i dettagli account.",
       "accountNotReady": "I dettagli account non sono ancora disponibili. Quando l’organizzazione è pronta, puoi configurare i costi energia qui.",
       "noOrg": "Nessuna organizzazione associata a questo account. L’analisi dei costi resterà disabilitata finché non viene creata un’org.",
-
       "fields": {
         "primaryEnergySources": {
           "label": "Fonti energetiche primarie",
@@ -314,7 +540,6 @@
           "placeholder": "es. EUR"
         }
       },
-
       "validation": {
         "accountNotLoaded": "I dettagli account non sono ancora caricati.",
         "ownerOnlyEdit": "Solo owner. Chiedi al proprietario dell’organizzazione di aggiornare le tariffe.",
@@ -323,53 +548,42 @@
         "electricityNonNegative": "Il prezzo elettricità deve essere un numero non negativo.",
         "gasNonNegative": "Il prezzo gas deve essere un numero non negativo."
       },
-
       "messages": {
         "saved": "Impostazioni salvate. L’analisi dei costi userà ora questi valori.",
         "fallbackKwhOnly": "Finché le tariffe non sono configurate, CEI userà analisi solo in kWh."
       },
-
       "actions": {
         "saveEnergySettings": "Salva impostazioni energia",
         "saving": "Salvataggio..."
       }
     },
-
     "integrationTokens": {
       "title": "Token di integrazione",
       "ownerOnly": "Solo owner",
       "description": "Token API di lunga durata per sistemi SCADA/BMS/historian per inviare dati timeseries direttamente in CEI tramite",
       "endpoint": "POST /api/v1/timeseries/batch",
-
       "noPermission": "Non hai permessi per visualizzare o gestire i token di integrazione. Chiedi al proprietario dell’organizzazione.",
-
       "createPlaceholder": "es. SCADA Stabilimento 4",
       "createButton": "Crea token",
       "creatingButton": "Creazione...",
-
       "newTokenTitle": "Nuovo token di integrazione (mostrato una sola volta)",
       "newTokenHelp": "Conserva questo token in modo sicuro (vault, password manager). Non potrai vederlo di nuovo.",
-
       "loading": "Caricamento token di integrazione...",
       "empty": "Nessun token di integrazione ancora. Creane uno sopra per permettere ai sistemi esterni di inviare dati in CEI.",
-
       "labels": {
         "created": "Creato",
         "lastUsed": "Ultimo utilizzo"
       },
-
       "status": {
         "active": "Attivo",
         "revoked": "Revocato"
       },
-
       "actions": {
         "copy": "Copia",
         "copied": "Copiato",
         "revoke": "Revoca",
         "revoking": "Revoca..."
       },
-
       "errors": {
         "load": "Impossibile caricare i token di integrazione.",
         "create": "Impossibile creare il token di integrazione.",
@@ -379,7 +593,6 @@
       }
     }
   },
-
   "account": {
     "header": {
       "title": "Account e fatturazione",
@@ -388,22 +601,18 @@
       "roleLabel": "Ruolo:",
       "planLabel": "Piano:"
     },
-
     "roles": {
       "owner": "Owner",
       "member": "Membro"
     },
-
     "labels": {
       "ownerOnly": "Solo owner",
       "enabled": "Attivo",
       "disabled": "Disattivo"
     },
-
     "warnings": {
       "accountUnavailable": "Dettagli di piano e prezzi non disponibili al momento. Le analisi core in kWh continueranno a funzionare."
     },
-
     "errors": {
       "ownerOnlyBilling": "Solo owner. Solo il proprietario dell’organizzazione può gestire gli abbonamenti.",
       "ownerOnlyDelete": "Solo owner. Solo il proprietario dell’organizzazione può eliminare l’account in questo deployment.",
@@ -413,7 +622,6 @@
       "softOffboardFailed": "Offboard soft non riuscito.",
       "nukeFailed": "Nuke non riuscito."
     },
-
     "confirm": {
       "deleteAccount": "Vuoi davvero eliminare il tuo account? Questa azione non può essere annullata.",
       "leaveOrg": "Lasciare questa organizzazione?\n\nQuesto scollega SOLO il tuo utente dall’org.\nSe sei l’ultimo owner, il server bloccherà l’operazione.",
@@ -421,7 +629,6 @@
       "nukePrompt": "MODALITÀ NUKE.\n\nQuesto elimina definitivamente l’org e i dati associati.\n\nDigita ESATTAMENTE il nome dell’org per confermare:\n{{orgName}}",
       "revokeInvite": "Revocare questo invito?\n\nQuesto farà:\n- Disabilita il link di invito\n- Impedisce all’utente invitato di accedere di nuovo (se già accettato)"
     },
-
     "plan": {
       "labels": {
         "starter": "CEI Starter",
@@ -429,7 +636,6 @@
         "custom": "Custom / Non specificato"
       }
     },
-
     "profile": {
       "title": "Profilo",
       "emailLabel": "Email:",
@@ -439,7 +645,6 @@
       "deleting": "Eliminazione…",
       "deletedMessage": "Il tuo account è stato eliminato in questo ambiente. Potrebbe essere necessario uscire manualmente o cancellare il token dal local storage."
     },
-
     "subscription": {
       "title": "Abbonamento",
       "currentPlan": "Piano attuale:",
@@ -459,14 +664,12 @@
         "growth": "Growth (più avanti) aggiunge più org, storico più lungo e supporto con SLA."
       }
     },
-
     "billing": {
       "notConfiguredCheckout": "La fatturazione non è completamente configurata in questo ambiente. Nessuna pagina checkout live disponibile.",
       "checkoutFailed": "Impossibile avviare il checkout. Riprova o contatta l’amministratore CEI.",
       "portalNotAvailable": "Il portale di fatturazione non è disponibile in questo ambiente. Stripe non è completamente configurato.",
       "portalFailed": "Impossibile aprire il portale di fatturazione. Riprova o contatta l’amministratore CEI."
     },
-
     "org": {
       "noOrgAttached": "Non sei collegato a nessuna organizzazione.",
       "leftOrg": "Organizzazione lasciata. Il tuo account è ora scollegato.",
@@ -475,7 +678,6 @@
       "nukeCancelled": "Nuke annullato (il nome org inserito non corrisponde).",
       "nukeComplete": "Nuke completato. Organizzazione eliminata."
     },
-
     "orgControls": {
       "title": "Controlli organizzazione",
       "subtitle": "Lascia l’org o fai offboard di un cliente.",
@@ -491,12 +693,10 @@
       "permanentDeleteTitle": "Pericolo: eliminazione definitiva",
       "footer": "Offboard organizzazione scollega gli utenti e revoca inviti/token, ma mantiene la riga org. Elimina definitivamente cancella org e dati associati. Lascia organizzazione scollega solo te (bloccato se sei l’ultimo owner)."
     },
-
     "invites": {
       "title": "Inviti organizzazione",
       "subtitle": "Solo owner. Genera link di accesso per questa org.",
       "notOwnerBlurb": "Non sei owner dell’organizzazione. La generazione inviti è limitata.",
-
       "form": {
         "emailLabel": "Email invito",
         "emailPlaceholder": "utente@azienda.com",
@@ -506,19 +706,16 @@
         "creating": "Creazione…",
         "emailBoundNote": "Gli inviti sono legati all’email. Il destinatario deve registrarsi usando questa stessa email."
       },
-
       "created": {
         "linkLabel": "Link invito:",
         "copy": "Copia"
       },
-
       "list": {
         "helper": "I link attivi dovrebbero durare poco. Revoca dopo che l’onboarding è completato.",
         "refresh": "Aggiorna",
         "refreshing": "Aggiornamento…",
         "empty": "Nessun invito ancora."
       },
-
       "table": {
         "id": "ID",
         "email": "Email",
@@ -529,12 +726,10 @@
         "accepted": "Accettato",
         "actions": "Azioni"
       },
-
       "status": {
         "active": "Attivo",
         "revoked": "Revocato"
       },
-
       "actions": {
         "revoke": "Revoca",
         "revokeTitle": "Revoca l’invito e blocca gli accessi dell’utente invitato",
@@ -542,7 +737,6 @@
         "extendTitle": "Estendi/riattiva questo invito e riabilita l’accesso utente",
         "extending": "Estensione…"
       },
-
       "errors": {
         "ownerOnly": "Solo owner. Solo il proprietario dell’organizzazione può generare link invito.",
         "invalidEmail": "L’email invito è obbligatoria e deve essere valida.",
@@ -551,7 +745,6 @@
         "revokeFailed": "Impossibile revocare l’invito.",
         "extendFailed": "Impossibile estendere l’invito."
       },
-
       "notes": {
         "linkGenerated": "Link invito generato. Copialo e invialo all’utente.",
         "createdNoToken": "Invito creato, ma il backend non ha restituito un token. (Atteso: token restituito UNA SOLA VOLTA quando l’invito è utilizzabile.)",
@@ -561,7 +754,6 @@
         "copyFailed": "Copia non riuscita in questo browser. Seleziona il link e copialo manualmente."
       }
     },
-
     "tariffs": {
       "title": "Tariffe e mix energetico",
       "subtitle": "Sola lettura. Usato per analisi costi e stime risparmio.",
@@ -575,7 +767,6 @@
       "notConfigured": "Non configurato",
       "notConfiguredNote": "Tariffe e mix energetico non sono ancora configurati. CEI userà analisi solo in kWh finché questi valori non vengono impostati."
     },
-
     "environment": {
       "title": "Ambiente e sicurezza",
       "labels": {
@@ -603,7 +794,6 @@
         }
       }
     },
-
     "planControls": {
       "title": "Cosa controlla il tuo piano",
       "core": {
@@ -620,11 +810,9 @@
       }
     }
   },
-
   "alerts": {
     "title": "Avvisi",
     "subtitle": "Eccezioni basate su regole generate dai tuoi dati timeseries. Gli avvisi <strong>Critici</strong> indicano sprechi ad alta confidenza o baseline anomale, mentre gli <strong>Avvisi</strong> segnalano pattern che meritano un controllo.",
-
     "window": {
       "label": "Finestra:",
       "24h": "24h",
@@ -632,101 +820,87 @@
       "last24h": "ultime 24 ore",
       "last7d": "ultimi 7 giorni"
     },
-
     "severity": {
       "critical": "Critico",
       "warning": "Avviso",
       "info": "Info"
     },
-
     "status": {
       "open": "Aperto",
-      "ack": "Preso in carico",
+      "ack": "Riconosciuto",
       "resolved": "Risolto",
-      "muted": "Silenzioso"
+      "muted": "Silenziato"
     },
-
     "errors": {
       "loadAlertsFailed": "Impossibile caricare gli avvisi.",
       "loadHistoryFailed": "Impossibile caricare la cronologia avvisi.",
       "updateAlertFailed": "Impossibile aggiornare l’avviso."
     },
-
     "gating": {
       "title": "Aggiorna per sbloccare gli avvisi",
-      "body": "Il tuo piano attuale (<code>{{planKey}}</code>) non include avvisi basati su regole. Aggiorna a CEI Starter o superiore per vedere deviazioni dalla baseline, sprechi nel weekend e dominanza del portfolio direttamente in questa pagina.",
+      "body": "Il tuo piano attuale (<code>{{planKey}}</code>) non include il sistema di avvisi basato su regole. Passa a CEI Starter o superiore per vedere deviazioni baseline, sprechi nel weekend e pattern di dominanza del portfolio direttamente su questa pagina.",
       "cta": "Vedi piani e fatturazione",
-      "footer": "Gli avvisi si attiveranno automaticamente non appena l’abbonamento è attivo."
+      "footer": "Gli avvisi si attiveranno automaticamente non appena l’abbonamento sarà attivo."
     },
-
     "summary": {
       "totalTitle": "Totale avvisi – {{windowLabel}}",
-      "totalHelp": "Conteggio di avvisi critici, avvisi e info generati nella finestra selezionata.",
+      "totalHelp": "Conteggio di tutti gli avvisi critici, warning e info nella finestra selezionata.",
       "severityMixTitle": "Mix severità",
-      "severityMixHelp": "Usalo per capire se il portfolio è soprattutto “rumore” o se stanno emergendo vere eccezioni."
+      "severityMixHelp": "Usalo per capire se il portfolio è perlopiù “rumore” o se stanno emergendo eccezioni reali."
     },
-
     "playbook": {
       "title": "Playbook operativo",
-      "item1": "Gestisci prima gli avvisi <strong>critici</strong>.",
-      "item2": "Rivedi gli avvisi durante le riunioni operative giornaliere/settimanali.",
-      "item3": "Usa i link ai siti qui sotto per investigare i trend."
+      "item1": "Lavora prima sugli avvisi <strong>critici</strong>.",
+      "item2": "Rivedi i warning durante le riunioni ops giornaliere/settimanali.",
+      "item3": "Usa i link ai siti sotto per investigare direttamente i trend."
     },
-
     "topSites": {
       "title": "Siti più impattati dagli avvisi",
-      "subtitle": "Ordinati per numero di avvisi correnti in {{windowLabel}}. Usalo come lista di triage giornaliera.",
+      "subtitle": "Classificati per numero di avvisi correnti in {{windowLabel}}. Usalo come lista di triage giornaliera.",
       "columns": {
         "site": "Sito",
         "openAlerts": "Avvisi aperti",
         "critical": "Critici",
-        "warnings": "Avvisi",
+        "warnings": "Warning",
         "info": "Info",
-        "navigate": "Apri"
+        "navigate": "Vai"
       }
     },
-
     "current": {
       "title": "Avvisi correnti",
-      "subtitle": "Eccezioni a livello sito per la finestra selezionata. Apri il sito per vedere il trend sottostante.",
-      "empty": "Nessun avviso in {{windowLabel}}. Se hai caricato dati da poco, dai un momento a CEI per calcolare baseline e soglie."
+      "subtitle": "Eccezioni a livello sito per la finestra selezionata. Clicca per aprire la dashboard del sito e vedere il trend sottostante.",
+      "empty": "Nessun avviso in {{windowLabel}}. Se hai caricato dati di recente, dai a CEI un momento per calcolare baseline e riconvergere le soglie."
     },
-
     "history": {
       "title": "Cronologia avvisi e workflow",
       "subtitle": "Stream append-only da <code>alert_events</code>. Usalo per tracciare chi ha fatto cosa, e quando.",
-      "empty": "Nessun avviso storico per questo filtro. Man mano che /alerts gira nel tempo, gli eventi compariranno qui.",
+      "empty": "Nessun avviso storico ancora per questo filtro. Man mano che /alerts gira nel tempo, gli eventi si accumuleranno qui.",
       "filters": {
         "all": "Tutti",
         "open": "Aperti",
-        "ackShort": "Presa",
+        "ackShort": "Ack",
         "resolved": "Risolti"
       }
     },
-
     "labels": {
       "site": "Sito:",
-      "triggered": "Generato:",
+      "triggered": "Attivato:",
       "updated": "Aggiornato:",
       "metric": "Metrica:",
       "window": "Finestra:",
       "note": "Nota:"
     },
-
     "actions": {
       "viewSite": "Apri sito →"
     },
-
     "export": {
       "current": "Esporta avvisi correnti (CSV)",
       "history": "Esporta cronologia (CSV)"
     },
-
     "defaults": {
       "title": "Anomalia energetica rilevata",
-      "message": "Il pattern energetico recente di questo sito devia dalla baseline. Controlla la dashboard per conferma."
+      "message": "Il pattern energetico recente di questo sito devia dalla sua baseline. Rivedi la dashboard per conferma."
     },
-
     "stats": {
       "deltaVsBaseline": "Δ vs baseline:",
       "actualVsExpected": "Reale vs atteso:",
@@ -736,46 +910,46 @@
       "hoursElevated": "elevate:",
       "hoursBelowBaseline": "sotto baseline:",
       "estCostImpact": "Impatto costo stimato:",
-      "statsLabel": "Stat:"
+      "statsLabel": "Statistiche:"
     },
-
     "cost": {
-      "overspend": "Extra costo vs baseline",
+      "overspend": "Sovracosto vs baseline",
       "savings": "Risparmio vs baseline",
-      "onBaseline": "In baseline"
+      "onBaseline": "In linea con baseline"
     },
-
     "workflow": {
       "updateStatus": "Aggiorna stato:",
-      "ack": "Presa in carico",
+      "ack": "Ack",
       "resolve": "Risolvi",
       "reopen": "Riapri"
     }
   },
-
   "reports": {
     "title": "Report",
-    "subtitle": "Reportistica portfolio per operations e leadership. Usala per quantificare sprechi vs baseline e tracciare risparmi nel tempo.",
-
+    "subtitle": "Reportistica portfolio per operations e leadership. Usalo per quantificare sprechi per sito vs baseline e tracciare risparmi nel tempo.",
     "meta": {
       "window": "Finestra: ultimi 7 giorni (168 ore)",
       "sitesCount": "Siti: <strong>{{count}}</strong>",
       "noTariffs": "Nessuna tariffa configurata – mostro solo kWh"
     },
-
     "alerts": {
       "reportsDisabled": "I report non sono abilitati per questo piano.",
-      "noSiteData": "Nessun dato sito disponibile da esportare.",
-      "noOpportunityData": "Nessun dato opportunità disponibile da esportare."
+      "noSiteData": "Nessun dato sito disponibile per l’export.",
+      "noOpportunityData": "Nessun dato opportunità disponibile per l’export."
     },
-
+    "window": {
+      "label": "Finestra:",
+      "7d": "7g",
+      "30d": "30g",
+      "last7d": "ultimi 7 giorni",
+      "last30d": "ultimi 30 giorni"
+    },
     "gating": {
       "title": "Aggiorna per sbloccare i report",
-      "body": "Il tuo piano attuale (<code>{{planKey}}</code>) non include la reportistica. Aggiorna a CEI Starter o superiore per esportare riepiloghi 7 giorni, delta vs baseline e impatto economico.",
+      "body": "Il tuo piano attuale (<code>{{planKey}}</code>) non include la reportistica. Passa a CEI Starter o superiore per esportare riepiloghi 7 giorni, delta vs baseline e impatto costi.",
       "cta": "Vedi piani e fatturazione",
-      "note": "I report si sbloccheranno automaticamente non appena l’abbonamento è attivo."
+      "note": "I report si sbloccheranno automaticamente non appena l’abbonamento sarà attivo."
     },
-
     "kpis": {
       "energy": {
         "title": "Energia portfolio – ultimi 7 giorni",
@@ -783,16 +957,16 @@
       },
       "sitesWithData": {
         "title": "Siti con dati",
-        "subtitle": "Siti che hanno riportato almeno un punto timeseries nell’ultima settimana."
+        "subtitle": "Siti con almeno un punto timeseries nell’ultima settimana."
       },
       "avgEnergy": {
         "title": "Energia media per sito – 7 giorni",
-        "subtitle": "Media semplice: energia portfolio divisa per i siti monitorati."
+        "subtitle": "Media semplice: energia portfolio divisa per siti monitorati."
       },
       "cost": {
         "title": "Costo energia portfolio – ultimi 7 giorni",
-        "subtitleWithTariff": "Derivato applicando la tua tariffa elettrica ai kWh portfolio nelle ultime 168 ore.",
-        "subtitleNoTariff": "Imposta la tariffa elettrica in Account/Impostazioni per sbloccare l’analisi costi."
+        "subtitleWithTariff": "Derivato applicando la tariffa elettricità ai kWh portfolio nelle ultime 168 ore.",
+        "subtitleNoTariff": "Imposta la tariffa elettricità in Account e Impostazioni per sbloccare analisi costi portfolio."
       },
       "avgCost": {
         "title": "Costo medio per sito attivo – 7 giorni",
@@ -803,24 +977,28 @@
         "title": "Tariffa e ancoraggio €/MWh",
         "subtitleWithTariffPrefix": "Tariffa:",
         "primarySources": "fonti primarie:",
-        "subtitleNoTariff": "Configura il prezzo elettricità per kWh (e la valuta) in Account/Impostazioni per avere ancore €/MWh."
+        "subtitleNoTariff": "Configura prezzo elettricità per kWh (e valuta) in Account e Impostazioni per ottenere ancoraggi €/MWh."
       }
     },
-
+    "summary": {
+      "title": "Riepilogo portfolio – {{windowLabel}}",
+      "subtitle": "Rollup di alto livello su tutti i siti. Usalo per capire quali impianti guidano sovracosti o risparmi.",
+      "totalActual": "Totale reale",
+      "totalExpected": "Totale atteso",
+      "deltaVsBaseline": "Δ vs baseline",
+      "estCostImpact": "Impatto costo stimato"
+    },
     "table": {
       "title": "Energia e costi per sito – 7 giorni",
-      "subtitle": "Energia, costo e deviazione vs baseline per sito nell’ultima settimana. Ordinato per impatto € quando le tariffe sono configurate.",
-      "empty": "Nessun sito disponibile. Quando siti e timeseries sono configurati, questa tabella mostrerà metrica energia/costo a 7 giorni per sito.",
-
+      "subtitle": "Energia, costi e deviazione vs baseline per sito nell’ultima settimana. Ordinato per impatto € quando le tariffe sono configurate.",
+      "empty": "Nessun sito disponibile ancora. Quando siti e timeseries sono configurati, questa tabella mostrerà metriche 7 giorni per sito.",
       "download": "Scarica CSV",
       "preparing": "Preparazione…",
-      "tip": "Suggerimento: ordinamento per costo quando le tariffe esistono.",
-      "downloadTooltip": "Esporta la tabella report 7 giorni per sito (kWh + baseline + costo se disponibile).",
-
+      "tip": "Tip: ordinamento per costo quando esistono tariffe.",
+      "downloadTooltip": "Esporta la tabella report per sito (kWh + baseline + costi se disponibili).",
       "viewSite": "Apri sito →",
-      "baselineHoursValue": "Crit: {{c}}, Warn: {{w}}, Below: {{b}}",
+      "baselineHoursValue": "Crit: {{c}}, Warn: {{w}}, Sotto: {{b}}",
       "daysAbbrev": "g",
-
       "columns": {
         "site": "Sito",
         "location": "Località",
@@ -833,108 +1011,93 @@
         "deviation": "Deviazione vs baseline",
         "expectedEnergy": "Atteso (7 giorni)",
         "baselineHours": "Ore baseline (crit / warn / sotto)",
-        "stats": "Stat"
+        "stats": "Statistiche"
       }
     },
-
     "chart": {
-      "caption": "L’altezza delle barre scala con l’energia 7 giorni del sito. Le barre sono ordinate per impatto € quando le tariffe sono configurate."
+      "caption": "L’altezza delle barre scala con l’energia 7 giorni di ciascun sito. Le barre sono ordinate per impatto € quando le tariffe sono configurate."
     },
-
     "opps": {
       "title": "Top opportunità di efficienza (portfolio)",
-      "subtitle": "Misure a maggior impatto per sito, ordinate per risparmio annuo stimato in € quando le tariffe sono configurate (fallback su kWh).",
-
+      "subtitle": "Misure a maggior impatto per sito, ordinate per risparmio annuo stimato quando le tariffe sono configurate (fallback su kWh).",
       "download": "Scarica CSV opportunità",
-      "downloadTooltip": "Esporta la lista opportunità portfolio (con stime costo se disponibili).",
+      "downloadTooltip": "Esporta la lista opportunità portfolio (con stime costi quando disponibili).",
       "costRankingRequiresTariffs": "La classifica per costo richiede tariffe.",
-      "empty": "Nessuna opportunità ancora. Quando CEI ha abbastanza contesto KPI per sito, il motore opportunità inizierà a proporre misure qui.",
-
+      "empty": "Nessuna opportunità ancora. Quando CEI avrà abbastanza contesto KPI per sito, il motore opportunità inizierà a proporre misure qui.",
       "columns": {
         "site": "Sito",
         "location": "Località",
         "measure": "Misura",
-        "kwhSaved": "Stima kWh risparmiati / anno",
-        "costSaved": "Stima costo risparmiato / anno",
+        "kwhSaved": "kWh risparmiati stimati / anno",
+        "costSaved": "Risparmio costo stimato / anno",
         "co2Saved": "CO₂ risparmiata (t / anno)"
       }
     },
-
     "errors": {
       "loadReports": "Impossibile caricare i report.",
-      "loadOpportunities": "Impossibile caricare le opportunità."
+      "loadOpportunities": "Impossibile caricare le misure opportunità."
     }
   },
-
   "csvUpload": {
     "title": {
       "global": "Carica dati timeseries",
       "perSite": "Carica dati timeseries per questo sito"
     },
-
     "subtitle": {
-      "global": "Trascina un CSV in CEI e ingeriremo le letture energetiche nel motore timeseries. L’<code>ordine</code> delle colonne non conta, purché le intestazioni includano <code>timestamp</code>, <code>value</code>, <code>unit</code>, <code>site_id</code> e <code>meter_id</code>.",
-      "perSite": "Stai caricando dati per <code>{{forcedSiteId}}</code>. CEI ingerirà tutte le righe in questo sito. L’<code>ordine</code> delle colonne non conta: il motore legge la riga di intestazione. Per questo upload “scoped”, il CSV deve includere almeno <code>timestamp</code>, <code>value</code>, <code>unit</code> e <code>meter_id</code>. Una colonna <code>site_id</code> è facoltativa e verrà ignorata per il routing."
+      "global": "Trascina un CSV in CEI e ingeriremo le letture energia nel motore timeseries. L’<code>ordine delle colonne non conta</code> purché le intestazioni includano <code>timestamp</code>, <code>value</code>, <code>unit</code>, <code>site_id</code> e <code>meter_id</code>.",
+      "perSite": "Stai caricando dati per <code>{{forcedSiteId}}</code>. CEI ingerirà tutte le righe in questo sito. L’<code>ordine</code> non conta; il motore legge l’header. In modalità sito, il CSV deve includere almeno <code>timestamp</code>, <code>value</code>, <code>unit</code> e <code>meter_id</code>. La colonna <code>site_id</code> è opzionale e verrà ignorata per l’instradamento."
     },
-
     "scopedMode": "Modalità scoped: tutte le righe ingerite useranno <code>site_id = {{forcedSiteId}}</code>.",
-
     "meta": {
       "endpoint": "Endpoint:",
-      "authRequired": "Auth: richiesta",
-      "lastSuccessful": "Ultimo caricamento riuscito",
-      "scopeSuffix": " (in questo ambito)",
+      "authRequired": "Auth: richiesto",
+      "lastSuccessful": "Ultimo upload riuscito",
+      "scopeSuffix": " (questo scope)",
       "ingestedSummary": "ingerite <strong>{{ingested}}</strong> / {{received}} righe."
     },
-
     "form": {
       "csvFileLabel": "File CSV",
-      "mappingIntro": "CEI legge la riga di intestazione e mappa le colonne per nome. Il motore si aspetta almeno:",
-      "timestampHint": "ISO 8601 oppure <code>YYYY-MM-DD HH:MM:SS</code>",
+      "mappingIntro": "CEI leggerà la riga header e mapperà le colonne per nome. Il motore si aspetta almeno:",
+      "timestampHint": "ISO 8601 o <code>YYYY-MM-DD HH:MM:SS</code>",
       "valueHint": "lettura numerica",
       "unitHint": "es. <code>kWh</code>",
       "siteIdHint": "es. <code>site-1</code>",
       "meterIdHint": "es. <code>meter-main-1</code> (se omesso, CEI userà un meter id generico)"
     },
-
     "tips": {
-      "title": "Consigli per un’ingestione pulita",
-      "item1": "Mantieni i timestamp in un unico fuso orario per file.",
-      "item2Base": "Usa valori <code>site_id</code> stabili così le dashboard possono costruire trend nel tempo.",
-      "item2Scoped": "Per questo upload scoped, CEI forzerà <code>{{forcedSiteId}}</code> su ogni riga.",
-      "item3": "Se fai backfill di dati più vecchi, non cambierà i KPI “ultime 24 ore”, ma comparirà in finestre più ampie in seguito."
+      "title": "Consigli per un’ingestione fluida",
+      "item1": "Mantieni i timestamp in un solo fuso orario per file.",
+      "item2Base": "Usa valori <code>site_id</code> stabili così le dashboard costruiscono trend nel tempo.",
+      "item2Scoped": "In modalità sito CEI forzerà <code>{{forcedSiteId}}</code> su ogni riga.",
+      "item3": "Se fai backfill di dati vecchi, non cambierà i KPI “ultime 24 ore” ma apparirà in finestre più ampie."
     },
-
     "button": {
       "uploadCsv": "Carica CSV",
       "uploadAgain": "Carica di nuovo",
       "validating": "Validazione e ingestione…",
       "ingesting": "Ingestione…"
     },
-
     "status": {
       "idle": "In attesa di un file CSV.",
-      "readyWithFile": "Pronto per il caricamento: {{name}}",
-      "validating": "Validazione intestazioni e preparazione righe per l’ingestione…",
-      "ingesting": "Ingestione delle righe nel motore timeseries…",
-      "doneGlobal": "Caricamento completato. I nuovi dati alimenteranno Dashboard, SiteView, Avvisi e Report.",
-      "donePerSite": "Caricamento completato. I nuovi dati alimenteranno grafici, avvisi e report di questo sito.",
-      "error": "Caricamento fallito. Controlla l’errore e correggi il CSV."
+      "readyWithFile": "Pronto a caricare: {{name}}",
+      "validating": "Validazione header e preparazione righe per l’ingestione…",
+      "ingesting": "Ingestione righe nel motore timeseries…",
+      "doneGlobal": "Upload completato. I dati alimenteranno Dashboard, SiteView, Avvisi e Report.",
+      "donePerSite": "Upload completato. I dati alimenteranno grafici, avvisi e report di questo sito.",
+      "error": "Upload fallito. Controlla il messaggio di errore e correggi il CSV."
     },
-
     "errors": {
       "noFileSelected": "Seleziona un file CSV da caricare.",
-      "uploadFailedGeneric": "Caricamento fallito. Controlla il file e riprova."
+      "uploadFailedGeneric": "Upload fallito. Controlla il file e riprova."
     },
-
     "result": {
       "title": "Riepilogo ingestione",
-      "summary": "CEI ha ricevuto <strong>{{received}}</strong> riga{{pluralSuffix}}, ne ha ingerite <strong>{{ingested}}</strong> e ne ha scartate <strong>{{failed}}</strong>.",
+      "summary": "CEI ha ricevuto <strong>{{received}}</strong> riga{{pluralSuffix}}, ingerite <strong>{{ingested}}</strong> e saltate <strong>{{failed}}</strong>.",
       "successRate": "Tasso di successo effettivo: <strong>{{rate}}</strong>.",
-      "sampleSiteIds": "Esempi di site_ids",
-      "sampleMeterIds": "Esempi di meter_ids",
+      "sampleSiteIds": "Esempi site_ids",
+      "sampleMeterIds": "Esempi meter_ids",
       "noneDetected": "Nessuno rilevato",
-      "sampleIssues": "Esempi di problemi a livello riga (prime {{count}}):"
+      "sampleIssues": "Esempi problemi a livello riga (prime {{count}}):"
     }
   }
 }
