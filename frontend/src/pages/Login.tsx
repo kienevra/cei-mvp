@@ -643,6 +643,24 @@ const Login: React.FC = () => {
                     })
                 : t("auth.actions.signIn", { defaultValue: "Sign in" })}
             </button>
+
+            {/* Forgot password link (login only) */}
+            {!isSignup && !inviteToken && (
+              <a
+                href="/forgot-password"
+                style={{
+                  display: "block",
+                  marginTop: "0.75rem",
+                  fontSize: "0.9rem",
+                  color: "var(--cei-text-muted)",
+                  textAlign: "center",
+                }}
+              >
+                {t("auth.passwordReset.forgot.link", {
+                  defaultValue: "Forgot password?",
+                })}
+              </a>
+            )}
           </form>
         </div>
       </div>

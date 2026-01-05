@@ -118,10 +118,12 @@ function isAuthPath(url: string | undefined): boolean {
 
   // NOTE:
   // - /org/invites/accept-and-signup is PUBLIC
+  // - /auth/password/* should NOT trigger refresh pipeline; treat as auth path
   return (
     url.includes("/auth/login") ||
     url.includes("/auth/signup") ||
     url.includes("/auth/refresh") ||
+    url.includes("/auth/password/") ||
     url.includes("/org/invites/accept-and-signup")
   );
 }
@@ -162,7 +164,7 @@ api.interceptors.response.use(
 
     const url = originalRequest.url || "";
 
-    // Do NOT attempt refresh for login/signup/refresh/invite-accept – just fail clearly
+    // Do NOT attempt refresh for login/signup/refresh/invite-accept/password-reset – just fail clearly
     if (isAuthPath(url)) {
       return Promise.reject(error);
     }
@@ -350,6 +352,33 @@ export async function login(payload: LoginPayload) {
 export async function signup(payload: SignupPayload) {
   const resp = await api.post("/auth/signup", payload);
   return resp.data as { access_token: string; token_type: string };
+}
+
+/* ===== Password recovery ===== */
+
+export async function requestPasswordReset(
+  email: string
+): Promise<{ detail: string; debug_reset_link?: string | null }> {
+  try {
+    const resp = await api.post("/auth/password/forgot", { email });
+    return resp.data as any;
+  } catch (err: any) {
+    attachRequestId(err);
+    throw new Error(getApiErrorMessage(err, "Failed to request password reset."));
+  }
+}
+
+export async function resetPassword(
+  token: string,
+  new_password: string
+): Promise<{ detail: string }> {
+  try {
+    const resp = await api.post("/auth/password/reset", { token, new_password });
+    return resp.data as any;
+  } catch (err: any) {
+    attachRequestId(err);
+    throw new Error(getApiErrorMessage(err, "Failed to reset password."));
+  }
 }
 
 /* ===== KPI type for /analytics/sites/{site_id}/kpi ===== */
@@ -835,7 +864,10 @@ export async function leaveOrg(): Promise<{
   }
 }
 
-export async function offboardOrg(params: { mode: OffboardMode; org_id?: number }): Promise<any> {
+export async function offboardOrg(params: {
+  mode: OffboardMode;
+  org_id?: number;
+}): Promise<any> {
   const { mode, org_id } = params || ({} as any);
 
   const query: Record<string, string | number> = { mode };
@@ -905,11 +937,11 @@ export interface ManualOpportunity {
   description: string | null;
 }
 
-export async function getManualOpportunities(siteId: number | string): Promise<ManualOpportunity[]> {
+export async function getManualOpportunities(
+  siteId: number | string
+): Promise<ManualOpportunity[]> {
   const idStr = normalizeNumericSiteId(siteId);
-  const resp = await api.get<ManualOpportunity[]>(
-    `/sites/${idStr}/opportunities/manual`
-  );
+  const resp = await api.get<ManualOpportunity[]>(`/sites/${idStr}/opportunities/manual`);
   return resp.data;
 }
 

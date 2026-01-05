@@ -19,6 +19,9 @@ const CSVUpload = lazy(() => import("./pages/CSVUpload"));
 const Alerts = lazy(() => import("./pages/Alerts"));
 const Reports = lazy(() => import("./pages/Reports"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -44,6 +47,9 @@ const App: React.FC = () => (
           {/* Public routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+
 
           {/* Optional convenience alias */}
           <Route path="/join" element={<Navigate to="/signup" replace />} />

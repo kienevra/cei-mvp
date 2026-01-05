@@ -324,9 +324,11 @@ from app.api.v1 import (  # noqa: E402
     org_offboard,
     org,
     org_leave,
+    password_recovery,
 )
 
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(password_recovery.router, prefix="/api/v1")
 app.include_router(billing.router, prefix="/api/v1")
 app.include_router(sites_api.router, prefix="/api/v1")
 app.include_router(data_timeseries.router, prefix="/api/v1")

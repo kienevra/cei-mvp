@@ -375,3 +375,34 @@ class OrgInvite(Base):
         Index("ix_org_invites_org_active", "org_id", "is_active"),
         Index("ix_org_invites_token_hash", "token_hash"),
     )
+class PasswordResetToken(Base):
+    """
+    One-time password reset token.
+
+    - Store only a SHA-256 hash of the token
+    - Enforce expiry + one-time use
+    - Keep minimal metadata for audit/abuse investigation
+    """
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    user_id = Column(Integer, ForeignKey("user.id"), nullable=False, index=True)
+
+    # normalized email snapshot (helps support/debug, avoids joins in simple admin queries)
+    email = Column(String(255), nullable=False, index=True)
+
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+    used_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    request_ip = Column(String(128), nullable=True)
+    user_agent = Column(String(255), nullable=True)
+
+    __table_args__ = (
+        Index("ix_pwdreset_user_expires", "user_id", "expires_at"),
+        Index("ix_pwdreset_email_expires", "email", "expires_at"),
+    )

@@ -104,7 +104,30 @@
       "passwordsNoMatch": "Passwords do not match.",
       "inviteJoinNotLive": "Invite join isn’t live on this backend yet (missing /org/invites/accept-and-signup). Deploy the invites router, then retry.",
       "inviteMissingAccessToken": "Invite signup succeeded but response missing access_token."
+    },
+    "passwordReset": {
+      "forgot": {
+        "link": "Forgot password?",
+        "title": "Reset password",
+        "subtitle": "Enter your email and we’ll send you a reset link.",
+        "send": "Send reset link",
+        "sending": "Sending…",
+        "done": "If the email exists, a password reset link has been sent.",
+        "error": "Failed to request password reset.",
+        "devLink": "Dev reset link:"
+      },
+      "reset": {
+        "title": "Set a new password",
+        "subtitle": "Choose a strong password (min 8 characters).",
+        "missingToken": "Missing reset token.",
+        "save": "Update password",
+        "saving": "Saving…",
+        "done": "Password updated. You can now sign in.",
+        "error": "Failed to reset password."
+      },
+    "backToLogin": "Back to sign in"
     }
+
   },
   "dashboard": {
     "errors": {

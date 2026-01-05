@@ -104,8 +104,31 @@
       "passwordsNoMatch": "Le password non corrispondono.",
       "inviteJoinNotLive": "Il join tramite invito non è ancora attivo su questo backend (manca /org/invites/accept-and-signup). Distribuisci il router inviti e riprova.",
       "inviteMissingAccessToken": "Registrazione tramite invito riuscita ma manca access_token nella risposta."
+    },
+
+    "passwordReset": {
+      "forgot": {
+        "link": "Password dimenticata?",
+        "title": "Reimposta password",
+        "subtitle": "Inserisci la tua email e ti invieremo un link per reimpostare la password.",
+        "send": "Invia link di reset",
+        "sending": "Invio in corso…",
+        "done": "Se l’email esiste, è stato inviato un link per reimpostare la password.",
+        "error": "Impossibile richiedere il reset della password.",
+        "devLink": "Link di reset (dev):"
+      },
+      "reset": {
+        "title": "Imposta una nuova password",
+        "subtitle": "Scegli una password robusta (min 8 caratteri).",
+        "missingToken": "Token di reset mancante.",
+        "save": "Aggiorna password",
+        "saving": "Salvataggio…",
+        "done": "Password aggiornata. Ora puoi accedere.",
+        "error": "Impossibile reimpostare la password."
+      },
+      "backToLogin": "Torna al login"
     }
-  },
+ },
   "dashboard": {
     "errors": {
       "summary": "Impossibile caricare il riepilogo energia.",
