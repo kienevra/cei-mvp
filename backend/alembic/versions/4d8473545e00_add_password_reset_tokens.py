@@ -17,6 +17,7 @@ depends_on = None
 
 
 def upgrade():
+    # Create table (portable: SQLite + Postgres)
     op.create_table(
         "password_reset_tokens",
         sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
@@ -25,6 +26,9 @@ def upgrade():
         sa.Column("token_hash", sa.String(length=64), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
+        # NEW: audit fields (these are what your prod is missing)
+        sa.Column("request_ip", sa.String(length=64), nullable=True),
+        sa.Column("user_agent", sa.String(length=512), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
