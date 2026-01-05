@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -49,6 +49,24 @@ def _client_ip(request: Request) -> str:
 def _password_ok(pw: str) -> bool:
     pw = pw or ""
     return len(pw) >= 8
+
+
+def _utcnow() -> datetime:
+    # Always return timezone-aware UTC
+    return datetime.now(timezone.utc)
+
+
+def _as_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    Normalize datetimes for safe comparison:
+    - If dt is naive, assume it's UTC and attach timezone.utc.
+    - If dt is aware, convert to timezone.utc.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 class ForgotPasswordIn(BaseModel):
@@ -100,7 +118,7 @@ def forgot_password(payload: ForgotPasswordIn, request: Request, db: Session = D
 
     raw = RESET_TOKEN_PREFIX + secrets.token_urlsafe(32)
     token_hash = _hash_token(raw)
-    now = datetime.utcnow()
+    now = _utcnow()
     expires = now + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
 
     prt = PasswordResetToken(
@@ -146,7 +164,10 @@ def reset_password(payload: ResetPasswordIn, db: Session = Depends(get_db)) -> R
     new_pw = payload.new_password or ""
 
     if not token.startswith(RESET_TOKEN_PREFIX):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "BAD_TOKEN", "message": "Invalid token."})
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "BAD_TOKEN", "message": "Invalid token."},
+        )
 
     if not _password_ok(new_pw):
         raise HTTPException(
@@ -158,32 +179,51 @@ def reset_password(payload: ResetPasswordIn, db: Session = Depends(get_db)) -> R
 
     rec = db.query(PasswordResetToken).filter(PasswordResetToken.token_hash == token_hash).first()
     if not rec:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "BAD_TOKEN", "message": "Invalid token."})
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "BAD_TOKEN", "message": "Invalid token."},
+        )
 
     if rec.used_at is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "TOKEN_USED", "message": "Token already used."})
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "TOKEN_USED", "message": "Token already used."},
+        )
 
-    now = datetime.utcnow()
-    if rec.expires_at is None or rec.expires_at < now:
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail={"code": "TOKEN_EXPIRED", "message": "Token expired."})
+    now = _utcnow()
+    expires_at = _as_aware_utc(getattr(rec, "expires_at", None))
+    if expires_at is None or expires_at < now:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={"code": "TOKEN_EXPIRED", "message": "Token expired."},
+        )
 
     user = db.query(User).filter(User.id == rec.user_id).first()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "USER_NOT_FOUND", "message": "User not found."})
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "USER_NOT_FOUND", "message": "User not found."},
+        )
 
     # Enforce kill-switch (don’t let disabled users reset)
     try:
         if hasattr(user, "is_active") and not bool(int(getattr(user, "is_active", 1))):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": "USER_DISABLED", "message": "User access is disabled."})
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "USER_DISABLED", "message": "User access is disabled."},
+            )
     except HTTPException:
         raise
     except Exception:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": "USER_DISABLED", "message": "User access is disabled."})
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "USER_DISABLED", "message": "User access is disabled."},
+        )
 
     # Update password
     user.hashed_password = pwd_context.hash(str(new_pw))
 
-    # Mark token used
+    # Mark token used (timezone-aware UTC)
     rec.used_at = now
 
     db.add(user)
