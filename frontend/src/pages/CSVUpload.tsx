@@ -89,11 +89,26 @@ const CSVUpload: React.FC = () => {
 
   const location = useLocation();
   const params = new URLSearchParams(location.search);
-  const forcedSiteId = params.get("site_id");
+
+  // --- Core fix: support both query param spellings + normalize numeric ids ---
+  const normalizeSiteKey = (v: string): string => {
+    const s = (v || "").trim();
+    if (!s) return "";
+    if (s.toLowerCase().startsWith("site-")) return s;
+    if (/^\d+$/.test(s)) return `site-${s}`;
+    return s;
+  };
+
+  // Backward compatible: accept both ?site_id=... and ?siteId=...
+  const forcedSiteIdRaw = params.get("site_id") ?? params.get("siteId");
+  const forcedSiteIdNorm = forcedSiteIdRaw ? normalizeSiteKey(forcedSiteIdRaw) : "";
+  const forcedSiteId = forcedSiteIdNorm || null;
+
   const isPerSiteMode = !!forcedSiteId;
   const storageKey = isPerSiteMode
     ? `${STORAGE_KEY_BASE}_${forcedSiteId}`
     : STORAGE_KEY_BASE;
+  // -------------------------------------------------------------------------
 
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<UploadStatus>("idle");
@@ -138,7 +153,11 @@ const CSVUpload: React.FC = () => {
     setResult(null);
 
     if (!file) {
-      setError(t("csvUpload.errors.noFileSelected", { defaultValue: "Please choose a CSV file to upload." }));
+      setError(
+        t("csvUpload.errors.noFileSelected", {
+          defaultValue: "Please choose a CSV file to upload.",
+        })
+      );
       setStatus("error");
       return;
     }
@@ -305,7 +324,9 @@ const CSVUpload: React.FC = () => {
             >
               <Trans
                 i18nKey="csvUpload.scopedMode"
-                defaults={"Scoped mode: all ingested rows will use <code>site_id = {{forcedSiteId}}</code>."}
+                defaults={
+                  "Scoped mode: all ingested rows will use <code>site_id = {{forcedSiteId}}</code>."
+                }
                 values={{ forcedSiteId }}
                 components={{ code: <code /> }}
               />
@@ -411,7 +432,8 @@ const CSVUpload: React.FC = () => {
                       />
                     </li>
                     <li>
-                      <code>value</code> – {t("csvUpload.form.valueHint", { defaultValue: "numeric reading" })}
+                      <code>value</code> –{" "}
+                      {t("csvUpload.form.valueHint", { defaultValue: "numeric reading" })}
                     </li>
                     <li>
                       <code>unit</code> –{" "}
@@ -464,7 +486,11 @@ const CSVUpload: React.FC = () => {
                     lineHeight: 1.6,
                   }}
                 >
-                  <li>{t("csvUpload.tips.item1", { defaultValue: "Keep timestamps in a single timezone per file." })}</li>
+                  <li>
+                    {t("csvUpload.tips.item1", {
+                      defaultValue: "Keep timestamps in a single timezone per file.",
+                    })}
+                  </li>
                   <li>
                     <Trans
                       i18nKey="csvUpload.tips.item2Base"
@@ -595,10 +621,14 @@ const CSVUpload: React.FC = () => {
                       marginBottom: "0.2rem",
                     }}
                   >
-                    {t("csvUpload.result.sampleSiteIds", { defaultValue: "Sample site_ids" })}
+                    {t("csvUpload.result.sampleSiteIds", {
+                      defaultValue: "Sample site_ids",
+                    })}
                   </div>
                   {result.sample_site_ids.length === 0 ? (
-                    <div>{t("csvUpload.result.noneDetected", { defaultValue: "None detected" })}</div>
+                    <div>
+                      {t("csvUpload.result.noneDetected", { defaultValue: "None detected" })}
+                    </div>
                   ) : (
                     <div>{result.sample_site_ids.join(", ")}</div>
                   )}
@@ -614,10 +644,14 @@ const CSVUpload: React.FC = () => {
                       marginBottom: "0.2rem",
                     }}
                   >
-                    {t("csvUpload.result.sampleMeterIds", { defaultValue: "Sample meter_ids" })}
+                    {t("csvUpload.result.sampleMeterIds", {
+                      defaultValue: "Sample meter_ids",
+                    })}
                   </div>
                   {result.sample_meter_ids.length === 0 ? (
-                    <div>{t("csvUpload.result.noneDetected", { defaultValue: "None detected" })}</div>
+                    <div>
+                      {t("csvUpload.result.noneDetected", { defaultValue: "None detected" })}
+                    </div>
                   ) : (
                     <div>{result.sample_meter_ids.join(", ")}</div>
                   )}
@@ -639,8 +673,7 @@ const CSVUpload: React.FC = () => {
                     }}
                   >
                     {t("csvUpload.result.sampleIssues", {
-                      defaultValue:
-                        "Sample row-level issues (first {{count}}):",
+                      defaultValue: "Sample row-level issues (first {{count}}):",
                       count: result.errors.length,
                     })}
                   </div>

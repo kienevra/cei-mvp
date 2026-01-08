@@ -1,3 +1,4 @@
+#C:\dev\cei-mvp\generate_test_timeseries_csvs.py
 # generate_test_timeseries_csvs.py
 #
 # Generate synthetic hourly timeseries CSVs for CEI:
@@ -17,7 +18,7 @@ from pathlib import Path
 
 DAYS = 30                   # <- increased from 5 to 30 days
 FILES_PER_MODE = 5          # 5 with site_id, 5 without
-SITES_WITH_IDS = ["site-26", "site-27", "site-28"]
+SITES_WITH_IDS = ["site-30", "site-31", "site-32"]
 METERS = ["meter-main-1"]   # keep simple; can add more if needed
 UNIT = "kWh"
 
