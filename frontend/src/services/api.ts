@@ -461,7 +461,7 @@ export async function uploadCsv(formData: FormData, opts?: { siteId?: string }) 
   const params: Record<string, string> = {};
   if (opts?.siteId) params.site_id = opts.siteId;
 
-  const r = await api.post("/upload-csv", formData, {
+  const r = await api.post("/upload-csv/", formData, {
     params,
     headers: { "Content-Type": "multipart/form-data" },
   });
