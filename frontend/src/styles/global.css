@@ -53,6 +53,17 @@
   white-space: nowrap;
 }
 
+/* === CEI pill size variants === */
+.cei-pill--sm {
+  font-size: 0.62rem;
+  padding: 0.08rem 0.45rem;
+  line-height: 1;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Neutral / baseline */
 .cei-pill-neutral {
   background: rgba(148, 163, 184, 0.18);

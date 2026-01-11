@@ -818,7 +818,7 @@ const SiteView: React.FC = () => {
             <h2 style={{ fontSize: "0.95rem", fontWeight: 600 }}>
               {t("siteView.forecast.title", { defaultValue: "Next 24h forecast" })}
             </h2>
-            <span className="cei-pill cei-pill-neutral">
+            <span className="cei-pill cei-pill-neutral cei-pill--sm">
               {t("common.loading", { defaultValue: "Loading" })}
             </span>
           </div>
@@ -894,12 +894,25 @@ const SiteView: React.FC = () => {
               })}
             </p>
           </div>
-          <span className="cei-pill cei-pill-neutral">
+          <span
+            className="cei-pill cei-pill-neutral"
+            style={{
+              fontSize: "0.65rem",
+              padding: "0.15rem 0.5rem",
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+              maxWidth: "14rem",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+            title={`Stub: ${localForecast.method}`}
+          >
             {t("siteView.forecast.stub", {
               defaultValue: "Stub: {{method}}",
               method: localForecast.method,
             })}
           </span>
+
         </div>
 
         <div
