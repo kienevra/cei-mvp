@@ -225,6 +225,9 @@ const SiteView: React.FC = () => {
   });
   const [manualOppSaving, setManualOppSaving] = useState(false);
   const [manualOppError, setManualOppError] = useState<string | null>(null);
+  const [actionSavingId, setActionSavingId] = useState<number | null>(null);
+  const [actionNoteById, setActionNoteById] = useState<Record<number, string>>({});
+
 
   const siteKey = id ? `site-${id}` : undefined;
 
@@ -579,6 +582,49 @@ const SiteView: React.FC = () => {
     downloadCsv(`cei_${safeSiteId}_timeseries.csv`, rows);
   };
 
+    const handleMarkOpportunityActioned = async (opp: BackendOpportunity) => {
+      if (!siteKey) return;
+
+      const note = (actionNoteById[opp.id] || "").trim();
+
+      setActionSavingId(opp.id);
+      try {
+        await createSiteEvent(siteKey, {
+          type: "action_taken",
+          title: `Action taken: ${opp.name}`,
+          body: [
+            `Opportunity ID: ${opp.id}`,
+            `Source: ${opp.source || "auto"}`,
+            opp.est_annual_kwh_saved != null ? `Est kWh/yr saved: ${opp.est_annual_kwh_saved}` : null,
+            opp.simple_roi_years != null ? `Simple ROI (yrs): ${opp.simple_roi_years}` : null,
+            note ? `Operator note: ${note}` : null,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        });
+
+        // Clear note and refresh timeline
+        setActionNoteById((prev) => {
+          const next = { ...prev };
+          delete next[opp.id];
+          return next;
+        });
+        setTimelineRefreshKey((k) => k + 1);
+      } catch (e: any) {
+        alert(
+          normalizeApiError(
+            e,
+            t("siteView.opps.markActionedFailed", {
+              defaultValue: "Failed to log action. Please try again.",
+            })
+          )
+        );
+      } finally {
+        setActionSavingId(null);
+      }
+    };
+
+
   const handleExportKpiCsv = () => {
     if (!siteKey) {
       alert(
@@ -739,8 +785,8 @@ const SiteView: React.FC = () => {
 
   const kpiDeltaBadgeClass = (value: number | null | undefined): string => {
     if (value === null || value === undefined) return "cei-pill-neutral";
-    if (value > 10) return "cei-pill-bad";
-    if (value > 2) return "cei-pill-watch";
+    if (value > 10) return "cei-pill-negative";
+    if (value > 2) return "cei-pill-warning";
     if (value < -10) return "cei-pill-good";
     return "cei-pill-neutral";
   };
@@ -762,6 +808,43 @@ const SiteView: React.FC = () => {
       return `${safeCode} ${value.toFixed(2)}`;
     }
   };
+
+  const computeEstimatedEurPerYear = (
+      opp: BackendOpportunity,
+      electricityPricePerKwh: number | null
+    ): number | null => {
+      if (!isFiniteNumber(electricityPricePerKwh)) return null;
+      const kwh = opp.est_annual_kwh_saved;
+      if (!isFiniteNumber(kwh) || kwh <= 0) return null;
+      return kwh * electricityPricePerKwh;
+    };
+
+    const sortOpportunitiesDecisionReady = (
+      list: BackendOpportunity[],
+      electricityPricePerKwh: number | null
+    ): BackendOpportunity[] => {
+      const scored = list.map((o) => {
+        const eurYr = computeEstimatedEurPerYear(o, electricityPricePerKwh);
+        const kwhYr = isFiniteNumber(o.est_annual_kwh_saved) ? o.est_annual_kwh_saved : null;
+        const roi = isFiniteNumber(o.simple_roi_years) ? o.simple_roi_years : null;
+
+        // Decision-ready scoring:
+        // 1) highest €/yr first (if computable)
+        // 2) else highest kWh/yr
+        // 3) else lowest ROI years
+        // 4) else keep stable
+        const score =
+          (eurYr != null ? eurYr * 1_000_000 : 0) +
+          (eurYr == null && kwhYr != null ? kwhYr * 1_000 : 0) +
+          (eurYr == null && kwhYr == null && roi != null ? (1 / Math.max(roi, 0.1)) : 0);
+
+        return { o, eurYr, score };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      return scored.map((x) => x.o);
+    };
+
 
   // --- Cost KPI wiring (robust to backend field naming) ---
   const kpiAny = kpi as any;
@@ -785,6 +868,11 @@ const SiteView: React.FC = () => {
     if (cost24hActual != null && cost24hBaseline != null) return cost24hActual - cost24hBaseline;
     return null;
   }, [kpiAny, cost24hActual, cost24hBaseline]);
+
+  const decisionReadyOpps = useMemo(() => {
+    return sortOpportunitiesDecisionReady(opportunities, electricityPricePerKwh ?? null);
+  }, [opportunities, electricityPricePerKwh]);
+
 
   const tariffsConfigured =
     electricityPricePerKwh != null ||
@@ -2098,49 +2186,111 @@ const SiteView: React.FC = () => {
                   {t("siteView.opps.modelledMeasures", { defaultValue: "Modelled measures for this site" })}
                 </div>
                 <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.8rem", lineHeight: 1.5 }}>
-                  {opportunities.map((o, idx) => {
+                  {decisionReadyOpps.map((o, idx) => {
                     const roiYears = typeof o.simple_roi_years === "number" ? o.simple_roi_years : null;
-                    const savings = typeof o.est_annual_kwh_saved === "number" ? o.est_annual_kwh_saved : null;
+                    const savingsKwhYr = typeof o.est_annual_kwh_saved === "number" ? o.est_annual_kwh_saved : null;
                     const co2 =
                       typeof o.est_co2_tons_saved_per_year === "number" ? o.est_co2_tons_saved_per_year : null;
 
+                    const eurYr = computeEstimatedEurPerYear(o, electricityPricePerKwh ?? null);
+
                     return (
-                      <li key={`${o.source || "auto"}-${o.id}-${idx}`} style={{ marginBottom: "0.25rem" }}>
-                        <strong>
-                          {o.source === "manual"
-                            ? t("siteView.opps.manualTag", { defaultValue: "[Manual] " })
-                            : ""}
-                          {o.name}
-                        </strong>
-                        {o.description ? ` – ${o.description}` : ""}
-                        <span style={{ display: "block", fontSize: "0.78rem" }}>
-                          {savings != null && (
-                            <>
-                              ≈{" "}
-                              <strong>
-                                {savings.toLocaleString(undefined, { maximumFractionDigits: 0 })} kWh/yr
-                              </strong>{" "}
-                              {t("siteView.opps.saved", { defaultValue: "saved" })}
-                            </>
-                          )}
-                          {roiYears != null && (
-                            <>
-                              {" "}
-                              · {t("siteView.opps.roi", { defaultValue: "simple ROI" })} ~{" "}
-                              <strong>{roiYears.toFixed(1)} yrs</strong>
-                            </>
-                          )}
-                          {co2 != null && (
-                            <>
-                              {" "}
-                              · {t("siteView.opps.co2Cut", { defaultValue: "CO₂ cut" })} ~{" "}
-                              <strong>{co2.toFixed(2)} tCO₂/yr</strong>
-                            </>
-                          )}
-                        </span>
+                      <li key={`${o.source || "auto"}-${o.id}-${idx}`} style={{ marginBottom: "0.55rem" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem" }}>
+                          <div style={{ minWidth: 0 }}>
+                            <strong>
+                              {o.source === "manual"
+                                ? t("siteView.opps.manualTag", { defaultValue: "[Manual] " })
+                                : ""}
+                              {o.name}
+                            </strong>
+                            {o.description ? ` – ${o.description}` : ""}
+
+                            <span style={{ display: "block", fontSize: "0.78rem", marginTop: "0.15rem" }}>
+                              {eurYr != null && (
+                                <>
+                                  ≈{" "}
+                                  <strong>{formatCurrency(eurYr, kpiCurrencyCode)}</strong>{" "}
+                                  {t("siteView.opps.perYear", { defaultValue: "/ year" })}
+                                </>
+                              )}
+
+                              {eurYr == null && savingsKwhYr != null && (
+                                <>
+                                  ≈{" "}
+                                  <strong>
+                                    {savingsKwhYr.toLocaleString(undefined, { maximumFractionDigits: 0 })} kWh/yr
+                                  </strong>{" "}
+                                  {t("siteView.opps.saved", { defaultValue: "saved" })}
+                                </>
+                              )}
+
+                              {roiYears != null && (
+                                <>
+                                  {" "}
+                                  · {t("siteView.opps.roi", { defaultValue: "simple ROI" })} ~{" "}
+                                  <strong>{roiYears.toFixed(1)} yrs</strong>
+                                </>
+                              )}
+
+                              {co2 != null && (
+                                <>
+                                  {" "}
+                                  · {t("siteView.opps.co2Cut", { defaultValue: "CO₂ cut" })} ~{" "}
+                                  <strong>{co2.toFixed(2)} tCO₂/yr</strong>
+                                </>
+                              )}
+                            </span>
+
+                            <div style={{ marginTop: "0.35rem", display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                              <input
+                                type="text"
+                                value={actionNoteById[o.id] || ""}
+                                onChange={(e) =>
+                                  setActionNoteById((prev) => ({ ...prev, [o.id]: e.target.value }))
+                                }
+                                placeholder={t("siteView.opps.actionNotePlaceholder", {
+                                  defaultValue: "Optional note (who/when/what changed)…",
+                                })}
+                                style={{
+                                  flex: "1 1 280px",
+                                  minWidth: 220,
+                                  padding: "0.45rem 0.6rem",
+                                  borderRadius: "0.5rem",
+                                  border: "1px solid rgba(148, 163, 184, 0.5)",
+                                  backgroundColor: "rgba(15,23,42,0.9)",
+                                  color: "var(--cei-text-main)",
+                                  fontSize: "0.82rem",
+                                }}
+                              />
+
+                              <button
+                                type="button"
+                                className="cei-btn cei-btn-primary"
+                                onClick={() => handleMarkOpportunityActioned(o)}
+                                disabled={actionSavingId === o.id}
+                                style={{ fontSize: "0.78rem", padding: "0.35rem 0.85rem" }}
+                                title={t("siteView.opps.markActionedTooltip", {
+                                  defaultValue: "Logs an action event into the site timeline for auditability.",
+                                })}
+                              >
+                                {actionSavingId === o.id
+                                  ? t("common.savingEllipsis", { defaultValue: "Saving…" })
+                                  : t("siteView.opps.markActioned", { defaultValue: "Mark as actioned" })}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div style={{ flex: "0 0 auto", textAlign: "right" }}>
+                            <span className="cei-pill cei-pill-neutral" style={{ fontSize: "0.7rem" }}>
+                              {t("siteView.opps.rank", { defaultValue: "Rank #{{n}}" , n: idx + 1 })}
+                            </span>
+                          </div>
+                        </div>
                       </li>
                     );
                   })}
+
                 </ul>
               </div>
             )}

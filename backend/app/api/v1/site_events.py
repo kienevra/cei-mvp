@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, Depends, Query, status, HTTPException
@@ -12,11 +12,16 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.db.session import get_db
-from app.db.models import SiteEvent
+from app.models import SiteEvent, Site
 
 logger = logging.getLogger("cei")
 
 router = APIRouter(prefix="/site-events", tags=["site-events"])
+
+
+def _utcnow() -> datetime:
+    # timezone-aware UTC timestamp to match DateTime(timezone=True)
+    return datetime.now(timezone.utc)
 
 
 class SiteEventOut(BaseModel):
@@ -122,17 +127,15 @@ def _try_parse_site_numeric_id(site_id: str) -> Optional[int]:
 
 def _build_site_name_map(db: Session, site_ids: Set[str]) -> Dict[str, str]:
     """
-    Best-effort mapping from timeseries.site_id -> human-readable site name.
+    Best-effort mapping from site_events.site_id (timeseries-style) -> human-readable site name.
 
-    For IDs like 'site-1', we try to resolve Site(id=1). If the Site model
-    is not available or the lookup fails, we simply fall back to the raw site_id.
+    For IDs like 'site-1', we try to resolve Site(id=1). If the lookup fails,
+    we simply fall back to the raw site_id.
     """
     if not site_ids:
         return {}
 
     try:
-        from app.models import Site  # type: ignore
-
         numeric_ids: Set[int] = set()
         for raw in site_ids:
             parsed = _try_parse_site_numeric_id(raw)
@@ -203,7 +206,6 @@ def list_site_events(
     - limit (max rows)
     - page (for offset-based pagination)
     """
-
     organization_id, _allowed_site_ids = _resolve_org_context(user)
 
     if organization_id is None:
@@ -214,7 +216,7 @@ def list_site_events(
             detail="Site events require an organization context.",
         )
 
-    now = datetime.utcnow()
+    now = _utcnow()
     q = db.query(SiteEvent).filter(SiteEvent.organization_id == organization_id)
 
     if site_id:
@@ -241,7 +243,7 @@ def list_site_events(
 
     out: List[SiteEventOut] = []
     for r in rows:
-        site_name = site_name_map.get(r.site_id)
+        site_name = site_name_map.get(r.site_id) if r.site_id else None
         out.append(
             SiteEventOut.model_validate(
                 {
@@ -329,15 +331,13 @@ def create_site_event(
     except Exception:
         created_by_user_id = None
 
-    now = datetime.utcnow()
-
     row = SiteEvent(
         organization_id=organization_id,
         site_id=site_id,
         type=event_type,
-        title=title,
+        title=title,  # SiteEvent.title is nullable=False in your model
         body=body,
-        created_at=now,
+        created_at=_utcnow(),  # timezone-aware UTC
         created_by_user_id=created_by_user_id,
     )
 

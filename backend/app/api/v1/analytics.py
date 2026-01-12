@@ -1,7 +1,8 @@
+# //backend/app/api/v1/analytics.py
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -331,6 +332,112 @@ def _compute_cost_from_kwh(
     }
 
 
+def _maybe_emit_kpi_site_events(
+    *,
+    db: Session,
+    org_id: Optional[int],
+    site_id: str,
+    created_by_user_id: Optional[int],
+    last_24h_kwh: float,
+    baseline_24h_kwh: Optional[float],
+    deviation_pct_24h: Optional[float],
+    last_24h_cost: Optional[float],
+    expected_24h_cost: Optional[float],
+    cost_savings_24h: Optional[float],
+    currency_code: Optional[str],
+) -> None:
+    """
+    Best-effort: write auto "decision events" into site_events based on KPI signals.
+
+    Hard rules (MVP):
+      - Only emit at most once per 24h per (site_id, type).
+      - Never break KPI response if this fails.
+
+    This is intentionally conservative and minimal.
+    """
+    if org_id is None:
+        return
+
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(hours=24)
+
+    # Tunables (keep conservative for MVP)
+    COST_ABS_THRESHOLD = 10.0     # currency units (e.g. €10)
+    DEV_PCT_THRESHOLD = 10.0      # ±10%
+
+    def already_emitted(event_type: str) -> bool:
+        existing = (
+            db.query(core_models.SiteEvent)
+            .filter(core_models.SiteEvent.organization_id == org_id)
+            .filter(core_models.SiteEvent.site_id == site_id)
+            .filter(core_models.SiteEvent.type == event_type)
+            .filter(core_models.SiteEvent.created_at >= window_start)
+            .first()
+        )
+        return existing is not None
+
+    def emit(event_type: str, title: str, body: Optional[str]) -> None:
+        if already_emitted(event_type):
+            return
+
+        row = core_models.SiteEvent(
+            organization_id=org_id,
+            site_id=site_id,
+            type=event_type,
+            title=title,
+            body=body,
+            created_by_user_id=created_by_user_id,
+            created_at=now,
+        )
+        db.add(row)
+        db.commit()
+
+    # ---- Cost-based events (highest ROI) ----
+    # cost_savings_24h = expected - actual (positive = savings, negative = overspend)
+    if cost_savings_24h is not None and expected_24h_cost is not None and last_24h_cost is not None:
+        cur = (currency_code or "").strip() or ""
+        # Overspend
+        if cost_savings_24h <= -COST_ABS_THRESHOLD:
+            overspend = abs(cost_savings_24h)
+            title = f"Overspend last 24h: {cur} {overspend:.2f}".strip()
+            body = (
+                f"Actual: {cur} {last_24h_cost:.2f} vs Expected: {cur} {expected_24h_cost:.2f}.\n"
+                f"Energy: {last_24h_kwh:.2f} kWh"
+                + (f" vs Baseline: {baseline_24h_kwh:.2f} kWh" if baseline_24h_kwh is not None else "")
+                + (f" ({deviation_pct_24h:+.1f}%)" if deviation_pct_24h is not None else "")
+            )
+            emit("kpi_overspend_24h", title, body)
+
+        # Savings
+        if cost_savings_24h >= COST_ABS_THRESHOLD:
+            title = f"Savings last 24h: {cur} {cost_savings_24h:.2f}".strip()
+            body = (
+                f"Actual: {cur} {last_24h_cost:.2f} vs Expected: {cur} {expected_24h_cost:.2f}.\n"
+                f"Energy: {last_24h_kwh:.2f} kWh"
+                + (f" vs Baseline: {baseline_24h_kwh:.2f} kWh" if baseline_24h_kwh is not None else "")
+                + (f" ({deviation_pct_24h:+.1f}%)" if deviation_pct_24h is not None else "")
+            )
+            emit("kpi_savings_24h", title, body)
+
+    # ---- Deviation-based events (useful even without tariff) ----
+    if deviation_pct_24h is not None:
+        if deviation_pct_24h >= DEV_PCT_THRESHOLD:
+            title = f"High deviation vs baseline (24h): {deviation_pct_24h:+.1f}%"
+            body = (
+                f"Actual: {last_24h_kwh:.2f} kWh"
+                + (f" vs Baseline: {baseline_24h_kwh:.2f} kWh" if baseline_24h_kwh is not None else "")
+            )
+            emit("baseline_deviation_high_24h", title, body)
+
+        if deviation_pct_24h <= -DEV_PCT_THRESHOLD:
+            title = f"Low usage vs baseline (24h): {deviation_pct_24h:+.1f}%"
+            body = (
+                f"Actual: {last_24h_kwh:.2f} kWh"
+                + (f" vs Baseline: {baseline_24h_kwh:.2f} kWh" if baseline_24h_kwh is not None else "")
+            )
+            emit("baseline_deviation_low_24h", title, body)
+
+
 # ========= Routes =========
 
 
@@ -623,6 +730,34 @@ def get_site_kpi(
 
     # Currency: prefer whatever cost helpers resolved
     currency_code = cost_24h["currency_code"] or cost_7d["currency_code"]
+
+    # --- NEW: emit decision events (best effort, never breaks KPI response) ---
+    try:
+        org_id: Optional[int] = None
+        if org is not None and getattr(org, "id", None) is not None:
+            org_id = int(getattr(org, "id"))
+        else:
+            raw_org_id = getattr(user, "organization_id", None)
+            org_id = int(raw_org_id) if raw_org_id is not None else None
+
+        created_by_user_id: Optional[int] = getattr(user, "id", None)
+
+        _maybe_emit_kpi_site_events(
+            db=db,
+            org_id=org_id,
+            site_id=site_id,
+            created_by_user_id=created_by_user_id,
+            last_24h_kwh=last_24h_kwh,
+            baseline_24h_kwh=baseline_24h_kwh,
+            deviation_pct_24h=deviation_pct_24h,
+            last_24h_cost=last_24h_cost,
+            expected_24h_cost=expected_24h_cost,
+            cost_savings_24h=cost_savings_24h,
+            currency_code=currency_code,
+        )
+    except Exception:
+        # best-effort only
+        pass
 
     return SiteKpiOut(
         site_id=site_id,
