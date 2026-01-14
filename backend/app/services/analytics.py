@@ -1,3 +1,4 @@
+# backend/app/services/analytics.py
 from __future__ import annotations
 
 from collections import defaultdict
@@ -22,9 +23,16 @@ def _load_site_history(
     site_id: str,
     history_start: datetime,
     history_end: datetime,
+    *,
+    organization_id: Optional[int] = None,
+    allowed_site_ids: Optional[List[str]] = None,
 ) -> List[TimeseriesRecord]:
     """
     Load historical records for baseline calculation.
+
+    Multi-tenant safety (additive, optional):
+      - If organization_id is provided, filter TimeseriesRecord.organization_id.
+      - If allowed_site_ids is provided, filter TimeseriesRecord.site_id IN allowed_site_ids.
     """
     q = (
         db.query(TimeseriesRecord)
@@ -32,6 +40,14 @@ def _load_site_history(
         .filter(TimeseriesRecord.timestamp >= history_start)
         .filter(TimeseriesRecord.timestamp < history_end)
     )
+
+    if organization_id is not None:
+        q = q.filter(TimeseriesRecord.organization_id == organization_id)
+
+    # Defense-in-depth: if caller supplies allow-list, constrain to it too
+    if allowed_site_ids:
+        q = q.filter(TimeseriesRecord.site_id.in_(allowed_site_ids))
+
     return q.all()
 
 
@@ -40,9 +56,16 @@ def _load_site_recent(
     site_id: str,
     recent_start: datetime,
     recent_end: datetime,
+    *,
+    organization_id: Optional[int] = None,
+    allowed_site_ids: Optional[List[str]] = None,
 ) -> List[TimeseriesRecord]:
     """
     Load recent records for deviation scoring.
+
+    Multi-tenant safety (additive, optional):
+      - If organization_id is provided, filter TimeseriesRecord.organization_id.
+      - If allowed_site_ids is provided, filter TimeseriesRecord.site_id IN allowed_site_ids.
     """
     q = (
         db.query(TimeseriesRecord)
@@ -50,6 +73,13 @@ def _load_site_recent(
         .filter(TimeseriesRecord.timestamp >= recent_start)
         .filter(TimeseriesRecord.timestamp <= recent_end)
     )
+
+    if organization_id is not None:
+        q = q.filter(TimeseriesRecord.organization_id == organization_id)
+
+    if allowed_site_ids:
+        q = q.filter(TimeseriesRecord.site_id.in_(allowed_site_ids))
+
     return q.all()
 
 
@@ -118,20 +148,17 @@ def compute_baseline_profile(
     lookback_days: int = 30,
     now: Optional[datetime] = None,
     allowed_site_ids: Optional[List[str]] = None,
+    organization_id: Optional[int] = None,
 ) -> Optional[BaselineProfile]:
     """
     Compute a statistical baseline profile for a given site/meter.
 
-    - Pulls last `lookback_days` worth of TimeseriesRecord rows.
-    - Groups values by (hour_of_day, weekend/weekday).
-    - For each group: computes mean and std (population std).
-    - Also computes global mean, p50, p90 across all points.
+    Multi-tenant safety (additive, optional):
+      - If organization_id is provided, filter TimeseriesRecord.organization_id.
+      - If allowed_site_ids is provided, filter TimeseriesRecord.site_id IN allowed_site_ids.
 
     Returns:
         BaselineProfile if we have data, otherwise None.
-
-    This does NOT change any existing behaviour yet; it's a reusable
-    building block for richer insights/alerts.
     """
     if now is None:
         now = _utcnow()
@@ -140,7 +167,10 @@ def compute_baseline_profile(
 
     q = db.query(TimeseriesRecord).filter(TimeseriesRecord.timestamp >= start)
 
-    # Multi-tenant safety: optional org-level scoping via allowed_site_ids
+    if organization_id is not None:
+        q = q.filter(TimeseriesRecord.organization_id == organization_id)
+
+    # Defense-in-depth allow-list
     if allowed_site_ids:
         q = q.filter(TimeseriesRecord.site_id.in_(allowed_site_ids))
 
@@ -151,13 +181,10 @@ def compute_baseline_profile(
 
     rows = q.all()
     if not rows:
-        # No data in the lookback window – caller must handle None gracefully
         return None
 
     # Compute actual history span for warm-up / confidence metadata
-    valid_timestamps: List[datetime] = [
-        r.timestamp for r in rows if r.timestamp is not None
-    ]
+    valid_timestamps: List[datetime] = [r.timestamp for r in rows if r.timestamp is not None]
     total_history_days: Optional[int] = None
     is_warming_up: bool = False
     confidence_level: Optional[str] = None
@@ -165,7 +192,6 @@ def compute_baseline_profile(
     if valid_timestamps:
         min_ts = min(valid_timestamps)
         max_ts = max(valid_timestamps)
-        # Inclusive day span between first and last observation
         span_days = (max_ts.date() - min_ts.date()).days + 1
         total_history_days = span_days
         is_warming_up = span_days < MIN_HISTORY_DAYS_FOR_CONFIDENT_BASELINE
@@ -204,7 +230,6 @@ def compute_baseline_profile(
             try:
                 s = float(pstdev(vals))
             except Exception:
-                # Extremely defensive; we never want baselines to break the app
                 s = 0.0
 
         buckets.append(
@@ -216,7 +241,6 @@ def compute_baseline_profile(
             )
         )
 
-    # Stable sort: weekend flag then hour
     buckets.sort(key=lambda b: (b.is_weekend, b.hour_of_day))
 
     # Global distribution metrics
@@ -226,7 +250,6 @@ def compute_baseline_profile(
     def _percentile(values: List[float], p: float) -> Optional[float]:
         if not values:
             return None
-        # Simple nearest-rank style; operationally good enough
         idx = int(round((p / 100.0) * (len(values) - 1)))
         return float(values[idx])
 
@@ -257,19 +280,27 @@ def compute_hourly_baseline(
     site_id: str,
     lookback_days: int = 30,
     as_of: Optional[datetime] = None,
+    *,
+    organization_id: Optional[int] = None,
+    allowed_site_ids: Optional[List[str]] = None,
 ) -> Dict[int, Dict[str, float]]:
     """
     Compute a very simple "learned" baseline per hour-of-day for a site,
     using the last `lookback_days` of data.
 
-    Returns:
-      { hour: {"mean": float, "std": float}, ... }
+    Multi-tenant safety (additive, optional):
+      - If organization_id is provided, filter TimeseriesRecord.organization_id.
+      - If allowed_site_ids is provided, filter TimeseriesRecord.site_id IN allowed_site_ids.
     """
     now = as_of or _utcnow()
     history_end = now
     history_start = now - timedelta(days=lookback_days)
 
-    records = _load_site_history(db, site_id, history_start, history_end)
+    records = _load_site_history(
+        db, site_id, history_start, history_end,
+        organization_id=organization_id,
+        allowed_site_ids=allowed_site_ids,
+    )
     if not records:
         return {}
 
@@ -312,6 +343,9 @@ def compute_site_insights(
     window_hours: int = 24,
     lookback_days: int = 30,
     as_of: Optional[datetime] = None,
+    *,
+    organization_id: Optional[int] = None,
+    allowed_site_ids: Optional[List[str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Core engine that:
@@ -319,10 +353,9 @@ def compute_site_insights(
       2) Compares the last `window_hours` of actuals vs that baseline.
       3) Returns structured "insights" that both /analytics and /alerts can use.
 
-    Phase 4.1 enrichment:
-      - Attach a 'baseline_profile' payload built via compute_baseline_profile:
-          * global_mean_kwh, global_p50_kwh, global_p90_kwh
-          * buckets[{hour_of_day, is_weekend, mean_kwh, std_kwh}]
+    Multi-tenant safety (additive, optional):
+      - If organization_id is provided, filter TimeseriesRecord.organization_id.
+      - If allowed_site_ids is provided, constrain reads to that allow-list.
     """
     now = as_of or _utcnow()
     recent_end = now
@@ -334,8 +367,9 @@ def compute_site_insights(
         site_id=site_id,
         lookback_days=lookback_days,
         as_of=now,
+        organization_id=organization_id,
+        allowed_site_ids=allowed_site_ids,
     )
-    # No baseline -> nothing to say
     if not baseline:
         return None
 
@@ -348,7 +382,8 @@ def compute_site_insights(
             meter_id=None,
             lookback_days=lookback_days,
             now=now,
-            allowed_site_ids=None,
+            allowed_site_ids=allowed_site_ids,
+            organization_id=organization_id,
         )
     except Exception:
         baseline_profile_obj = None
@@ -378,7 +413,6 @@ def compute_site_insights(
                 ],
             }
         except Exception:
-            # Never let baseline-profile enrichment break the core insights
             baseline_profile_payload = None
 
     # Derive top-level warm-up / confidence flags for this site's insights
@@ -395,11 +429,15 @@ def compute_site_insights(
             confidence_level = "low" if is_baseline_warming_up else "normal"
 
     # 2) Recent actuals
-    recent_records = _load_site_recent(db, site_id, recent_start, recent_end)
+    recent_records = _load_site_recent(
+        db, site_id, recent_start, recent_end,
+        organization_id=organization_id,
+        allowed_site_ids=allowed_site_ids,
+    )
     if not recent_records:
         return None
 
-    # Aggregate recent actuals by hour-of-day (0–23)
+    # Aggregate recent actuals by hour-of-day (0–23) (legacy path)
     actual_by_hour: Dict[int, float] = defaultdict(float)
     for rec in recent_records:
         if not rec.timestamp:
@@ -419,52 +457,157 @@ def compute_site_insights(
     elevated_hours = 0
     below_baseline_hours = 0
 
-    for hour in range(24):
-        actual = actual_by_hour.get(hour, 0.0)
-        base = baseline.get(hour)
-        expected = base["mean"] if base else 0.0
-        std_val = base["std"] if base else 0.0
+    # ---- IMPORTANT FIX (only when window_hours > 24): expand expected/actual over full window ----
+    # Keep the existing 24-entry behavior unchanged for window_hours <= 24.
+    if int(window_hours) > 24:
+        # Build a per-hour (ts floored to hour) actual series for the last window_hours.
+        def _floor_to_hour(ts: datetime) -> datetime:
+            return ts.replace(minute=0, second=0, microsecond=0)
 
-        if expected > 0:
-            delta = actual - expected
-            delta_pct = (delta / expected) * 100.0
-        else:
-            delta = actual
-            delta_pct = 0.0 if actual == 0 else 100.0
+        actual_by_ts: Dict[datetime, float] = defaultdict(float)
+        for rec in recent_records:
+            ts = rec.timestamp
+            if not ts:
+                continue
+            try:
+                val = float(rec.value)
+            except Exception:
+                continue
+            hts = _floor_to_hour(ts)
+            if hts < recent_start or hts >= recent_end:
+                continue
+            actual_by_ts[hts] += val
 
-        if std_val > 0:
-            z = delta / std_val
-        else:
-            z = 0.0
+        # Index statistical buckets by (hour_of_day, is_weekend) when available
+        bucket_index: Dict[Tuple[int, bool], BaselineBucket] = {}
+        if baseline_profile_obj is not None and baseline_profile_obj.buckets:
+            for b in baseline_profile_obj.buckets:
+                try:
+                    bucket_index[(int(b.hour_of_day), bool(b.is_weekend))] = b
+                except Exception:
+                    continue
 
-        total_actual += actual
-        if expected > 0:
-            total_expected += expected
+        def _expected_and_std_for(ts: datetime) -> Tuple[float, float]:
+            hour_of_day = ts.hour
+            is_weekend_flag = ts.weekday() >= 5
 
-        if expected > 0 and actual < expected:
-            below_baseline_hours += 1
+            # Prefer statistical buckets (weekday/weekend-aware)
+            b = bucket_index.get((hour_of_day, is_weekend_flag))
+            if b is None:
+                # Fallback: try any bucket for that hour (either weekend/weekday)
+                b = bucket_index.get((hour_of_day, True)) or bucket_index.get((hour_of_day, False))
+            if b is not None:
+                try:
+                    return float(b.mean_kwh), float(b.std_kwh)
+                except Exception:
+                    pass
 
-        band = "normal"
-        if expected > 0:
-            # baseline-driven classification
-            if delta_pct >= 30.0 or z >= 2.5:
-                band = "critical"
-                critical_hours += 1
-            elif delta_pct >= 10.0 or z >= 1.5:
-                band = "elevated"
-                elevated_hours += 1
+            # Final fallback: legacy per-hour baseline (weekday/weekend-agnostic)
+            base = baseline.get(hour_of_day)
+            if base:
+                try:
+                    return float(base.get("mean", 0.0)), float(base.get("std", 0.0))
+                except Exception:
+                    return 0.0, 0.0
 
-        hours_output.append(
-            {
-                "hour": hour,
-                "actual_kwh": round(actual, 3),
-                "expected_kwh": round(expected, 3),
-                "delta_kwh": round(delta, 3),
-                "delta_pct": round(delta_pct, 2),
-                "z_score": round(z, 2),
-                "band": band,
-            }
-        )
+            return 0.0, 0.0
+
+        # Emit one entry per hour in the requested window (chronological).
+        # We keep "hour" as the sequential offset to avoid collapsing repeated hour-of-day values.
+        base_ts = _floor_to_hour(recent_end) - timedelta(hours=int(window_hours))
+        for i in range(int(window_hours)):
+            ts = base_ts + timedelta(hours=i)
+            actual = float(actual_by_ts.get(ts, 0.0))
+
+            expected, std_val = _expected_and_std_for(ts)
+
+            if expected > 0:
+                delta = actual - expected
+                delta_pct = (delta / expected) * 100.0
+            else:
+                delta = actual
+                delta_pct = 0.0 if actual == 0 else 100.0
+
+            if std_val > 0:
+                z = delta / std_val
+            else:
+                z = 0.0
+
+            total_actual += actual
+            if expected > 0:
+                total_expected += expected
+
+            if expected > 0 and actual < expected:
+                below_baseline_hours += 1
+
+            band = "normal"
+            if expected > 0:
+                if delta_pct >= 30.0 or z >= 2.5:
+                    band = "critical"
+                    critical_hours += 1
+                elif delta_pct >= 10.0 or z >= 1.5:
+                    band = "elevated"
+                    elevated_hours += 1
+
+            hours_output.append(
+                {
+                    "hour": int(i),
+                    "actual_kwh": round(actual, 3),
+                    "expected_kwh": round(expected, 3),
+                    "delta_kwh": round(delta, 3),
+                    "delta_pct": round(delta_pct, 2),
+                    "z_score": round(z, 2),
+                    "band": band,
+                }
+            )
+
+    else:
+        # ---- Legacy behavior (unchanged): 24 buckets by hour-of-day ----
+        for hour in range(24):
+            actual = actual_by_hour.get(hour, 0.0)
+            base = baseline.get(hour)
+            expected = base["mean"] if base else 0.0
+            std_val = base["std"] if base else 0.0
+
+            if expected > 0:
+                delta = actual - expected
+                delta_pct = (delta / expected) * 100.0
+            else:
+                delta = actual
+                delta_pct = 0.0 if actual == 0 else 100.0
+
+            if std_val > 0:
+                z = delta / std_val
+            else:
+                z = 0.0
+
+            total_actual += actual
+            if expected > 0:
+                total_expected += expected
+
+            if expected > 0 and actual < expected:
+                below_baseline_hours += 1
+
+            band = "normal"
+            if expected > 0:
+                if delta_pct >= 30.0 or z >= 2.5:
+                    band = "critical"
+                    critical_hours += 1
+                elif delta_pct >= 10.0 or z >= 1.5:
+                    band = "elevated"
+                    elevated_hours += 1
+
+            hours_output.append(
+                {
+                    "hour": hour,
+                    "actual_kwh": round(actual, 3),
+                    "expected_kwh": round(expected, 3),
+                    "delta_kwh": round(delta, 3),
+                    "delta_pct": round(delta_pct, 2),
+                    "z_score": round(z, 2),
+                    "band": band,
+                }
+            )
 
     deviation_pct = 0.0
     if total_expected > 0:
@@ -482,13 +625,12 @@ def compute_site_insights(
         "below_baseline_hours": below_baseline_hours,
         "hours": hours_output,
         "generated_at": now.isoformat(),
-        # New warm-up / confidence metadata
+        # Warm-up / confidence metadata
         "total_history_days": total_history_days,
         "is_baseline_warming_up": is_baseline_warming_up,
         "confidence_level": confidence_level,
     }
 
-    # Phase 4.1: attach statistical baseline profile if available
     if baseline_profile_payload is not None:
         insights["baseline_profile"] = baseline_profile_payload
 
@@ -501,24 +643,23 @@ def generate_alerts_for_all_sites(
     lookback_days: int = 30,
     as_of: Optional[datetime] = None,
     allowed_site_ids: Optional[List[str]] = None,
+    *,
+    organization_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     Portfolio-level alert generator that uses the baseline/deviation engine.
 
-    Strategy:
-      - For each site_id seen in TimeseriesRecord (optionally restricted to
-        allowed_site_ids for multi-tenant safety):
-          * Build insights.
-          * If deviation is large or there are many critical/elevated hours,
-            emit an alert.
-      - Keeps output shape compatible with the existing Alerts frontend.
+    Multi-tenant safety (additive, optional):
+      - If organization_id is provided, filter TimeseriesRecord.organization_id.
+      - If allowed_site_ids is provided, restricts to those site_ids.
     """
     now = as_of or _utcnow()
 
-    # Get distinct site_ids from the timeseries table
-    q = db.query(TimeseriesRecord.site_id).filter(
-        TimeseriesRecord.site_id.isnot(None)
-    )
+    q = db.query(TimeseriesRecord.site_id).filter(TimeseriesRecord.site_id.isnot(None))
+
+    if organization_id is not None:
+        q = q.filter(TimeseriesRecord.organization_id == organization_id)
+
     if allowed_site_ids:
         q = q.filter(TimeseriesRecord.site_id.in_(allowed_site_ids))
 
@@ -527,13 +668,15 @@ def generate_alerts_for_all_sites(
 
     alerts: List[Dict[str, Any]] = []
 
-    for site_id in site_ids:
+    for sid in site_ids:
         insights = compute_site_insights(
             db=db,
-            site_id=site_id,
+            site_id=sid,
             window_hours=window_hours,
             lookback_days=lookback_days,
             as_of=now,
+            organization_id=organization_id,
+            allowed_site_ids=allowed_site_ids,
         )
         if not insights:
             continue
@@ -545,7 +688,6 @@ def generate_alerts_for_all_sites(
         severity: Optional[str] = None
         title: Optional[str] = None
 
-        # Simple but defensible rules:
         if dev_pct >= 30.0 or crit_hours >= 2:
             severity = "critical"
             title = "Sustained high consumption vs baseline"
@@ -553,23 +695,21 @@ def generate_alerts_for_all_sites(
             severity = "warning"
             title = "Elevated consumption vs baseline"
         else:
-            # small deviations – optionally emit info alerts only if notable
             if abs(dev_pct) < 5.0:
-                continue  # too small, skip as noise
+                continue
             severity = "info"
             title = "Mild deviation vs baseline"
 
-        message_parts = [
-            f"Total energy in the last {window_hours}h is {dev_pct:+.1f}% vs this site's learned baseline.",
-            f"Critical hours: {crit_hours}, elevated hours: {elev_hours}.",
-        ]
-        message = " ".join(message_parts)
+        message = (
+            f"Total energy in the last {window_hours}h is {dev_pct:+.1f}% vs this site's learned baseline. "
+            f"Critical hours: {crit_hours}, elevated hours: {elev_hours}."
+        )
 
         alerts.append(
             {
-                "id": f"{site_id}:{window_hours}",
-                "site_id": site_id,
-                "site_name": None,  # frontend falls back to site_id if missing
+                "id": f"{sid}:{window_hours}",
+                "site_id": sid,
+                "site_name": None,
                 "severity": severity,
                 "title": title,
                 "message": message,
@@ -594,40 +734,17 @@ def compute_site_forecast_stub(
     lookback_days: int = 30,
     as_of: Optional[datetime] = None,
     allowed_site_ids: Optional[List[str]] = None,
+    organization_id: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Very simple baseline-driven forecast stub.
 
-    Uses:
-      - compute_baseline_profile(...) over `lookback_days` to get typical hourly levels
-      - compute_site_insights(...) over `history_window_hours` to get recent deviation_pct
-        and folds that into a single uplift factor.
-
-    Returns a dict with:
-      {
-        "site_id": str,
-        "history_window_hours": int,
-        "horizon_hours": int,
-        "baseline_lookback_days": int,
-        "generated_at": iso-str,
-        "method": "stub_baseline_v1",
-        "points": [
-           {
-             "ts": iso-str,
-             "expected_kwh": float,
-             "lower_kwh": float,
-             "upper_kwh": float,
-             "basis": "stub_baseline_v1",
-           },
-           ...
-        ],
-      }
-
-    If there is not enough data to build a baseline, returns None.
+    Multi-tenant safety (additive, optional):
+      - If organization_id is provided, filter TimeseriesRecord.organization_id.
+      - If allowed_site_ids is provided, restricts to those site_ids.
     """
     now = as_of or _utcnow()
 
-    # 1) Statistical baseline profile
     baseline = compute_baseline_profile(
         db=db,
         site_id=site_id,
@@ -635,17 +752,20 @@ def compute_site_forecast_stub(
         lookback_days=lookback_days,
         now=now,
         allowed_site_ids=allowed_site_ids,
+        organization_id=organization_id,
     )
     if baseline is None or not baseline.buckets:
         return None
 
-    # 2) Recent deviation vs baseline (deterministic/statistical)
+    # IMPORTANT: pass the same scoping into insights, otherwise forecast can leak
     insights = compute_site_insights(
         db=db,
         site_id=site_id,
         window_hours=history_window_hours,
         lookback_days=lookback_days,
         as_of=now,
+        organization_id=organization_id,
+        allowed_site_ids=allowed_site_ids,
     )
 
     deviation_pct = 0.0
@@ -655,14 +775,12 @@ def compute_site_forecast_stub(
         except Exception:
             deviation_pct = 0.0
 
-    # Turn deviation into a simple uplift factor and clamp to sane bounds
     uplift_factor = 1.0 + (deviation_pct / 100.0)
     if uplift_factor < 0.1:
         uplift_factor = 0.1
     if uplift_factor > 3.0:
         uplift_factor = 3.0
 
-    # Index baseline buckets by (hour_of_day, is_weekend)
     bucket_index: Dict[Tuple[int, bool], BaselineBucket] = {}
     for b in baseline.buckets:
         key = (int(b.hour_of_day), bool(b.is_weekend))
@@ -672,10 +790,8 @@ def compute_site_forecast_stub(
         hour = ts.hour
         is_weekend_flag = ts.weekday() >= 5
 
-        # Prefer exact (hour, weekend_flag)
         b = bucket_index.get((hour, is_weekend_flag))
         if b is None:
-            # Fallback: any bucket with same hour
             b = bucket_index.get((hour, True)) or bucket_index.get((hour, False))
 
         if b is not None:
@@ -696,7 +812,6 @@ def compute_site_forecast_stub(
         base = _get_baseline_for(ts)
         expected = base * uplift_factor
 
-        # Very simple symmetric band; intentionally conservative placeholder.
         lower = expected * 0.9 if expected > 0 else 0.0
         upper = expected * 1.1 if expected > 0 else 0.0
 
@@ -718,7 +833,6 @@ def compute_site_forecast_stub(
         "generated_at": now.isoformat(),
         "method": "stub_baseline_v1",
         "points": points,
-        # Baseline warm-up metadata for the forecast as well
         "baseline_total_history_days": baseline.total_history_days,
         "baseline_is_warming_up": baseline.is_warming_up,
         "baseline_confidence_level": baseline.confidence_level
@@ -739,7 +853,6 @@ class AnalyticsService:
     """
 
     def __init__(self, db: Any):
-        # Tests pass a DummySession here; we don't rely on a real SQLAlchemy Session
         self.db = db
 
     def compute_kpis(
@@ -750,28 +863,12 @@ class AnalyticsService:
         values: Optional[List[float]] = None,
         as_of: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        """
-        Legacy helper for tests.
-
-        tests/test_analytics.py calls:
-            service = analytics.AnalyticsService(DummySession())
-            result = service.compute_kpis(site_id=1, window_days=1)
-
-        Requirements:
-        - Accept a `window_days` kwarg (to avoid the TypeError).
-        - NOT touch the real DB (DummySession has no `.query`).
-        - Return a dict with basic KPI fields, including:
-            - "energy_kwh"
-            - "avg_power_kw"
-        """
-        # Translate days → hours if only window_days is provided
         if window_hours is None and window_days is not None:
             try:
                 window_hours = int(window_days) * 24
             except Exception:
                 window_hours = None
 
-        # For the test shim, if no values are passed, pretend it's an empty series
         if not values:
             total = 0.0
             avg = 0.0
@@ -784,7 +881,6 @@ class AnalyticsService:
             min_v = float(min(vals))
             max_v = float(max(vals))
 
-        # Average power over the window in kW: kWh / hours
         if window_hours is not None and window_hours > 0:
             avg_power_kw = total / float(window_hours)
         else:
@@ -792,7 +888,6 @@ class AnalyticsService:
 
         peak_kw = max_v
 
-        # Classic load factor: average demand / peak demand
         if peak_kw > 0:
             load_factor = avg_power_kw / peak_kw
         else:
@@ -802,14 +897,13 @@ class AnalyticsService:
             "site_id": site_id,
             "window_days": window_days,
             "window_hours": window_hours,
-            # legacy-friendly KPI keys:
-            "energy_kwh": total,     # tests expect this key
+            "energy_kwh": total,
             "total_kwh": total,
             "avg_kwh": avg,
             "min_kwh": min_v,
             "max_kwh": max_v,
-            "avg_power_kw": avg_power_kw,  # tests expect this key
-            "peak_kw": peak_kw,            # tests expect this key
+            "avg_power_kw": avg_power_kw,
+            "peak_kw": peak_kw,
             "load_factor": load_factor,
         }
 
@@ -818,18 +912,6 @@ class AnalyticsService:
         metric_name: str,
         metric_value: float,
     ) -> Dict[str, Any]:
-        """
-        Legacy helper for tests.
-
-        tests/test_analytics.py calls:
-            service = analytics.AnalyticsService(DummySession())
-            res = service.benchmark_against_industry(
-                "manufacturing_energy_intensity", 1200.0
-            )
-
-        We keep the logic simple and self-contained; no DB.
-        """
-        # Very naive, test-only baselines
         industry_baselines = {
             "manufacturing_energy_intensity": 1000.0,
         }
@@ -840,12 +922,9 @@ class AnalyticsService:
         else:
             diff_pct = (metric_value - baseline) / baseline * 100.0
 
-        # Flag as "above industry" if more than 5% higher than baseline
         flagged = diff_pct > 5.0
         if flagged:
-            recommendation = (
-                "Above industry baseline – investigate major loads and schedules."
-            )
+            recommendation = "Above industry baseline – investigate major loads and schedules."
         else:
             recommendation = "Within industry range – monitor periodically."
 
@@ -855,10 +934,9 @@ class AnalyticsService:
             "industry_baseline": baseline,
             "difference_pct": diff_pct,
             "is_above_industry": metric_value > baseline,
-            "flagged": flagged,          # tests expect this key
-            "recommendation": recommendation,  # tests expect this key
+            "flagged": flagged,
+            "recommendation": recommendation,
         }
-
 
     def detect_anomalies(
         self,
@@ -866,16 +944,6 @@ class AnalyticsService:
         *,
         z_threshold: float = 2.0,
     ) -> Dict[str, Any]:
-        """
-        Simple 1-D anomaly detector over a numeric list.
-
-        tests/test_analytics.py calls:
-            res = service.detect_anomalies(values)
-
-        This MUST NOT touch the DB; it only works on the in-memory list.
-
-        We expose "anomaly_indices" for tests, plus detailed anomalies.
-        """
         if not values:
             return {
                 "values": [],
@@ -895,13 +963,7 @@ class AnalyticsService:
             for idx, v in enumerate(vals):
                 z = (v - mu) / sigma
                 if abs(z) >= z_threshold:
-                    anomalies.append(
-                        {
-                            "index": idx,
-                            "value": v,
-                            "z_score": z,
-                        }
-                    )
+                    anomalies.append({"index": idx, "value": v, "z_score": z})
 
         anomaly_indices = [a["index"] for a in anomalies]
 
@@ -911,6 +973,5 @@ class AnalyticsService:
             "std": sigma,
             "z_threshold": z_threshold,
             "anomalies": anomalies,
-            "anomaly_indices": anomaly_indices,  # tests expect this key
+            "anomaly_indices": anomaly_indices,
         }
-

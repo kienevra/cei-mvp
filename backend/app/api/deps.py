@@ -92,7 +92,7 @@ def create_org_audit_event(
             related_alert_id=None,
             title=title,
             body=description,
-            created_by_user_id=user_id,
+            created_by_user_id=user_id if user_id else None,
         )
         db.add(ev)
         db.commit()

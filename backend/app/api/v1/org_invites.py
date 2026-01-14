@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import get_current_user  # ✅ canonical location
 from app.db.session import get_db
-from app.models import User, OrgInvite, SiteEvent
+from app.models import User, OrgInvite
+from app.db.models import SiteEvent  # ✅ canonical SiteEvent model import (matches alerts.py usage)
 from app.api.v1.auth import (
     create_access_token,
     create_refresh_token,
@@ -112,26 +113,45 @@ def _as_utc_aware(dt: datetime | None) -> datetime | None:
 def _audit(
     db: Session,
     *,
-    org_id: int,
+    organization_id: int,
     title: str,
-    description: Optional[str],
+    body: Optional[str],
+    created_by_user_id: Optional[int],
 ) -> None:
     """
-    Best-effort audit trail.
+    Best-effort audit trail into site_events.
 
-    IMPORTANT: Must match your actual SiteEvent columns.
-    Based on your SQLite migration log, site_events has:
-      org_id, site_id, kind, related_alert_id, title, description, created_at
+    Canonical SiteEvent columns in this codebase are:
+      organization_id, site_id, type, title, body, created_by_user_id, created_at (default)
+
+    IMPORTANT: invite lifecycle actions are HUMAN actions, so created_by_user_id should be set.
     """
     try:
-        ev = SiteEvent(
-            org_id=org_id,
+        # Be defensive across migrations: attempt canonical fields first.
+        payload = dict(
+            organization_id=organization_id,
             site_id=None,
-            kind="org_event",
-            related_alert_id=None,
+            type="org_event",
             title=title,
-            description=description,
+            body=body,
+            created_by_user_id=created_by_user_id,
         )
+
+        try:
+            ev = SiteEvent(**payload)
+        except TypeError:
+            # Fallback for older column names (if any environment is behind):
+            # try progressively removing/renaming fields without breaking the request path.
+            payload2 = dict(payload)
+            # common legacy: kind/description/org_id
+            payload2.pop("type", None)
+            payload2.pop("body", None)
+            payload2.pop("organization_id", None)
+            payload2["org_id"] = organization_id
+            payload2["kind"] = "org_event"
+            payload2["description"] = body
+            ev = SiteEvent(**payload2)
+
         db.add(ev)
         db.commit()
     except Exception:
@@ -346,7 +366,7 @@ def create_invite(
     existing = (
         db.query(OrgInvite)
         .filter(
-            OrgInvite.organization_id == org_id,  # ✅ FIX: was OrgInvite.org_id
+            OrgInvite.organization_id == org_id,
             OrgInvite.email == invited_email,
         )
         .first()
@@ -376,12 +396,13 @@ def create_invite(
 
         _audit(
             db,
-            org_id=org_id,
+            organization_id=org_id,
             title="Invite created/re-issued",
-            description=(
+            body=(
                 f"email={invited_email}; invite_id={existing.id}; role={role}; "
                 f"expires_at={expires_at.isoformat()}; token_returned={'yes' if raw_token else 'no'}"
             ),
+            created_by_user_id=current_user.id,  # ✅ human action
         )
 
         return InviteCreateResponse(
@@ -401,7 +422,7 @@ def create_invite(
     token_hash = hash_invite_token(raw_token)
 
     inv = OrgInvite(
-        organization_id=org_id,  # ✅ FIX: was org_id=org_id
+        organization_id=org_id,
         email=invited_email,
         token_hash=token_hash,
         role=role,
@@ -417,9 +438,10 @@ def create_invite(
 
     _audit(
         db,
-        org_id=org_id,
+        organization_id=org_id,
         title="Invite created",
-        description=f"email={invited_email}; invite_id={inv.id}; role={role}; expires_at={expires_at.isoformat()}",
+        body=f"email={invited_email}; invite_id={inv.id}; role={role}; expires_at={expires_at.isoformat()}",
+        created_by_user_id=current_user.id,  # ✅ human action
     )
 
     return InviteCreateResponse(
@@ -448,7 +470,7 @@ def list_invites(
 
     invites = (
         db.query(OrgInvite)
-        .filter(OrgInvite.organization_id == org_id)  # ✅ FIX: was OrgInvite.org_id
+        .filter(OrgInvite.organization_id == org_id)
         .order_by(OrgInvite.created_at.desc())
         .all()
     )
@@ -493,7 +515,7 @@ def revoke_invite(
         db.query(OrgInvite)
         .filter(
             OrgInvite.id == invite_id,
-            OrgInvite.organization_id == org_id,  # ✅ FIX: was OrgInvite.org_id
+            OrgInvite.organization_id == org_id,
         )
         .first()
     )
@@ -527,9 +549,10 @@ def revoke_invite(
 
     _audit(
         db,
-        org_id=org_id,
+        organization_id=org_id,
         title="Invite revoked",
-        description=f"invite_id={inv.id}; email={email_norm}; invite=revoked; user_action={disabled_detail or 'none'}",
+        body=f"invite_id={inv.id}; email={email_norm}; invite=revoked; user_action={disabled_detail or 'none'}",
+        created_by_user_id=current_user.id,  # ✅ human action
     )
 
     return Response(status_code=204)
@@ -549,7 +572,7 @@ def extend_invite(
         db.query(OrgInvite)
         .filter(
             OrgInvite.id == invite_id,
-            OrgInvite.organization_id == org_id,  # ✅ FIX: was OrgInvite.org_id
+            OrgInvite.organization_id == org_id,
         )
         .first()
     )
@@ -600,12 +623,14 @@ def extend_invite(
 
     _audit(
         db,
-        org_id=org_id,
+        organization_id=org_id,
         title="Invite extended/reactivated",
-        description=(
-            f"invite_id={inv.id}; email={email_norm}; expires_at={(_as_utc_aware(inv.expires_at).isoformat() if inv.expires_at else 'none')}; "
+        body=(
+            f"invite_id={inv.id}; email={email_norm}; "
+            f"expires_at={(_as_utc_aware(inv.expires_at).isoformat() if inv.expires_at else 'none')}; "
             f"user_action={enabled_detail or 'none'}; token_returned={'yes' if raw_token else 'no'}"
         ),
+        created_by_user_id=current_user.id,  # ✅ human action
     )
 
     return InviteExtendResponse(
@@ -689,7 +714,7 @@ def accept_and_signup(
     user = User(
         email=email_norm,
         hashed_password=hashed_password,
-        organization_id=inv.organization_id,  # ✅ FIX: was inv.org_id
+        organization_id=inv.organization_id,
     )
 
     if payload.full_name:
@@ -729,11 +754,13 @@ def accept_and_signup(
     db.add(inv)
     db.commit()
 
+    # ✅ user-driven event (the accepting user is the actor)
     _audit(
         db,
-        org_id=int(inv.organization_id),  # ✅ FIX: was inv.org_id
+        organization_id=int(inv.organization_id),
         title="Invite accepted",
-        description=f"email={email_norm}; invite_id={inv.id}; user_id={user.id}",
+        body=f"email={email_norm}; invite_id={inv.id}; user_id={user.id}",
+        created_by_user_id=user.id,
     )
 
     access = create_access_token({"sub": user.email})

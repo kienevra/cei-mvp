@@ -39,7 +39,7 @@ FUTURE_SAFETY_MARGIN_MINUTES = 10
 #  - Positive values would create future timestamps (will FAIL in prod) -> blocked.
 #  - Negative values generate older data.
 #  - 0 generates a window ending "near now" (minus safety margin).
-TIME_SHIFT_DAYS = -40
+TIME_SHIFT_DAYS = 0
 
 # Optional deterministic offset (in hours) to make "new" timestamps without going future.
 # Applied AFTER TIME_SHIFT_DAYS and still respects future safety margin.

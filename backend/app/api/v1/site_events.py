@@ -19,9 +19,95 @@ logger = logging.getLogger("cei")
 router = APIRouter(prefix="/site-events", tags=["site-events"])
 
 
+# --- Canonical definition: system-generated events MUST have created_by_user_id = NULL ---
+# Keep this tight and explicit so you don't accidentally null out operator actions.
+SYSTEM_SITE_EVENT_TYPES: Set[str] = {
+    # alerts engine
+    "alert_triggered",
+    # baseline engine
+    "baseline_deviation_high_24h",
+    "baseline_deviation_low_24h",
+    # add other fully-automatic types here as you create them
+}
+
+
 def _utcnow() -> datetime:
     # timezone-aware UTC timestamp to match DateTime(timezone=True)
     return datetime.now(timezone.utc)
+
+
+def _try_parse_site_numeric_id(site_id: str) -> Optional[int]:
+    if not site_id:
+        return None
+    s = site_id.strip()
+    if s.startswith("site-"):
+        try:
+            return int(s.split("site-")[-1])
+        except ValueError:
+            return None
+    try:
+        return int(s)
+    except ValueError:
+        return None
+
+
+def _normalize_site_id(raw: Optional[str]) -> Optional[str]:
+    """
+    Accept:
+      - 'site-3'
+      - '3'
+      - '  site-3  '
+    Return canonical 'site-<n>' when numeric is extractable.
+    """
+    if raw is None:
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    n = _try_parse_site_numeric_id(s)
+    if n is not None:
+        return f"site-{n}"
+    return s
+
+
+def _is_system_event_row(r: SiteEvent) -> bool:
+    """
+    System events are identified by:
+      - type in SYSTEM_SITE_EVENT_TYPES
+      - created_by_user_id is NULL
+    """
+    try:
+        return (r.type in SYSTEM_SITE_EVENT_TYPES) and (r.created_by_user_id is None)
+    except Exception:
+        return False
+
+
+def _dedupe_system_timeline_rows(rows: List[SiteEvent]) -> List[SiteEvent]:
+    """
+    Prevent timeline spam from repeated polling and repeated auto-emits.
+
+    Strategy (fail-safe and minimal):
+      - Only dedupe SYSTEM events (operator notes remain untouched).
+      - Keep the newest row per (site_id, type, title, body) since rows are
+        ordered newest-first.
+      - This collapses identical “same event” repeats while preserving distinct
+        system events (e.g., high vs low, different titles/bodies).
+    """
+    seen: Set[Tuple[Optional[str], str, Optional[str], Optional[str]]] = set()
+    out: List[SiteEvent] = []
+
+    for r in rows:
+        if not _is_system_event_row(r):
+            out.append(r)
+            continue
+
+        key = (r.site_id, str(r.type), r.title, r.body)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+
+    return out
 
 
 class SiteEventOut(BaseModel):
@@ -54,6 +140,10 @@ class SiteEventCreate(BaseModel):
 
     body:
       - Free-form text body for the event.
+
+    IMPORTANT:
+    - This endpoint is ONLY for operator-driven events.
+    - System events (alert_triggered, baseline_deviation_*, etc.) must never be created here.
     """
 
     type: Optional[str] = None
@@ -110,21 +200,6 @@ def _resolve_org_context(user: Any) -> Tuple[Optional[int], Optional[Set[str]]]:
     return organization_id, allowed_site_ids
 
 
-def _try_parse_site_numeric_id(site_id: str) -> Optional[int]:
-    if not site_id:
-        return None
-    site_id = site_id.strip()
-    if site_id.startswith("site-"):
-        try:
-            return int(site_id.split("site-")[-1])
-        except ValueError:
-            return None
-    try:
-        return int(site_id)
-    except ValueError:
-        return None
-
-
 def _build_site_name_map(db: Session, site_ids: Set[str]) -> Dict[str, str]:
     """
     Best-effort mapping from site_events.site_id (timeseries-style) -> human-readable site name.
@@ -169,7 +244,7 @@ def _build_site_name_map(db: Session, site_ids: Set[str]) -> Dict[str, str]:
 def list_site_events(
     site_id: Optional[str] = Query(
         None,
-        description="Optional timeseries site_id filter (e.g. 'site-1').",
+        description="Optional timeseries site_id filter (e.g. 'site-1' or '1').",
     ),
     window_hours: Optional[int] = Query(
         168,
@@ -180,7 +255,7 @@ def list_site_events(
     event_type: Optional[str] = Query(
         None,
         alias="type",
-        description="Optional event type filter (e.g. 'alert_triggered', 'alert_status_changed').",
+        description="Optional event type filter (e.g. 'alert_triggered', 'operator_note').",
     ),
     limit: int = Query(
         100,
@@ -193,24 +268,26 @@ def list_site_events(
         ge=1,
         description="Page number for offset-based pagination (used together with limit).",
     ),
+    dedupe: bool = Query(
+        True,
+        description=(
+            "If true, collapses duplicate system-generated events (same site_id/type/title/body) "
+            "to prevent timeline spam under repeated polling."
+        ),
+    ),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ) -> List[SiteEventOut]:
     """
     Organization-scoped site activity timeline.
 
-    Returns SiteEvent rows for the caller's organization, optionally filtered by:
-    - site_id (timeseries ID style, e.g. 'site-1')
-    - window_hours (look-back from now)
-    - type (event_type)
-    - limit (max rows)
-    - page (for offset-based pagination)
+    Note on spam control:
+      - By default we dedupe identical SYSTEM events (operator events are never deduped).
+      - This keeps the feed useful: clients care about over/under signals, not repeated clones.
     """
     organization_id, _allowed_site_ids = _resolve_org_context(user)
 
     if organization_id is None:
-        # In a true multi-tenant deployment we expect users to have an org.
-        # If not, we treat it as misconfigured and fail fast.
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Site events require an organization context.",
@@ -219,8 +296,9 @@ def list_site_events(
     now = _utcnow()
     q = db.query(SiteEvent).filter(SiteEvent.organization_id == organization_id)
 
-    if site_id:
-        q = q.filter(SiteEvent.site_id == site_id)
+    normalized_site_id = _normalize_site_id(site_id)
+    if normalized_site_id:
+        q = q.filter(SiteEvent.site_id == normalized_site_id)
 
     if window_hours is not None and window_hours > 0:
         window_start = now - timedelta(hours=window_hours)
@@ -229,7 +307,6 @@ def list_site_events(
     if event_type:
         q = q.filter(SiteEvent.type == event_type)
 
-    # Apply ordering, then offset + limit for pagination
     q = q.order_by(SiteEvent.created_at.desc())
 
     offset = (page - 1) * limit
@@ -237,7 +314,9 @@ def list_site_events(
 
     rows: List[SiteEvent] = q.all()
 
-    # Build site name map for convenience in the UI
+    if dedupe and rows:
+        rows = _dedupe_system_timeline_rows(rows)
+
     site_ids: Set[str] = {r.site_id for r in rows if r.site_id}
     site_name_map = _build_site_name_map(db, site_ids)
 
@@ -276,11 +355,9 @@ def create_site_event(
     """
     Create an operator-driven site event for a given site_id.
 
-    This powers the "Add note" / "Operator event" workflow in the SiteView timeline.
-
-    Constraints:
-    - Scoped to the caller's organization_id.
-    - Optionally constrained by allowed_site_ids (if present).
+    Hard rule:
+    - This endpoint MUST NOT allow creation of system event types.
+    - Operator events always have created_by_user_id set to the current user id.
     """
     organization_id, allowed_site_ids = _resolve_org_context(user)
 
@@ -290,24 +367,37 @@ def create_site_event(
             detail="Site events require an organization context.",
         )
 
-    site_id = (site_id or "").strip()
-    if not site_id:
+    normalized_site_id = _normalize_site_id(site_id)
+    if not normalized_site_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="site_id path parameter is required.",
         )
 
-    # If we have an explicit list of allowed site_ids, enforce it
-    if allowed_site_ids is not None and site_id not in allowed_site_ids:
-        # Return 404 rather than 403 to avoid leaking other orgs' site_ids
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Site not found in this organization.",
-        )
+    # If we have an explicit list of allowed site_ids, enforce it (defense-in-depth)
+    if allowed_site_ids is not None:
+        # allowed_site_ids may include both 'site-<n>' and '<n>' — normalize for comparison
+        normalized_allow: Set[str] = set()
+        for s in allowed_site_ids:
+            ns = _normalize_site_id(s)
+            if ns:
+                normalized_allow.add(ns)
+        if normalized_site_id not in normalized_allow:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Site not found in this organization.",
+            )
 
     # Normalize type and validate minimum content
     raw_type = (payload.type or "").strip()
     event_type = raw_type or "note"
+
+    # Block creation of system event types via this operator endpoint
+    if event_type in SYSTEM_SITE_EVENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This event type is system-generated and cannot be created manually.",
+        )
 
     title = (payload.title or "").strip() or None
     body = (payload.body or "").strip() or None
@@ -319,34 +409,40 @@ def create_site_event(
         )
 
     if title is None and body is not None:
-        # Fallback: derive a very short title from the body
         snippet = body.strip().splitlines()[0]
         if len(snippet) > 80:
             snippet = snippet[:77] + "..."
         title = snippet or "Operator note"
 
-    created_by_user_id: Optional[int]
+    # Operator events must always be attributed to the current user
+    user_id: Optional[int]
     try:
-        created_by_user_id = getattr(user, "id", None)
+        user_id = getattr(user, "id", None)
+        if user_id is not None:
+            user_id = int(user_id)
     except Exception:
-        created_by_user_id = None
+        user_id = None
+
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Cannot create an operator event without an authenticated user.",
+        )
 
     row = SiteEvent(
         organization_id=organization_id,
-        site_id=site_id,
+        site_id=normalized_site_id,
         type=event_type,
-        title=title,  # SiteEvent.title is nullable=False in your model
+        title=title,  # SiteEvent.title is required in your model
         body=body,
-        created_at=_utcnow(),  # timezone-aware UTC
-        created_by_user_id=created_by_user_id,
+        created_at=_utcnow(),
+        created_by_user_id=user_id,
     )
 
     db.add(row)
     db.commit()
     db.refresh(row)
 
-    # We don't attempt to resolve site_name here; the GET endpoint
-    # is responsible for enriching with human-readable labels.
     return SiteEventOut.model_validate(
         {
             "id": row.id,

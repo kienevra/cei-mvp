@@ -1,7 +1,8 @@
-# //backend/app/api/v1/analytics.py
+# backend/app/api/v1/analytics.py
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import logging
+from typing import Any, Dict, List, Optional, Set, Tuple
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -20,6 +21,8 @@ from app.services.analytics import (
     compute_baseline_profile,
     compute_site_forecast_stub,
 )
+
+logger = logging.getLogger("cei")
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -103,10 +106,9 @@ class SiteInsightsOut(BaseModel):
     baseline_profile: Optional[BaselineProfileOut] = None
 
     # ---- Cost engine: OPEX based on energy consumption ----
-    # All optional, populated when the org has an electricity_price_per_kwh set.
-    actual_cost: Optional[float] = None        # cost of total_actual_kwh
-    expected_cost: Optional[float] = None      # cost of total_expected_kwh
-    cost_delta: Optional[float] = None         # actual_cost - expected_cost (positive = overspend)
+    actual_cost: Optional[float] = None
+    expected_cost: Optional[float] = None
+    cost_delta: Optional[float] = None
     currency_code: Optional[str] = None
 
 
@@ -126,7 +128,6 @@ class SiteForecastOut(BaseModel):
     generated_at: str
     method: str  # e.g. "stub_baseline_v1"
 
-    # Warm-up metadata for the baseline underpinning this forecast
     baseline_total_history_days: Optional[int] = None
     baseline_is_warming_up: Optional[bool] = None
     baseline_confidence_level: Optional[str] = None
@@ -146,25 +147,133 @@ class SiteKpiOut(BaseModel):
     prev_7d_kwh: Optional[float] = None
     deviation_pct_7d: Optional[float] = None
 
-    # Warm-up / confidence metadata for the baseline used by the KPI
     total_history_days: Optional[int] = None
     is_baseline_warming_up: Optional[bool] = None
     confidence_level: Optional[str] = None
 
     # ---- Cost engine KPIs ----
-    # These are computed from org-level electricity_price_per_kwh when available.
     last_24h_cost: Optional[float] = None
     expected_24h_cost: Optional[float] = None
-    cost_savings_24h: Optional[float] = None  # expected - actual (can be negative if overspending)
+    cost_savings_24h: Optional[float] = None
 
     last_7d_cost: Optional[float] = None
     expected_7d_cost: Optional[float] = None
-    cost_savings_7d: Optional[float] = None   # expected - actual
+    cost_savings_7d: Optional[float] = None
 
     currency_code: Optional[str] = None
 
 
 # ========= Helpers =========
+
+SYSTEM_SITE_EVENT_TYPES = {
+    "kpi_overspend_24h",
+    "kpi_savings_24h",
+    "baseline_deviation_high_24h",
+    "baseline_deviation_low_24h",
+}
+
+
+def _try_parse_site_numeric_id(site_id: str) -> Optional[int]:
+    if not site_id:
+        return None
+    s = site_id.strip()
+    if s.startswith("site-"):
+        try:
+            return int(s.split("site-")[-1])
+        except ValueError:
+            return None
+    try:
+        return int(s)
+    except ValueError:
+        return None
+
+
+def _normalize_site_id(site_id: str) -> str:
+    n = _try_parse_site_numeric_id(site_id)
+    return f"site-{n}" if n is not None else site_id.strip()
+
+
+def _resolve_org_context(user: Any) -> Tuple[Optional[int], Optional[int]]:
+    org_id: Optional[int] = None
+    try:
+        raw = getattr(user, "organization_id", None)
+        if raw is not None:
+            org_id = int(raw)
+    except Exception:
+        org_id = None
+
+    if org_id is None:
+        try:
+            org = getattr(user, "organization", None)
+            if org is not None and getattr(org, "id", None) is not None:
+                org_id = int(getattr(org, "id"))
+        except Exception:
+            org_id = None
+
+    user_id: Optional[int] = None
+    try:
+        if getattr(user, "id", None) is not None:
+            user_id = int(getattr(user, "id"))
+    except Exception:
+        user_id = None
+
+    return org_id, user_id
+
+
+def _get_allowed_site_ids(db: Session, org_id: Optional[int]) -> Optional[Set[str]]:
+    if org_id is None:
+        return None
+    try:
+        rows = (
+            db.query(core_models.Site.id)
+            .filter(core_models.Site.org_id == org_id)
+            .all()
+        )
+        ids = {int(r[0]) for r in rows if r and r[0] is not None}
+        out: Set[str] = set()
+        for n in ids:
+            out.add(f"site-{n}")
+            out.add(str(n))
+        return out
+    except Exception:
+        logger.exception("Failed to build allowed_site_ids for org_id=%s", org_id)
+        return None
+
+
+def _enforce_site_access(
+    *,
+    db: Session,
+    org_id: Optional[int],
+    site_id_raw: str,
+) -> str:
+    site_id_canon = _normalize_site_id(site_id_raw)
+
+    if org_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization context is missing; access denied.",
+        )
+
+    n = _try_parse_site_numeric_id(site_id_canon)
+    if n is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid site_id format.",
+        )
+
+    site_row = (
+        db.query(core_models.Site)
+        .filter(core_models.Site.id == n)
+        .filter(core_models.Site.org_id == org_id)
+        .first()
+    )
+    if site_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this site_id.",
+        )
+
+    return f"site-{n}"
 
 
 def _build_empty_insights_payload(
@@ -174,16 +283,8 @@ def _build_empty_insights_payload(
     lookback_days: int,
     baseline_profile: Optional[BaselineProfileOut] = None,
 ) -> SiteInsightsOut:
-    """
-    When there is no usable insights data yet (no points for this site
-    in the requested window), we return a neutral "warming up" payload
-    instead of a 404 to keep the frontend contract stable.
-    """
-
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # If we do have a baseline_profile (e.g. from long-term history but
-    # no recent points), keep it; otherwise baseline_profile stays None.
     total_history_days = (
         baseline_profile.total_history_days
         if baseline_profile and baseline_profile.total_history_days is not None
@@ -218,11 +319,6 @@ def _build_empty_kpi_payload(
     site_id: str,
     lookback_days: int,
 ) -> SiteKpiOut:
-    """
-    Neutral KPI when there is no recent data. Keeps response_model shape
-    stable and lets the UI render a "warming up" state instead of hard
-    failing on 404.
-    """
     now = datetime.now(timezone.utc)
 
     return SiteKpiOut(
@@ -251,19 +347,10 @@ def _get_org_for_user(
     db: Session,
     user: Any,
 ) -> Optional[core_models.Organization]:
-    """
-    Resolve the Organization row for the current user.
-
-    Strategy:
-      1. Prefer the relationship attribute: user.organization
-      2. Fallback to querying by organization_id via core_models.Organization.
-    """
-    # 1) Relationship already loaded? This will lazy-load via the active Session.
     org = getattr(user, "organization", None)
     if org is not None:
         return org
 
-    # 2) Fallback: use organization_id if present
     org_id = getattr(user, "organization_id", None)
     if not org_id:
         return None
@@ -281,14 +368,6 @@ def _compute_cost_from_kwh(
     expected_kwh: Optional[float],
     org: Optional[core_models.Organization],
 ) -> Dict[str, Optional[float]]:
-    """
-    Simple OPEX cost calculator.
-
-    For now:
-      - Treat all kWh as electricity.
-      - Use org.electricity_price_per_kwh if set.
-      - Gas or more complex tariff models can be layered on later.
-    """
     if org is None:
         return {
             "actual_cost": None,
@@ -320,7 +399,7 @@ def _compute_cost_from_kwh(
         expected_cost = None
 
     if actual_cost is not None and expected_cost is not None:
-        cost_delta = actual_cost - expected_cost  # positive = overspend vs baseline
+        cost_delta = actual_cost - expected_cost
     else:
         cost_delta = None
 
@@ -346,57 +425,45 @@ def _maybe_emit_kpi_site_events(
     cost_savings_24h: Optional[float],
     currency_code: Optional[str],
 ) -> None:
-    """
-    Best-effort: write auto "decision events" into site_events based on KPI signals.
-
-    Hard rules (MVP):
-      - Only emit at most once per 24h per (site_id, type).
-      - Never break KPI response if this fails.
-
-    This is intentionally conservative and minimal.
-    """
     if org_id is None:
         return
 
     now = datetime.now(timezone.utc)
     window_start = now - timedelta(hours=24)
 
-    # Tunables (keep conservative for MVP)
-    COST_ABS_THRESHOLD = 10.0     # currency units (e.g. €10)
-    DEV_PCT_THRESHOLD = 10.0      # ±10%
+    site_id = _normalize_site_id(site_id)
+
+    COST_ABS_THRESHOLD = 10.0
+    DEV_PCT_THRESHOLD = 10.0
 
     def already_emitted(event_type: str) -> bool:
         existing = (
             db.query(core_models.SiteEvent)
-            .filter(core_models.SiteEvent.organization_id == org_id)
+            .filter(core_models.SiteEvent.org_id == org_id)
             .filter(core_models.SiteEvent.site_id == site_id)
-            .filter(core_models.SiteEvent.type == event_type)
+            .filter(core_models.SiteEvent.kind == event_type)
             .filter(core_models.SiteEvent.created_at >= window_start)
             .first()
         )
         return existing is not None
 
-    def emit(event_type: str, title: str, body: Optional[str]) -> None:
+    def stage(event_type: str, title: str, body: Optional[str]) -> None:
         if already_emitted(event_type):
             return
-
         row = core_models.SiteEvent(
-            organization_id=org_id,
+            org_id=org_id,
             site_id=site_id,
-            type=event_type,
+            kind=event_type,
             title=title,
-            body=body,
-            created_by_user_id=created_by_user_id,
+            description=body,
+            created_by_user_id=None,
             created_at=now,
         )
         db.add(row)
-        db.commit()
 
-    # ---- Cost-based events (highest ROI) ----
-    # cost_savings_24h = expected - actual (positive = savings, negative = overspend)
     if cost_savings_24h is not None and expected_24h_cost is not None and last_24h_cost is not None:
         cur = (currency_code or "").strip() or ""
-        # Overspend
+
         if cost_savings_24h <= -COST_ABS_THRESHOLD:
             overspend = abs(cost_savings_24h)
             title = f"Overspend last 24h: {cur} {overspend:.2f}".strip()
@@ -406,9 +473,8 @@ def _maybe_emit_kpi_site_events(
                 + (f" vs Baseline: {baseline_24h_kwh:.2f} kWh" if baseline_24h_kwh is not None else "")
                 + (f" ({deviation_pct_24h:+.1f}%)" if deviation_pct_24h is not None else "")
             )
-            emit("kpi_overspend_24h", title, body)
+            stage("kpi_overspend_24h", title, body)
 
-        # Savings
         if cost_savings_24h >= COST_ABS_THRESHOLD:
             title = f"Savings last 24h: {cur} {cost_savings_24h:.2f}".strip()
             body = (
@@ -417,9 +483,8 @@ def _maybe_emit_kpi_site_events(
                 + (f" vs Baseline: {baseline_24h_kwh:.2f} kWh" if baseline_24h_kwh is not None else "")
                 + (f" ({deviation_pct_24h:+.1f}%)" if deviation_pct_24h is not None else "")
             )
-            emit("kpi_savings_24h", title, body)
+            stage("kpi_savings_24h", title, body)
 
-    # ---- Deviation-based events (useful even without tariff) ----
     if deviation_pct_24h is not None:
         if deviation_pct_24h >= DEV_PCT_THRESHOLD:
             title = f"High deviation vs baseline (24h): {deviation_pct_24h:+.1f}%"
@@ -427,7 +492,7 @@ def _maybe_emit_kpi_site_events(
                 f"Actual: {last_24h_kwh:.2f} kWh"
                 + (f" vs Baseline: {baseline_24h_kwh:.2f} kWh" if baseline_24h_kwh is not None else "")
             )
-            emit("baseline_deviation_high_24h", title, body)
+            stage("baseline_deviation_high_24h", title, body)
 
         if deviation_pct_24h <= -DEV_PCT_THRESHOLD:
             title = f"Low usage vs baseline (24h): {deviation_pct_24h:+.1f}%"
@@ -435,7 +500,12 @@ def _maybe_emit_kpi_site_events(
                 f"Actual: {last_24h_kwh:.2f} kWh"
                 + (f" vs Baseline: {baseline_24h_kwh:.2f} kWh" if baseline_24h_kwh is not None else "")
             )
-            emit("baseline_deviation_low_24h", title, body)
+            stage("baseline_deviation_low_24h", title, body)
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
 
 
 # ========= Routes =========
@@ -453,33 +523,20 @@ def get_site_insights(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ) -> SiteInsightsOut:
-    """
-    Return a combined deterministic + statistical insight payload for a site.
-
-    - deterministic/statistical (existing behaviour):
-        * call compute_site_insights(...) to get:
-          total_actual, total_expected, deviation_pct, per-hour bands, etc.
-
-    - statistical baseline (additive):
-        * call compute_baseline_profile(...) over the same lookback window
-          and expose global_mean/p50/p90 plus per-bucket stats.
-
-    - NEW: cost engine
-        * multiply kWh by org-level electricity_price_per_kwh when available
-          to expose OPEX metrics (actual_cost, expected_cost, cost_delta).
-
-    If there is no usable data yet, we return a neutral "warming up" payload
-    (200) instead of 404, so the frontend can show a graceful empty state.
-    """
-
     org = _get_org_for_user(db, user)
+    org_id, user_id = _resolve_org_context(user)
 
-    # --- Statistical baseline profile (can exist even if no recent data) ---
+    site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
+
+    allowed_site_ids = _get_allowed_site_ids(db, org_id)
+
     baseline = compute_baseline_profile(
         db=db,
-        site_id=site_id,
-        meter_id=None,  # per-meter later
+        site_id=site_id_canon,
+        meter_id=None,
         lookback_days=lookback_days,
+        allowed_site_ids=sorted(list(allowed_site_ids)) if allowed_site_ids is not None else None,
+        organization_id=org_id,
     )
 
     baseline_profile_out: Optional[BaselineProfileOut] = None
@@ -508,20 +565,19 @@ def get_site_insights(
             buckets=bucket_outs,
         )
 
-    # --- Deterministic/statistical insights ---
     try:
         insights: Optional[Dict[str, Any]] = compute_site_insights(
             db=db,
-            site_id=site_id,
+            site_id=site_id_canon,
             window_hours=window_hours,
             lookback_days=lookback_days,
+            organization_id=org_id,
+            allowed_site_ids=sorted(list(allowed_site_ids)) if allowed_site_ids is not None else None,
         )
     except HTTPException as exc:
-        # If the underlying engine uses 404 for "no data yet", convert to a
-        # neutral payload. Any other status is propagated.
         if exc.status_code == status.HTTP_404_NOT_FOUND:
             return _build_empty_insights_payload(
-                site_id=site_id,
+                site_id=site_id_canon,
                 window_hours=window_hours,
                 lookback_days=lookback_days,
                 baseline_profile=baseline_profile_out,
@@ -529,15 +585,13 @@ def get_site_insights(
         raise
 
     if not insights:
-        # No insights object returned → treat as "warming up"
         return _build_empty_insights_payload(
-            site_id=site_id,
+            site_id=site_id_canon,
             window_hours=window_hours,
             lookback_days=lookback_days,
             baseline_profile=baseline_profile_out,
         )
 
-    # Validate and map hours list into typed HourBandOut objects
     raw_hours = insights.get("hours", []) or []
     hours_out: List[HourBandOut] = []
     for h in raw_hours:
@@ -553,35 +607,53 @@ def get_site_insights(
             )
         )
 
-    # Warm-up / confidence metadata from insights engine
     raw_total_history_days = insights.get("total_history_days")
     total_history_days: Optional[int] = (
         int(raw_total_history_days) if raw_total_history_days is not None else None
     )
-    is_baseline_warming_up: Optional[bool] = insights.get(
-        "is_baseline_warming_up"
-    )
+    is_baseline_warming_up: Optional[bool] = insights.get("is_baseline_warming_up")
     confidence_level: Optional[str] = insights.get("confidence_level")
 
     total_actual_kwh = float(insights.get("total_actual_kwh", 0.0))
     total_expected_raw = insights.get("total_expected_kwh")
-    total_expected_kwh: float = (
-        float(total_expected_raw) if total_expected_raw is not None else 0.0
-    )
+    total_expected_kwh: float = float(total_expected_raw) if total_expected_raw is not None else 0.0
 
-    # Cost engine: OPEX based on kWh and org tariff
     cost_info = _compute_cost_from_kwh(
         actual_kwh=total_actual_kwh,
         expected_kwh=total_expected_kwh if total_expected_raw is not None else None,
         org=org,
     )
 
+    try:
+        if int(window_hours) == 24:
+            deviation_pct = insights.get("deviation_pct")
+
+            last_24h_cost = cost_info["actual_cost"]
+            expected_24h_cost = cost_info["expected_cost"]
+            cost_savings_24h: Optional[float] = None
+            if last_24h_cost is not None and expected_24h_cost is not None:
+                cost_savings_24h = expected_24h_cost - last_24h_cost
+
+            _maybe_emit_kpi_site_events(
+                db=db,
+                org_id=org_id,
+                site_id=site_id_canon,
+                created_by_user_id=user_id,
+                last_24h_kwh=float(total_actual_kwh or 0.0),
+                baseline_24h_kwh=float(total_expected_raw) if total_expected_raw is not None else None,
+                deviation_pct_24h=float(deviation_pct) if deviation_pct is not None else None,
+                last_24h_cost=last_24h_cost,
+                expected_24h_cost=expected_24h_cost,
+                cost_savings_24h=cost_savings_24h,
+                currency_code=cost_info["currency_code"],
+            )
+    except Exception:
+        pass
+
     return SiteInsightsOut(
-        site_id=str(insights.get("site_id", site_id)),
+        site_id=str(insights.get("site_id", site_id_canon)),
         window_hours=int(insights.get("window_hours", window_hours)),
-        baseline_lookback_days=int(
-            insights.get("baseline_lookback_days", lookback_days)
-        ),
+        baseline_lookback_days=int(insights.get("baseline_lookback_days", lookback_days)),
         total_actual_kwh=total_actual_kwh,
         total_expected_kwh=total_expected_kwh,
         deviation_pct=float(insights.get("deviation_pct", 0.0)),
@@ -617,41 +689,29 @@ def get_site_kpi(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ) -> SiteKpiOut:
-    """
-    Site-level KPI snapshot using the existing analytics engine:
-
-      - Last 24h vs baseline (expected 24h) via compute_site_insights(window_hours=24)
-      - Last 7 days total kWh via compute_site_insights(window_hours=168)
-      - NEW: cost KPIs derived from org-level electricity_price_per_kwh.
-
-    If there is no usable data yet, we return a neutral "warming up" KPI
-    instead of a 404, to keep the frontend contract and KPIs stable.
-    """
-
     now = datetime.now(timezone.utc)
     org = _get_org_for_user(db, user)
+    org_id, user_id = _resolve_org_context(user)
 
-    # --- 24h: actual vs expected (baseline) ---
+    site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
+    allowed_site_ids = _get_allowed_site_ids(db, org_id)
+
     try:
         insights_24h: Optional[Dict[str, Any]] = compute_site_insights(
             db=db,
-            site_id=site_id,
+            site_id=site_id_canon,
             window_hours=24,
             lookback_days=lookback_days,
+            organization_id=org_id,
+            allowed_site_ids=sorted(list(allowed_site_ids)) if allowed_site_ids is not None else None,
         )
     except HTTPException as exc:
         if exc.status_code == status.HTTP_404_NOT_FOUND:
-            return _build_empty_kpi_payload(
-                site_id=site_id,
-                lookback_days=lookback_days,
-            )
+            return _build_empty_kpi_payload(site_id=site_id_canon, lookback_days=lookback_days)
         raise
 
     if not insights_24h:
-        return _build_empty_kpi_payload(
-            site_id=site_id,
-            lookback_days=lookback_days,
-        )
+        return _build_empty_kpi_payload(site_id=site_id_canon, lookback_days=lookback_days)
 
     last_24h_kwh = float(insights_24h.get("total_actual_kwh", 0.0))
 
@@ -662,21 +722,15 @@ def get_site_kpi(
 
     deviation_pct_24h: Optional[float] = None
     if baseline_24h_kwh is not None and baseline_24h_kwh != 0.0:
-        deviation_pct_24h = (
-            (last_24h_kwh - baseline_24h_kwh) / baseline_24h_kwh * 100.0
-        )
+        deviation_pct_24h = (last_24h_kwh - baseline_24h_kwh) / baseline_24h_kwh * 100.0
 
-    # Warm-up / confidence metadata for the baseline underpinning this KPI
     raw_total_history_days = insights_24h.get("total_history_days")
     total_history_days: Optional[int] = (
         int(raw_total_history_days) if raw_total_history_days is not None else None
     )
-    is_baseline_warming_up: Optional[bool] = insights_24h.get(
-        "is_baseline_warming_up"
-    )
+    is_baseline_warming_up: Optional[bool] = insights_24h.get("is_baseline_warming_up")
     confidence_level: Optional[str] = insights_24h.get("confidence_level")
 
-    # --- 24h cost metrics ---
     cost_24h = _compute_cost_from_kwh(
         actual_kwh=last_24h_kwh,
         expected_kwh=baseline_24h_kwh,
@@ -688,13 +742,14 @@ def get_site_kpi(
     if last_24h_cost is not None and expected_24h_cost is not None:
         cost_savings_24h = expected_24h_cost - last_24h_cost
 
-    # --- 7d: total actual over last 168h ---
     try:
         insights_7d: Optional[Dict[str, Any]] = compute_site_insights(
             db=db,
-            site_id=site_id,
+            site_id=site_id_canon,
             window_hours=24 * 7,
             lookback_days=lookback_days,
+            organization_id=org_id,
+            allowed_site_ids=sorted(list(allowed_site_ids)) if allowed_site_ids is not None else None,
         )
     except HTTPException as exc:
         if exc.status_code == status.HTTP_404_NOT_FOUND:
@@ -712,11 +767,9 @@ def get_site_kpi(
         last_7d_kwh = 0.0
         baseline_7d_kwh = None
 
-    # For now we keep previous 7d comparison neutral
     prev_7d_kwh: Optional[float] = None
     deviation_pct_7d: Optional[float] = None
 
-    # --- 7d cost metrics ---
     cost_7d = _compute_cost_from_kwh(
         actual_kwh=last_7d_kwh,
         expected_kwh=baseline_7d_kwh,
@@ -728,25 +781,14 @@ def get_site_kpi(
     if last_7d_cost is not None and expected_7d_cost is not None:
         cost_savings_7d = expected_7d_cost - last_7d_cost
 
-    # Currency: prefer whatever cost helpers resolved
     currency_code = cost_24h["currency_code"] or cost_7d["currency_code"]
 
-    # --- NEW: emit decision events (best effort, never breaks KPI response) ---
     try:
-        org_id: Optional[int] = None
-        if org is not None and getattr(org, "id", None) is not None:
-            org_id = int(getattr(org, "id"))
-        else:
-            raw_org_id = getattr(user, "organization_id", None)
-            org_id = int(raw_org_id) if raw_org_id is not None else None
-
-        created_by_user_id: Optional[int] = getattr(user, "id", None)
-
         _maybe_emit_kpi_site_events(
             db=db,
             org_id=org_id,
-            site_id=site_id,
-            created_by_user_id=created_by_user_id,
+            site_id=site_id_canon,
+            created_by_user_id=user_id,
             last_24h_kwh=last_24h_kwh,
             baseline_24h_kwh=baseline_24h_kwh,
             deviation_pct_24h=deviation_pct_24h,
@@ -756,11 +798,10 @@ def get_site_kpi(
             currency_code=currency_code,
         )
     except Exception:
-        # best-effort only
         pass
 
     return SiteKpiOut(
-        site_id=site_id,
+        site_id=_normalize_site_id(site_id_canon),
         now_utc=now,
         last_24h_kwh=last_24h_kwh,
         baseline_24h_kwh=baseline_24h_kwh,
@@ -809,23 +850,19 @@ def get_site_forecast(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ) -> SiteForecastOut:
-    """
-    Short-term forecast endpoint (stub implementation).
+    org_id, _ = _resolve_org_context(user)
+    site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
 
-    For now:
-      - Builds a statistical baseline over `lookback_days`.
-      - Computes recent deviation over `history_window_hours`.
-      - Projects the baseline forward `horizon_hours` with a simple uplift factor.
+    allowed_site_ids = _get_allowed_site_ids(db, org_id)
 
-    The shape is stable so we can swap in a real ML model later without breaking
-    the front-end or any API consumers.
-    """
     forecast = compute_site_forecast_stub(
         db=db,
-        site_id=site_id,
+        site_id=site_id_canon,
         history_window_hours=history_window_hours,
         horizon_hours=horizon_hours,
         lookback_days=lookback_days,
+        allowed_site_ids=sorted(list(allowed_site_ids)) if allowed_site_ids is not None else None,
+        organization_id=org_id,
     )
 
     if not forecast:
@@ -856,14 +893,10 @@ def get_site_forecast(
         )
 
     return SiteForecastOut(
-        site_id=str(forecast.get("site_id", site_id)),
-        history_window_hours=int(
-            forecast.get("history_window_hours", history_window_hours)
-        ),
+        site_id=str(forecast.get("site_id", _normalize_site_id(site_id_canon))),
+        history_window_hours=int(forecast.get("history_window_hours", history_window_hours)),
         horizon_hours=int(forecast.get("horizon_hours", horizon_hours)),
-        baseline_lookback_days=int(
-            forecast.get("baseline_lookback_days", lookback_days)
-        ),
+        baseline_lookback_days=int(forecast.get("baseline_lookback_days", lookback_days)),
         generated_at=str(forecast.get("generated_at", "")),
         method=str(forecast.get("method", "stub_baseline_v1")),
         baseline_total_history_days=forecast.get("baseline_total_history_days"),
