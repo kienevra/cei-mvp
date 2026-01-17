@@ -7,12 +7,12 @@ from typing import List, Optional, Dict, Literal, Any, Set, Tuple
 
 from fastapi import APIRouter, Depends, Query, status, HTTPException, Path
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.db.session import get_db
-from app.models import TimeseriesRecord, AlertEvent, SiteEvent  # ✅ canonical models import
+from app.models import TimeseriesRecord, AlertEvent, SiteEvent, Site  # ✅ include Site (optional cleanup)
 from app.services.analytics import compute_site_insights  # statistical engine
 
 logger = logging.getLogger("cei")
@@ -128,6 +128,14 @@ def get_thresholds_for_site(site_id: Optional[str]) -> AlertThresholdsConfig:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _utcnow_naive() -> datetime:
+    """
+    SQLite-safe 'now' (naive UTC).
+    Comparing tz-aware datetimes in SQLite can behave inconsistently depending on driver/storage.
+    """
+    return datetime.utcnow()
 
 
 def _try_parse_site_numeric_id(site_id: str) -> Optional[int]:
@@ -353,7 +361,6 @@ def list_alert_history(
     site_name_map: Dict[str, str] = {}
     if site_ids:
         try:
-            from app.models import Site  # type: ignore
             numeric_ids = set()
             for raw in site_ids:
                 parsed = _try_parse_site_numeric_id(raw)
@@ -479,7 +486,6 @@ def update_alert_event(
     site_name: Optional[str] = None
     if alert_row.site_id:
         try:
-            from app.models import Site  # type: ignore
             parsed = _try_parse_site_numeric_id(alert_row.site_id)
             if parsed is not None:
                 s = db.query(Site).filter(Site.id == parsed).first()
@@ -559,46 +565,146 @@ def _persist_alert_events(
     """
     Best-effort append-only persistence into alert_events + site_events.
 
-    ✅ IMPORTANT FIX:
-    - If organization_id is None, DO NOT write SiteEvent/AlertEvent (it would never show in org-scoped timeline).
-    - These are SYSTEM events: created_by_user_id must be NULL.
+    Hard rules:
+    - If organization_id is None, do NOT write.
+    - SYSTEM events: created_by_user_id must be NULL.
+
+    Dedupe (robust, SQLite/Postgres safe, idempotent under spam):
+    - Never rely on DB datetime comparisons (SQLite tz-naive/tz-aware inconsistencies).
+    - Treat /alerts as potentially high-QPS: do a tight identity-based dedupe in Python.
+    - Identity: (org_id, site_id variants, title, metric/rule_key, window_hours)
+    - Recency: within last 24h, but using a robust timestamp choice:
+        prefer triggered_at (if sane), else created_at.
+    - Also dedupe SiteEvent (timeline) by (org_id, site_id variants, type, title, body) + same recency logic.
+
+    IMPORTANT CHANGE (fix for your current failure mode):
+    - We do NOT "continue" the whole function when SiteEvent already exists; we just skip inserting SiteEvent.
+      AlertEvent dedupe and insertion remains independent.
+    - We use the SAME recency+identity logic for both, so either table won't explode under repeated calls.
     """
-    if not alerts:
+    if not alerts or organization_id is None:
         return
-    if organization_id is None:
-        return
+
+    now = _utcnow()
+    dedupe_since = now - timedelta(hours=24)
+
+    def _as_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    def _is_recent_dt(dt: Optional[datetime]) -> bool:
+        t = _as_aware_utc(dt)
+        return bool(t and t >= dedupe_since)
+
+    def _row_is_recent(row: Any) -> bool:
+        # Prefer triggered_at when available; fallback to created_at.
+        t = _as_aware_utc(getattr(row, "triggered_at", None)) or _as_aware_utc(getattr(row, "created_at", None))
+        return bool(t and t >= dedupe_since)
+
+    def _site_variants(sid: Optional[str]) -> List[str]:
+        if not sid:
+            return []
+        n = _try_parse_site_numeric_id(sid)
+        if n is not None:
+            return [f"site-{n}", str(n)]
+        return [sid]
 
     try:
         for a in alerts:
             try:
-                db.add(
-                    AlertEvent(
-                        organization_id=organization_id,
-                        site_id=a.site_id,
-                        rule_key=a.metric or "rule",
-                        severity=a.severity,
-                        title=a.title,
-                        message=a.message,
-                        metric=a.metric,
-                        window_hours=a.window_hours,
-                        status="open",
-                        owner_user_id=None,
-                        note=None,
-                        triggered_at=a.triggered_at,
-                    )
+                sid = a.site_id
+                sid_variants = _site_variants(sid)
+                wh = int(a.window_hours or 0)
+                rule_key = a.metric or "rule"
+                metric = a.metric
+
+                # -------------------------
+                # (A) AlertEvent dedupe/insert (history)
+                # -------------------------
+                ae_q = (
+                    db.query(AlertEvent)
+                    .filter(AlertEvent.organization_id == organization_id)
+                    .filter(AlertEvent.title == a.title)
+                    .filter((AlertEvent.window_hours == wh) | (AlertEvent.window_hours.is_(None)))
+                    .order_by(AlertEvent.created_at.desc())
                 )
 
-                db.add(
-                    SiteEvent(
-                        organization_id=organization_id,
-                        site_id=a.site_id,
-                        type="alert_triggered",
-                        title=a.title,
-                        body=a.message,
-                        created_by_user_id=None,  # system
-                        created_at=_utcnow(),
+                if sid_variants:
+                    ae_q = ae_q.filter(AlertEvent.site_id.in_(sid_variants))
+                else:
+                    ae_q = ae_q.filter(AlertEvent.site_id.is_(None))
+
+                latest_ae = None
+                if metric is not None:
+                    latest_ae = ae_q.filter(AlertEvent.metric == metric).first()
+                if latest_ae is None:
+                    latest_ae = ae_q.filter(AlertEvent.rule_key == rule_key).first()
+
+                should_insert_ae = True
+                if latest_ae is not None and _row_is_recent(latest_ae):
+                    should_insert_ae = False
+
+                if should_insert_ae:
+                    db.add(
+                        AlertEvent(
+                            organization_id=organization_id,
+                            site_id=sid,
+                            rule_key=rule_key,
+                            severity=a.severity,
+                            title=a.title,
+                            message=a.message,
+                            metric=metric,
+                            window_hours=wh,
+                            status="open",
+                            owner_user_id=None,
+                            note=None,
+                            triggered_at=a.triggered_at,
+                        )
                     )
-                )
+
+                # -------------------------
+                # (B) SiteEvent dedupe/insert (timeline) — independent from AlertEvent
+                # -------------------------
+                should_insert_se = True
+                if sid_variants:
+                    se_q = (
+                        db.query(SiteEvent)
+                        .filter(SiteEvent.organization_id == organization_id)
+                        .filter(SiteEvent.type == "alert_triggered")
+                        .filter(SiteEvent.site_id.in_(sid_variants))
+                        .filter(SiteEvent.title == a.title)
+                        .filter(SiteEvent.body == a.message)
+                        .order_by(SiteEvent.created_at.desc())
+                    )
+                    latest_se = se_q.first()
+                    if latest_se is not None and _is_recent_dt(getattr(latest_se, "created_at", None)):
+                        should_insert_se = False
+                else:
+                    # no site_id => no timeline event (keeps timeline sane)
+                    should_insert_se = False
+
+                if should_insert_se:
+                    db.add(
+                        SiteEvent(
+                            organization_id=organization_id,
+                            site_id=sid,
+                            type="alert_triggered",
+                            title=a.title,
+                            body=a.message,
+                            created_by_user_id=None,
+                            created_at=_utcnow(),
+                        )
+                    )
+
+                # Make inserts visible to subsequent loop iterations
+                try:
+                    db.flush()
+                except Exception:
+                    pass
+
             except Exception:
                 logger.exception("Failed to persist alert event for site_id=%s", a.site_id)
 
@@ -613,8 +719,6 @@ def _build_site_name_map(db: Session, stats_rows) -> Dict[str, str]:
     Best-effort mapping from timeseries.site_id -> Site.name.
     """
     try:
-        from app.models import Site  # type: ignore
-
         numeric_ids = set()
         for row in stats_rows:
             raw_id = getattr(row, "site_id", None)
@@ -696,12 +800,14 @@ def _generate_alerts_for_window(
     for row in stats_rows:
         sid = row.site_id or "unknown"
         try:
-            # ✅ IMPORTANT FIX: do not pass unsupported params (e.g. as_of) unless your service explicitly supports it
+            # ✅ FIX: pass org scope + allow-list into compute_site_insights
             insights = compute_site_insights(
                 db=db,
                 site_id=sid,
                 window_hours=window_hours,
                 lookback_days=30,
+                organization_id=organization_id,
+                allowed_site_ids=sorted(list(allowed_site_ids)) if allowed_site_ids is not None else None,
             )
         except Exception:
             logger.exception("Failed to compute insights for site_id=%s", sid)

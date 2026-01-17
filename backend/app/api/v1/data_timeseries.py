@@ -170,6 +170,17 @@ def _enforce_site_allowed_if_provided(
         )
 
 
+def _normalize_optional_param(raw: Optional[str]) -> Optional[str]:
+    """
+    Treat blank/whitespace query params as None.
+    This prevents accidental filtering on empty strings.
+    """
+    if raw is None:
+        return None
+    s = raw.strip()
+    return s if s else None
+
+
 @router.get("/summary", response_model=TimeseriesSummary)
 def get_timeseries_summary(
     site_id: Optional[str] = Query(None),
@@ -189,7 +200,10 @@ def get_timeseries_summary(
     now = datetime.utcnow()
     start = now - timedelta(hours=window_hours)
 
-    _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id)
+    site_id_norm = _normalize_optional_param(site_id)
+    meter_id_norm = _normalize_optional_param(meter_id)
+
+    _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id_norm)
 
     q = (
         db.query(
@@ -201,18 +215,18 @@ def get_timeseries_summary(
         .filter(TimeseriesRecord.timestamp >= start)
     )
 
-    if site_id:
-        q = q.filter(TimeseriesRecord.site_id == site_id)
-    if meter_id:
-        q = q.filter(TimeseriesRecord.meter_id == meter_id)
+    if site_id_norm:
+        q = q.filter(TimeseriesRecord.site_id == site_id_norm)
+    if meter_id_norm:
+        q = q.filter(TimeseriesRecord.meter_id == meter_id_norm)
 
     q = _apply_org_scope(q, org_ctx)
 
     total_value, points, min_ts, max_ts = q.one()
 
     return TimeseriesSummary(
-        site_id=site_id,
-        meter_id=meter_id,
+        site_id=site_id_norm,
+        meter_id=meter_id_norm,
         window_hours=window_hours,
         total_value=float(total_value or 0),
         points=int(points or 0),
@@ -242,14 +256,17 @@ def get_timeseries_series(
     now = datetime.utcnow()
     start = now - timedelta(hours=window_hours)
 
-    _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id)
+    site_id_norm = _normalize_optional_param(site_id)
+    meter_id_norm = _normalize_optional_param(meter_id)
+
+    _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id_norm)
 
     q = db.query(TimeseriesRecord).filter(TimeseriesRecord.timestamp >= start)
 
-    if site_id:
-        q = q.filter(TimeseriesRecord.site_id == site_id)
-    if meter_id:
-        q = q.filter(TimeseriesRecord.meter_id == meter_id)
+    if site_id_norm:
+        q = q.filter(TimeseriesRecord.site_id == site_id_norm)
+    if meter_id_norm:
+        q = q.filter(TimeseriesRecord.meter_id == meter_id_norm)
 
     q = _apply_org_scope(q, org_ctx)
 
@@ -265,8 +282,8 @@ def get_timeseries_series(
     points = [TimeseriesPoint(ts=ts, value=value) for ts, value in sorted_points]
 
     return TimeseriesSeries(
-        site_id=site_id,
-        meter_id=meter_id,
+        site_id=site_id_norm,
+        meter_id=meter_id_norm,
         window_hours=window_hours,
         resolution=resolution,
         points=points,
@@ -297,14 +314,17 @@ def export_timeseries_csv(
     now = datetime.utcnow()
     start = now - timedelta(hours=window_hours)
 
-    _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id)
+    site_id_norm = _normalize_optional_param(site_id)
+    meter_id_norm = _normalize_optional_param(meter_id)
+
+    _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id_norm)
 
     q = db.query(TimeseriesRecord).filter(TimeseriesRecord.timestamp >= start)
 
-    if site_id:
-        q = q.filter(TimeseriesRecord.site_id == site_id)
-    if meter_id:
-        q = q.filter(TimeseriesRecord.meter_id == meter_id)
+    if site_id_norm:
+        q = q.filter(TimeseriesRecord.site_id == site_id_norm)
+    if meter_id_norm:
+        q = q.filter(TimeseriesRecord.meter_id == meter_id_norm)
 
     q = _apply_org_scope(q, org_ctx)
     q = q.order_by(TimeseriesRecord.timestamp.asc())
@@ -433,14 +453,17 @@ def get_ingest_health(
     now = datetime.utcnow()
     start = now - timedelta(hours=window_hours)
 
-    _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id)
+    site_id_norm = _normalize_optional_param(site_id)
+    meter_id_norm = _normalize_optional_param(meter_id)
+
+    _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id_norm)
 
     q = db.query(TimeseriesRecord).filter(TimeseriesRecord.timestamp >= start)
 
-    if site_id:
-        q = q.filter(TimeseriesRecord.site_id == site_id)
-    if meter_id:
-        q = q.filter(TimeseriesRecord.meter_id == meter_id)
+    if site_id_norm:
+        q = q.filter(TimeseriesRecord.site_id == site_id_norm)
+    if meter_id_norm:
+        q = q.filter(TimeseriesRecord.meter_id == meter_id_norm)
 
     q = _apply_org_scope(q, org_ctx)
 

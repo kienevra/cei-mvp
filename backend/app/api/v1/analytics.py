@@ -165,7 +165,9 @@ class SiteKpiOut(BaseModel):
 
 # ========= Helpers =========
 
-SYSTEM_SITE_EVENT_TYPES = {
+# Keep this set local to analytics since we should not import API modules from other routers
+# (avoids circular imports). This set is ONLY used for "system emits" logic here.
+SYSTEM_SITE_EVENT_TYPES: Set[str] = {
     "kpi_overspend_24h",
     "kpi_savings_24h",
     "baseline_deviation_high_24h",
@@ -425,6 +427,16 @@ def _maybe_emit_kpi_site_events(
     cost_savings_24h: Optional[float],
     currency_code: Optional[str],
 ) -> None:
+    """
+    Emit system-generated site events from KPI/baseline signals.
+
+    IMPORTANT:
+    - These are SYSTEM events: created_by_user_id MUST remain NULL.
+    - Must use correct ORM attribute names per models.py:
+        SiteEvent.organization_id (DB column org_id)
+        SiteEvent.type            (DB column kind)
+        SiteEvent.body            (DB column description)
+    """
     if org_id is None:
         return
 
@@ -439,9 +451,9 @@ def _maybe_emit_kpi_site_events(
     def already_emitted(event_type: str) -> bool:
         existing = (
             db.query(core_models.SiteEvent)
-            .filter(core_models.SiteEvent.org_id == org_id)
+            .filter(core_models.SiteEvent.organization_id == org_id)
             .filter(core_models.SiteEvent.site_id == site_id)
-            .filter(core_models.SiteEvent.kind == event_type)
+            .filter(core_models.SiteEvent.type == event_type)
             .filter(core_models.SiteEvent.created_at >= window_start)
             .first()
         )
@@ -451,12 +463,12 @@ def _maybe_emit_kpi_site_events(
         if already_emitted(event_type):
             return
         row = core_models.SiteEvent(
-            org_id=org_id,
+            organization_id=org_id,
             site_id=site_id,
-            kind=event_type,
+            type=event_type,
             title=title,
-            description=body,
-            created_by_user_id=None,
+            body=body,
+            created_by_user_id=None,  # SYSTEM event
             created_at=now,
         )
         db.add(row)

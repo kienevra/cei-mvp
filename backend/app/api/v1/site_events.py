@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from fastapi import APIRouter, Depends, Query, status, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from app.api.v1.auth import get_current_user
 from app.db.session import get_db
@@ -27,6 +28,9 @@ SYSTEM_SITE_EVENT_TYPES: Set[str] = {
     # baseline engine
     "baseline_deviation_high_24h",
     "baseline_deviation_low_24h",
+    # KPI/system emits (analytics.py)
+    "kpi_overspend_24h",
+    "kpi_savings_24h",
     # add other fully-automatic types here as you create them
 }
 
@@ -68,6 +72,38 @@ def _normalize_site_id(raw: Optional[str]) -> Optional[str]:
     if n is not None:
         return f"site-{n}"
     return s
+
+
+def _site_id_variants(raw: Optional[str]) -> Set[str]:
+    """
+    Build a small, defensive set of equivalent site_id strings to support
+    legacy rows that might have been stored as "1" instead of "site-1".
+
+    Examples:
+      raw="1" -> {"site-1", "1"}
+      raw="site-1" -> {"site-1", "1"}
+      raw="foo" -> {"foo"}
+    """
+    out: Set[str] = set()
+    if raw is None:
+        return out
+    s = raw.strip()
+    if not s:
+        return out
+
+    canon = _normalize_site_id(s)
+    if canon:
+        out.add(canon)
+
+    n = _try_parse_site_numeric_id(s)
+    if n is not None:
+        out.add(str(n))
+        out.add(f"site-{n}")
+
+    # If it's non-numeric custom id, keep it as-is too.
+    out.add(s)
+
+    return {v for v in out if v}
 
 
 def _is_system_event_row(r: SiteEvent) -> bool:
@@ -143,7 +179,7 @@ class SiteEventCreate(BaseModel):
 
     IMPORTANT:
     - This endpoint is ONLY for operator-driven events.
-    - System events (alert_triggered, baseline_deviation_*, etc.) must never be created here.
+    - System events (alert_triggered, baseline_deviation_*, kpi_*, etc.) must never be created here.
     """
 
     type: Optional[str] = None
@@ -296,9 +332,11 @@ def list_site_events(
     now = _utcnow()
     q = db.query(SiteEvent).filter(SiteEvent.organization_id == organization_id)
 
-    normalized_site_id = _normalize_site_id(site_id)
-    if normalized_site_id:
-        q = q.filter(SiteEvent.site_id == normalized_site_id)
+    if site_id:
+        variants = sorted(list(_site_id_variants(site_id)))
+        if variants:
+            # Defensive: match both "site-1" and "1" for legacy rows.
+            q = q.filter(or_(*[SiteEvent.site_id == v for v in variants]))
 
     if window_hours is not None and window_hours > 0:
         window_start = now - timedelta(hours=window_hours)
