@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.api.v1.auth import get_current_user
+from app.core.security import get_org_context, OrgContext
 
 # Core ORM models (Organization, Site, User, TimeseriesRecord, etc.)
 from app import models as core_models
@@ -195,31 +195,24 @@ def _normalize_site_id(site_id: str) -> str:
     return f"site-{n}" if n is not None else site_id.strip()
 
 
-def _resolve_org_context(user: Any) -> Tuple[Optional[int], Optional[int]]:
+def _resolve_org_context_from_ctx(org_ctx: OrgContext) -> Tuple[Optional[int], Optional[int]]:
+    """
+    Analytics endpoints must support both:
+      - interactive JWT user sessions, and
+      - integration tokens (cei_int_...).
+
+    OrgContext is the canonical abstraction for both.
+    user_id is not available for integration tokens, and that's fine.
+    """
     org_id: Optional[int] = None
     try:
-        raw = getattr(user, "organization_id", None)
+        raw = getattr(org_ctx, "organization_id", None)
         if raw is not None:
             org_id = int(raw)
     except Exception:
         org_id = None
 
-    if org_id is None:
-        try:
-            org = getattr(user, "organization", None)
-            if org is not None and getattr(org, "id", None) is not None:
-                org_id = int(getattr(org, "id"))
-        except Exception:
-            org_id = None
-
-    user_id: Optional[int] = None
-    try:
-        if getattr(user, "id", None) is not None:
-            user_id = int(getattr(user, "id"))
-    except Exception:
-        user_id = None
-
-    return org_id, user_id
+    return org_id, None
 
 
 def _get_allowed_site_ids(db: Session, org_id: Optional[int]) -> Optional[Set[str]]:
@@ -270,9 +263,10 @@ def _enforce_site_access(
         .first()
     )
     if site_row is None:
+        # 404 prevents org/site existence leakage (matches /timeseries router behavior)
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this site_id.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Site not found",
         )
 
     return f"site-{n}"
@@ -345,18 +339,12 @@ def _build_empty_kpi_payload(
     )
 
 
-def _get_org_for_user(
+def _get_org_for_org_id(
     db: Session,
-    user: Any,
+    org_id: Optional[int],
 ) -> Optional[core_models.Organization]:
-    org = getattr(user, "organization", None)
-    if org is not None:
-        return org
-
-    org_id = getattr(user, "organization_id", None)
     if not org_id:
         return None
-
     return (
         db.query(core_models.Organization)
         .filter(core_models.Organization.id == org_id)
@@ -533,13 +521,12 @@ def get_site_insights(
     window_hours: int = Query(24, ge=1, le=24 * 7),
     lookback_days: int = Query(30, ge=7, le=365),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    org_ctx: OrgContext = Depends(get_org_context),
 ) -> SiteInsightsOut:
-    org = _get_org_for_user(db, user)
-    org_id, user_id = _resolve_org_context(user)
+    org_id, user_id = _resolve_org_context_from_ctx(org_ctx)
+    org = _get_org_for_org_id(db, org_id)
 
     site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
-
     allowed_site_ids = _get_allowed_site_ids(db, org_id)
 
     baseline = compute_baseline_profile(
@@ -699,11 +686,11 @@ def get_site_kpi(
         description="Lookback window in days used to build the statistical baseline for 24h comparison.",
     ),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    org_ctx: OrgContext = Depends(get_org_context),
 ) -> SiteKpiOut:
     now = datetime.now(timezone.utc)
-    org = _get_org_for_user(db, user)
-    org_id, user_id = _resolve_org_context(user)
+    org_id, user_id = _resolve_org_context_from_ctx(org_ctx)
+    org = _get_org_for_org_id(db, org_id)
 
     site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
     allowed_site_ids = _get_allowed_site_ids(db, org_id)
@@ -860,11 +847,11 @@ def get_site_forecast(
         description="Lookback window in days used to build the statistical baseline.",
     ),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    org_ctx: OrgContext = Depends(get_org_context),
 ) -> SiteForecastOut:
-    org_id, _ = _resolve_org_context(user)
-    site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
+    org_id, _ = _resolve_org_context_from_ctx(org_ctx)
 
+    site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
     allowed_site_ids = _get_allowed_site_ids(db, org_id)
 
     forecast = compute_site_forecast_stub(

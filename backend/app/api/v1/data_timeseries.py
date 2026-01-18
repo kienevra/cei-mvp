@@ -181,6 +181,41 @@ def _normalize_optional_param(raw: Optional[str]) -> Optional[str]:
     return s if s else None
 
 
+def _parse_iso8601_utc_param(raw: Optional[str]) -> Optional[datetime]:
+    """
+    Parse an ISO8601 timestamp query param into a naive UTC datetime.
+
+    Accepts:
+      - "2026-01-18T15:00:00Z"
+      - "2026-01-18T15:00:00+00:00"
+      - "2026-01-18T15:00:00" (treated as UTC)
+
+    Returns naive UTC datetime (tzinfo stripped) to match the rest of this module.
+    """
+    if raw is None:
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+
+    # Normalize common "Z" suffix to +00:00 for fromisoformat
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid datetime format. Use ISO8601, e.g. 2026-01-18T15:00:00Z",
+        )
+
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(tz=None).replace(tzinfo=None)
+
+    return dt
+
+
 @router.get("/summary", response_model=TimeseriesSummary)
 def get_timeseries_summary(
     site_id: Optional[str] = Query(None),
@@ -295,11 +330,26 @@ def export_timeseries_csv(
     site_id: Optional[str] = Query(None),
     meter_id: Optional[str] = Query(None),
     window_hours: int = Query(24, ge=1, le=24 * 90),
+    start_utc: Optional[str] = Query(
+        None,
+        description="Optional ISO8601 UTC start (e.g. 2026-01-01T00:00:00Z). If provided with end_utc, overrides window_hours.",
+    ),
+    end_utc: Optional[str] = Query(
+        None,
+        description="Optional ISO8601 UTC end (e.g. 2026-01-02T00:00:00Z). If provided with start_utc, overrides window_hours.",
+    ),
     db: Session = Depends(get_db),
     org_ctx: OrgContext = Depends(get_org_context),
 ):
     """
-    Export raw timeseries rows for the last N hours as CSV.
+    Export raw timeseries rows as CSV.
+
+    Default behavior (backwards compatible):
+      - Exports rows for the last N hours (window_hours).
+
+    Ranged export (pilot-friendly verification):
+      - If start_utc AND end_utc are provided, exports rows in [start_utc, end_utc).
+      - Range is capped to 90 days (2160 hours) to preserve the existing guardrail.
 
     Columns:
       - timestamp_utc (ISO8601)
@@ -311,15 +361,50 @@ def export_timeseries_csv(
     - Strict org scoping when org_ctx.organization_id is set.
     - If site_id is provided, verify allowed for org (404 if not).
     """
-    now = datetime.utcnow()
-    start = now - timedelta(hours=window_hours)
-
     site_id_norm = _normalize_optional_param(site_id)
     meter_id_norm = _normalize_optional_param(meter_id)
 
     _enforce_site_allowed_if_provided(db=db, org_ctx=org_ctx, site_id=site_id_norm)
 
-    q = db.query(TimeseriesRecord).filter(TimeseriesRecord.timestamp >= start)
+    start_dt = _parse_iso8601_utc_param(start_utc)
+    end_dt = _parse_iso8601_utc_param(end_utc)
+
+    # Backwards compatible mode: last N hours
+    if start_dt is None and end_dt is None:
+        now = datetime.utcnow()
+        start = now - timedelta(hours=window_hours)
+        end = now
+    else:
+        # Require both to avoid ambiguous semantics
+        if start_dt is None or end_dt is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Provide both start_utc and end_utc for ranged export.",
+            )
+        if end_dt <= start_dt:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="end_utc must be greater than start_utc.",
+            )
+
+        max_hours = 24 * 90
+        range_hours = (end_dt - start_dt).total_seconds() / 3600.0
+        if range_hours > max_hours + 1e-9:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Requested range is too large. Max is {max_hours} hours (90 days).",
+            )
+
+        start = start_dt
+        end = end_dt
+
+        # Keep window_hours field semantics stable for clients that still pass it:
+        # in ranged mode it's ignored, but validation already happened.
+
+    q = db.query(TimeseriesRecord).filter(
+        TimeseriesRecord.timestamp >= start,
+        TimeseriesRecord.timestamp < end,
+    )
 
     if site_id_norm:
         q = q.filter(TimeseriesRecord.site_id == site_id_norm)
