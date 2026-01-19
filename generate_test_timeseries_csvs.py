@@ -23,7 +23,7 @@ from pathlib import Path
 
 # --- CONFIG -----------------------------------------------------------------
 
-DAYS = 30
+DAYS = 200
 FILES_PER_MODE = 5
 
 SITES_WITH_IDS = ["site-30", "site-31", "site-32"]

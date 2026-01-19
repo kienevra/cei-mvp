@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from math import sqrt
 from dataclasses import dataclass
 from statistics import mean, pstdev
@@ -16,6 +16,31 @@ from app.models import TimeseriesRecord
 def _utcnow() -> datetime:
     # Keep this naive (no tzinfo) to match how timestamps are parsed from CSVs
     return datetime.utcnow()
+
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    Normalize datetimes to UTC-aware.
+
+    Root cause of prod crash:
+      - DB rows can yield offset-naive timestamps (SQLite / some drivers),
+      - API windows are built as naive (utcnow) in this module,
+      - but elsewhere (or in DB) we can end up with aware timestamps,
+      - and Python refuses to compare naive vs aware.
+
+    Policy:
+      - Treat naive timestamps as UTC.
+      - Convert aware timestamps to UTC.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _floor_to_hour(ts: datetime) -> datetime:
+    return ts.replace(minute=0, second=0, microsecond=0)
 
 
 def _load_site_history(
@@ -100,10 +125,10 @@ class BaselineBucket:
     Example: "weekday 08:00–09:00 has mean 900 kWh with std 120 kWh".
     """
 
-    hour_of_day: int       # 0–23
-    is_weekend: bool       # True = Saturday/Sunday
+    hour_of_day: int  # 0–23
+    is_weekend: bool  # True = Saturday/Sunday
     mean_kwh: float
-    std_kwh: float         # 0 if we only have 1 point
+    std_kwh: float  # 0 if we only have 1 point
 
 
 @dataclass
@@ -297,7 +322,10 @@ def compute_hourly_baseline(
     history_start = now - timedelta(days=lookback_days)
 
     records = _load_site_history(
-        db, site_id, history_start, history_end,
+        db,
+        site_id,
+        history_start,
+        history_end,
         organization_id=organization_id,
         allowed_site_ids=allowed_site_ids,
     )
@@ -360,6 +388,10 @@ def compute_site_insights(
     now = as_of or _utcnow()
     recent_end = now
     recent_start = now - timedelta(hours=window_hours)
+
+    # Normalize window bounds to UTC-aware to safely compare with DB-returned timestamps
+    recent_end_utc = _as_utc(recent_end)
+    recent_start_utc = _as_utc(recent_start)
 
     # 1) Baseline (hour-of-day dict used for deviation logic)
     baseline = compute_hourly_baseline(
@@ -430,7 +462,10 @@ def compute_site_insights(
 
     # 2) Recent actuals
     recent_records = _load_site_recent(
-        db, site_id, recent_start, recent_end,
+        db,
+        site_id,
+        recent_start,
+        recent_end,
         organization_id=organization_id,
         allowed_site_ids=allowed_site_ids,
     )
@@ -460,10 +495,6 @@ def compute_site_insights(
     # ---- IMPORTANT FIX (only when window_hours > 24): expand expected/actual over full window ----
     # Keep the existing 24-entry behavior unchanged for window_hours <= 24.
     if int(window_hours) > 24:
-        # Build a per-hour (ts floored to hour) actual series for the last window_hours.
-        def _floor_to_hour(ts: datetime) -> datetime:
-            return ts.replace(minute=0, second=0, microsecond=0)
-
         actual_by_ts: Dict[datetime, float] = defaultdict(float)
         for rec in recent_records:
             ts = rec.timestamp
@@ -473,9 +504,16 @@ def compute_site_insights(
                 val = float(rec.value)
             except Exception:
                 continue
+
             hts = _floor_to_hour(ts)
-            if hts < recent_start or hts >= recent_end:
-                continue
+
+            # Normalize record timestamp to UTC-aware before comparing with window bounds
+            hts_utc = _as_utc(hts)
+            if recent_start_utc is not None and recent_end_utc is not None:
+                if hts_utc < recent_start_utc or hts_utc >= recent_end_utc:
+                    continue
+
+            # Keep dict keys as the original naive hour buckets used elsewhere (ts floored)
             actual_by_ts[hts] += val
 
         # Index statistical buckets by (hour_of_day, is_weekend) when available
