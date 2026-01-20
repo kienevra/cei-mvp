@@ -151,6 +151,15 @@ class SiteKpiOut(BaseModel):
     is_baseline_warming_up: Optional[bool] = None
     confidence_level: Optional[str] = None
 
+    # ---- Coverage (prevents "fake savings" when data is missing) ----
+    points_24h: int = 0
+    expected_points_24h: int = 24
+    coverage_pct_24h: float = 0.0
+
+    points_7d: int = 0
+    expected_points_7d: int = 168
+    coverage_pct_7d: float = 0.0
+
     # ---- Cost engine KPIs ----
     last_24h_cost: Optional[float] = None
     expected_24h_cost: Optional[float] = None
@@ -329,6 +338,12 @@ def _build_empty_kpi_payload(
         total_history_days=None,
         is_baseline_warming_up=True,
         confidence_level="warming_up",
+        points_24h=0,
+        expected_points_24h=24,
+        coverage_pct_24h=0.0,
+        points_7d=0,
+        expected_points_7d=168,
+        coverage_pct_7d=0.0,
         last_24h_cost=None,
         expected_24h_cost=None,
         cost_savings_24h=None,
@@ -508,6 +523,35 @@ def _maybe_emit_kpi_site_events(
         db.rollback()
 
 
+def _count_hours_from_insights(insights: Optional[Dict[str, Any]]) -> int:
+    """
+    The insights engine emits an 'hours' array (hourly buckets). Use this as the
+    canonical coverage signal (works for both 24h and 7d windows).
+    """
+    if not insights:
+        return 0
+    raw = insights.get("hours", [])
+    if not raw:
+        return 0
+    try:
+        return int(len(raw))
+    except Exception:
+        return 0
+
+
+def _coverage_pct(points: int, expected_points: int) -> float:
+    if expected_points <= 0:
+        return 0.0
+    try:
+        return float(points) / float(expected_points)
+    except Exception:
+        return 0.0
+
+
+def _passes_coverage(points: int, expected_points: int, min_pct: float) -> bool:
+    return _coverage_pct(points, expected_points) >= float(min_pct)
+
+
 # ========= Routes =========
 
 
@@ -685,6 +729,19 @@ def get_site_kpi(
         le=365,
         description="Lookback window in days used to build the statistical baseline for 24h comparison.",
     ),
+    # Coverage thresholds are optional, but make this pilot-proof without changing clients.
+    min_coverage_24h: float = Query(
+        0.70,
+        ge=0.0,
+        le=1.0,
+        description="Minimum fraction of hourly buckets required in last 24h before baseline/cost KPIs are trusted.",
+    ),
+    min_coverage_7d: float = Query(
+        0.70,
+        ge=0.0,
+        le=1.0,
+        description="Minimum fraction of hourly buckets required in last 7d before baseline/cost KPIs are trusted.",
+    ),
     db: Session = Depends(get_db),
     org_ctx: OrgContext = Depends(get_org_context),
 ) -> SiteKpiOut:
@@ -712,12 +769,21 @@ def get_site_kpi(
     if not insights_24h:
         return _build_empty_kpi_payload(site_id=site_id_canon, lookback_days=lookback_days)
 
+    # Coverage (24h)
+    points_24h = _count_hours_from_insights(insights_24h)
+    expected_points_24h = 24
+    coverage_pct_24h = _coverage_pct(points_24h, expected_points_24h)
+    coverage_ok_24h = _passes_coverage(points_24h, expected_points_24h, min_coverage_24h)
+
     last_24h_kwh = float(insights_24h.get("total_actual_kwh", 0.0))
 
     baseline_expected = insights_24h.get("total_expected_kwh")
-    baseline_24h_kwh: Optional[float] = (
+    baseline_24h_kwh_raw: Optional[float] = (
         float(baseline_expected) if baseline_expected is not None else None
     )
+
+    # Gate "baseline truth" behind coverage. If coverage is low, we don't pretend this is savings.
+    baseline_24h_kwh: Optional[float] = baseline_24h_kwh_raw if coverage_ok_24h else None
 
     deviation_pct_24h: Optional[float] = None
     if baseline_24h_kwh is not None and baseline_24h_kwh != 0.0:
@@ -730,16 +796,31 @@ def get_site_kpi(
     is_baseline_warming_up: Optional[bool] = insights_24h.get("is_baseline_warming_up")
     confidence_level: Optional[str] = insights_24h.get("confidence_level")
 
+    # Cost (24h): always compute actual_cost if tariff exists; gate expected/savings behind coverage_ok_24h
     cost_24h = _compute_cost_from_kwh(
         actual_kwh=last_24h_kwh,
         expected_kwh=baseline_24h_kwh,
         org=org,
     )
     last_24h_cost = cost_24h["actual_cost"]
-    expected_24h_cost = cost_24h["expected_cost"]
+    expected_24h_cost = cost_24h["expected_cost"] if coverage_ok_24h else None
     cost_savings_24h: Optional[float] = None
-    if last_24h_cost is not None and expected_24h_cost is not None:
+    if coverage_ok_24h and last_24h_cost is not None and expected_24h_cost is not None:
         cost_savings_24h = expected_24h_cost - last_24h_cost
+
+    # --- 7d KPIs: derive directly from the same insights engine (single source of truth) ---
+    last_7d_kwh = 0.0
+    prev_7d_kwh: Optional[float] = None  # TODO: wire true prior-week compare later
+    deviation_pct_7d: Optional[float] = None
+
+    last_7d_cost: Optional[float] = None
+    expected_7d_cost: Optional[float] = None
+    cost_savings_7d: Optional[float] = None
+
+    points_7d = 0
+    expected_points_7d = 168
+    coverage_pct_7d = 0.0
+    coverage_ok_7d = False
 
     try:
         insights_7d: Optional[Dict[str, Any]] = compute_site_insights(
@@ -757,54 +838,45 @@ def get_site_kpi(
             raise
 
     if insights_7d:
+        points_7d = _count_hours_from_insights(insights_7d)
+        coverage_pct_7d = _coverage_pct(points_7d, expected_points_7d)
+        coverage_ok_7d = _passes_coverage(points_7d, expected_points_7d, min_coverage_7d)
+
         last_7d_kwh = float(insights_7d.get("total_actual_kwh", 0.0))
-        baseline_7d_raw = insights_7d.get("total_expected_kwh")
-        baseline_7d_kwh: Optional[float] = (
-            float(baseline_7d_raw) if baseline_7d_raw is not None else None
-        )
-    else:
-        last_7d_kwh = 0.0
-        baseline_7d_kwh = None
 
-    prev_7d_kwh: Optional[float] = None
-    deviation_pct_7d: Optional[float] = None
+        # Gate deviation/cost expectations behind coverage_ok_7d
+        raw_dev_7d = insights_7d.get("deviation_pct")
+        deviation_pct_7d = float(raw_dev_7d) if (raw_dev_7d is not None and coverage_ok_7d) else None
 
-    # 7d cost: only meaningful if we actually have 7d data in-window
-    last_7d_cost: Optional[float] = None
-    expected_7d_cost: Optional[float] = None
-    cost_savings_7d: Optional[float] = None
+        raw_last_7d_cost = insights_7d.get("actual_cost")
+        raw_expected_7d_cost = insights_7d.get("expected_cost")
 
-    if last_7d_kwh > 0.0 and baseline_7d_kwh is not None:
-        cost_7d = _compute_cost_from_kwh(
-            actual_kwh=last_7d_kwh,
-            expected_kwh=baseline_7d_kwh,
-            org=org,
-        )
-        last_7d_cost = cost_7d["actual_cost"]
-        expected_7d_cost = cost_7d["expected_cost"]
-        if last_7d_cost is not None and expected_7d_cost is not None:
+        last_7d_cost = float(raw_last_7d_cost) if raw_last_7d_cost is not None else None
+        expected_7d_cost = float(raw_expected_7d_cost) if (raw_expected_7d_cost is not None and coverage_ok_7d) else None
+
+        if coverage_ok_7d and last_7d_cost is not None and expected_7d_cost is not None:
             cost_savings_7d = expected_7d_cost - last_7d_cost
 
-    # Currency: prefer 24h currency; 7d currency only exists when 7d cost exists
-    currency_code = cost_24h["currency_code"] or (currency_code if False else None)
-    if currency_code is None and last_7d_kwh > 0.0 and baseline_7d_kwh is not None:
-        # Recompute currency only (cheap) when we actually computed 7d costs
-        currency_code = _compute_cost_from_kwh(actual_kwh=1.0, expected_kwh=1.0, org=org)["currency_code"]
+    currency_code = cost_24h["currency_code"] or (
+        getattr(org, "currency_code", None) if org is not None else None
+    )
 
+    # Emit KPI events ONLY when the 24h KPI is trustworthy.
     try:
-        _maybe_emit_kpi_site_events(
-            db=db,
-            org_id=org_id,
-            site_id=site_id_canon,
-            created_by_user_id=user_id,
-            last_24h_kwh=last_24h_kwh,
-            baseline_24h_kwh=baseline_24h_kwh,
-            deviation_pct_24h=deviation_pct_24h,
-            last_24h_cost=last_24h_cost,
-            expected_24h_cost=expected_24h_cost,
-            cost_savings_24h=cost_savings_24h,
-            currency_code=currency_code,
-        )
+        if coverage_ok_24h:
+            _maybe_emit_kpi_site_events(
+                db=db,
+                org_id=org_id,
+                site_id=site_id_canon,
+                created_by_user_id=user_id,
+                last_24h_kwh=last_24h_kwh,
+                baseline_24h_kwh=baseline_24h_kwh,
+                deviation_pct_24h=deviation_pct_24h,
+                last_24h_cost=last_24h_cost,
+                expected_24h_cost=expected_24h_cost,
+                cost_savings_24h=cost_savings_24h,
+                currency_code=currency_code,
+            )
     except Exception:
         pass
 
@@ -820,6 +892,12 @@ def get_site_kpi(
         total_history_days=total_history_days,
         is_baseline_warming_up=is_baseline_warming_up,
         confidence_level=confidence_level,
+        points_24h=points_24h,
+        expected_points_24h=expected_points_24h,
+        coverage_pct_24h=coverage_pct_24h,
+        points_7d=points_7d,
+        expected_points_7d=expected_points_7d,
+        coverage_pct_7d=coverage_pct_7d,
         last_24h_cost=last_24h_cost,
         expected_24h_cost=expected_24h_cost,
         cost_savings_24h=cost_savings_24h,
