@@ -769,18 +769,27 @@ def get_site_kpi(
     prev_7d_kwh: Optional[float] = None
     deviation_pct_7d: Optional[float] = None
 
-    cost_7d = _compute_cost_from_kwh(
-        actual_kwh=last_7d_kwh,
-        expected_kwh=baseline_7d_kwh,
-        org=org,
-    )
-    last_7d_cost = cost_7d["actual_cost"]
-    expected_7d_cost = cost_7d["expected_cost"]
+    # 7d cost: only meaningful if we actually have 7d data in-window
+    last_7d_cost: Optional[float] = None
+    expected_7d_cost: Optional[float] = None
     cost_savings_7d: Optional[float] = None
-    if last_7d_cost is not None and expected_7d_cost is not None:
-        cost_savings_7d = expected_7d_cost - last_7d_cost
 
-    currency_code = cost_24h["currency_code"] or cost_7d["currency_code"]
+    if last_7d_kwh > 0.0 and baseline_7d_kwh is not None:
+        cost_7d = _compute_cost_from_kwh(
+            actual_kwh=last_7d_kwh,
+            expected_kwh=baseline_7d_kwh,
+            org=org,
+        )
+        last_7d_cost = cost_7d["actual_cost"]
+        expected_7d_cost = cost_7d["expected_cost"]
+        if last_7d_cost is not None and expected_7d_cost is not None:
+            cost_savings_7d = expected_7d_cost - last_7d_cost
+
+    # Currency: prefer 24h currency; 7d currency only exists when 7d cost exists
+    currency_code = cost_24h["currency_code"] or (currency_code if False else None)
+    if currency_code is None and last_7d_kwh > 0.0 and baseline_7d_kwh is not None:
+        # Recompute currency only (cheap) when we actually computed 7d costs
+        currency_code = _compute_cost_from_kwh(actual_kwh=1.0, expected_kwh=1.0, org=org)["currency_code"]
 
     try:
         _maybe_emit_kpi_site_events(
