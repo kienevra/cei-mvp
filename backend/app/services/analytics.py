@@ -464,8 +464,8 @@ def compute_site_insights(
     recent_records = _load_site_recent(
         db,
         site_id,
-        recent_start,
-        recent_end,
+        recent_start_utc,
+        recent_end_utc,
         organization_id=organization_id,
         allowed_site_ids=allowed_site_ids,
     )
@@ -506,15 +506,15 @@ def compute_site_insights(
                 continue
 
             hts = _floor_to_hour(ts)
-
-            # Normalize record timestamp to UTC-aware before comparing with window bounds
             hts_utc = _as_utc(hts)
-            if recent_start_utc is not None and recent_end_utc is not None:
-                if hts_utc < recent_start_utc or hts_utc >= recent_end_utc:
-                    continue
 
-            # Keep dict keys as the original naive hour buckets used elsewhere (ts floored)
-            actual_by_ts[hts] += val
+            # Compare using UTC-aware timestamps
+            if hts_utc < recent_start_utc or hts_utc >= recent_end_utc:
+                continue
+
+            # Key by UTC-aware, floored-to-hour timestamp (so lookups match)
+            actual_by_ts[hts_utc] += val
+
 
         # Index statistical buckets by (hour_of_day, is_weekend) when available
         bucket_index: Dict[Tuple[int, bool], BaselineBucket] = {}
@@ -552,12 +552,12 @@ def compute_site_insights(
 
         # Emit one entry per hour in the requested window (chronological).
         # We keep "hour" as the sequential offset to avoid collapsing repeated hour-of-day values.
-        base_ts = _floor_to_hour(recent_end) - timedelta(hours=int(window_hours))
+        base_ts_utc = _as_utc(_floor_to_hour(recent_end_utc)) - timedelta(hours=int(window_hours))
         for i in range(int(window_hours)):
-            ts = base_ts + timedelta(hours=i)
-            actual = float(actual_by_ts.get(ts, 0.0))
+            ts_utc = base_ts_utc + timedelta(hours=i)
+            actual = float(actual_by_ts.get(ts_utc, 0.0))
 
-            expected, std_val = _expected_and_std_for(ts)
+            expected, std_val = _expected_and_std_for(ts_utc)
 
             if expected > 0:
                 delta = actual - expected
