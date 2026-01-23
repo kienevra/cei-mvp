@@ -64,6 +64,7 @@ function appendSupportCode(msg: string, rid: string | null): string {
   if (msg && msg.toLowerCase().includes("support code:")) return msg;
   return `${msg} (Support code: ${rid})`;
 }
+
 /* ===== Request-id generation + propagation (end-to-end tracing) ===== */
 
 function generateRequestId(): string {
@@ -101,7 +102,7 @@ api.interceptors.request.use((cfg) => {
 
   const url = cfg.url || "";
 
-  // Do NOT send stale tokens to login/signup/refresh/invite-accept.
+  // Do NOT send stale tokens to login/signup/refresh/invite-accept/password-reset.
   // All other /auth/* endpoints (like /auth/integration-tokens) stay authenticated.
   if (isAuthPath(url)) return cfg;
 
@@ -130,7 +131,7 @@ function isAuthPath(url: string | undefined): boolean {
 
 /* ===== Fix #3: stop hard-redirecting inside the API client ===== */
 
-class SessionExpiredError extends Error {
+export class SessionExpiredError extends Error {
   code = "SESSION_EXPIRED" as const;
   constructor(message: string = "Session expired. Please log in again.") {
     super(message);
@@ -185,7 +186,7 @@ api.interceptors.response.use(
       isRefreshing = true;
       refreshPromise = (async () => {
         try {
-          // Fix #1: refresh must NOT depend on (possibly expired) Authorization header.
+          // Refresh must NOT depend on (possibly expired) Authorization header.
           // Refresh cookie (HttpOnly) is the source of truth.
           const resp = await axios.post(
             `${baseURL}/auth/refresh`,
@@ -207,7 +208,7 @@ api.interceptors.response.use(
           attachRequestId(e);
           throw sessionExpired();
         } finally {
-          // Fix #2: reset the pipeline completely
+          // reset the pipeline completely
           isRefreshing = false;
           refreshPromise = null;
         }
@@ -491,24 +492,35 @@ export async function getSiteKpi(siteKey: string): Promise<SiteKpi> {
 export interface OpportunityMeasure {
   id: number;
   name: string;
-  description: string;
-  est_annual_kwh_saved: number;
-  est_capex_eur: number;
-  simple_roi_years: number;
-  est_co2_tons_saved_per_year: number;
+  // Manual opps and some backends can return null; keep UI tolerant.
+  description: string | null;
+
+  // backend can return null (manual opps)
+  est_annual_kwh_saved: number | null;
+  est_capex_eur: number | null;
+  simple_roi_years: number | null;
+  est_co2_tons_saved_per_year: number | null;
+
+  est_annual_cost_saved?: number | null;
+  currency_code?: string | null;
+
+  // backend includes this (you set it in opportunities.py)
+  source?: "auto" | "manual";
 }
 
 export async function getSiteOpportunities(
   siteId: string | number
 ): Promise<OpportunityMeasure[]> {
-  // ✅ Accept "site-<id>" OR numeric id, normalize for numeric path params
   const idStr = normalizeNumericSiteId(siteId);
 
-  const resp = await api.get<{ opportunities: OpportunityMeasure[] }>(
-    `/sites/${idStr}/opportunities`
-  );
-  const list = (resp.data as any)?.opportunities;
-  return Array.isArray(list) ? list : [];
+  // Be tolerant: backend may return {opportunities:[...]} or just [...]
+  const resp = await api.get<any>(`/sites/${idStr}/opportunities`);
+
+  const data = resp.data as any;
+  const list =
+    Array.isArray(data) ? data : Array.isArray(data?.opportunities) ? data.opportunities : [];
+
+  return Array.isArray(list) ? (list as OpportunityMeasure[]) : [];
 }
 
 /* ===== Ingest health types ===== */
@@ -864,8 +876,10 @@ export async function leaveOrg(): Promise<{
   }
 }
 
+export type OffboardModeParam = "soft" | "nuke";
+
 export async function offboardOrg(params: {
-  mode: OffboardMode;
+  mode: OffboardModeParam;
   org_id?: number;
 }): Promise<any> {
   const { mode, org_id } = params || ({} as any);

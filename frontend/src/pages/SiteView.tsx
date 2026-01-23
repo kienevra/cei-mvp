@@ -14,12 +14,12 @@ import {
   deleteSite,
   getSiteOpportunities,
   createManualOpportunity,
-  getManualOpportunities,
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import type { SiteInsights, SiteForecast } from "../types/api";
 import type { SiteKpi } from "../services/api";
+import type { OpportunityMeasure } from "../services/api";
 import { buildHybridNarrative } from "../utils/hybridNarrative";
 import SiteAlertsStrip from "../components/SiteAlertsStrip";
 import { downloadCsv } from "../utils/csv";
@@ -58,17 +58,6 @@ type SeriesResponse = {
 type TrendPoint = {
   label: string;
   value: number;
-};
-
-type BackendOpportunity = {
-  id: number;
-  name: string;
-  description?: string | null;
-  est_annual_kwh_saved?: number | null;
-  est_capex_eur?: number | null;
-  simple_roi_years?: number | null;
-  est_co2_tons_saved_per_year?: number | null;
-  source?: "auto" | "manual" | string;
 };
 
 type ManualOpportunityFormState = {
@@ -138,7 +127,6 @@ function formatTimeRange(from?: string | null, to?: string | null): string | nul
 // Normalise FastAPI/Pydantic error payloads into a human-readable string
 const normalizeApiError = (e: any, fallback: string): string => {
   // Prefer the "message" field first because api.ts may append "(Support code: <request_id>)"
-  // and we don't want to lose it by replacing with raw backend detail.
   if (e?.message && typeof e.message === "string") {
     return e.message;
   }
@@ -163,8 +151,7 @@ const normalizeApiError = (e: any, fallback: string): string => {
   return fallback;
 };
 
-const isFiniteNumber = (v: any): v is number =>
-  typeof v === "number" && Number.isFinite(v);
+const isFiniteNumber = (v: any): v is number => typeof v === "number" && Number.isFinite(v);
 
 const pickNumber = (obj: any, keys: string[]): number | null => {
   if (!obj) return null;
@@ -177,6 +164,12 @@ const pickNumber = (obj: any, keys: string[]): number | null => {
 
 const formatKwhValue = (v: number | null | undefined, digits = 1): string =>
   isFiniteNumber(v) ? v.toFixed(digits) : "—";
+
+const getOppIdKey = (opp: OpportunityMeasure): string => {
+  const raw = (opp as any)?.id;
+  if (raw === null || raw === undefined) return "unknown";
+  return String(raw);
+};
 
 const SiteView: React.FC = () => {
   const { t } = useTranslation();
@@ -215,7 +208,7 @@ const SiteView: React.FC = () => {
 
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
 
-  const [opportunities, setOpportunities] = useState<BackendOpportunity[]>([]);
+  const [opportunities, setOpportunities] = useState<OpportunityMeasure[]>([]);
   const [oppsLoading, setOppsLoading] = useState(false);
   const [oppsError, setOppsError] = useState<string | null>(null);
 
@@ -225,9 +218,11 @@ const SiteView: React.FC = () => {
   });
   const [manualOppSaving, setManualOppSaving] = useState(false);
   const [manualOppError, setManualOppError] = useState<string | null>(null);
-  const [actionSavingId, setActionSavingId] = useState<number | null>(null);
-  const [actionNoteById, setActionNoteById] = useState<Record<number, string>>({});
 
+  // IMPORTANT: Opportunity ids may not be strictly numeric across environments.
+  // Store keys as strings to compile cleanly and avoid TS friction.
+  const [actionSavingKey, setActionSavingKey] = useState<string | null>(null);
+  const [actionNoteByKey, setActionNoteByKey] = useState<Record<string, string>>({});
 
   const siteKey = id ? `site-${id}` : undefined;
 
@@ -376,21 +371,10 @@ const SiteView: React.FC = () => {
     setOpportunities([]);
 
     getSiteOpportunities(id)
-      .then((data: any) => {
+      .then((list) => {
         if (!isMounted) return;
-
-        let raw: unknown;
-        if (Array.isArray(data)) {
-          raw = data;
-        } else {
-          raw = (data as any)?.opportunities;
-        }
-
-        const list: BackendOpportunity[] = Array.isArray(raw)
-          ? (raw as BackendOpportunity[])
-          : [];
-
-        setOpportunities(list);
+        // ✅ Remove BackendOpportunity completely. Treat API response as OpportunityMeasure[].
+        setOpportunities(Array.isArray(list) ? (list as OpportunityMeasure[]) : []);
       })
       .catch((e: any) => {
         if (!isMounted) return;
@@ -406,24 +390,6 @@ const SiteView: React.FC = () => {
       .finally(() => {
         if (!isMounted) return;
         setOppsLoading(false);
-      });
-
-    // Manual opportunities list (numeric id)
-    getManualOpportunities(id)
-      .then((rows) => {
-        if (!isMounted) return;
-        if (Array.isArray(rows)) {
-          const mapped: BackendOpportunity[] = rows.map((r) => ({
-            id: r.id,
-            name: r.name,
-            description: r.description,
-            source: "manual",
-          }));
-          setOpportunities((prev) => [...mapped, ...prev]);
-        }
-      })
-      .catch(() => {
-        // non-fatal; we already surface error from unified endpoint
       });
 
     return () => {
@@ -541,10 +507,8 @@ const SiteView: React.FC = () => {
   );
 
   const baselineProfile = insights?.baseline_profile || null;
-  const deviationPct =
-    typeof insights?.deviation_pct === "number" ? insights.deviation_pct : null;
-  const insightWindowHours =
-    typeof insights?.window_hours === "number" ? insights.window_hours : 24;
+  const deviationPct = typeof insights?.deviation_pct === "number" ? insights.deviation_pct : null;
+  const insightWindowHours = typeof insights?.window_hours === "number" ? insights.window_hours : 24;
   const insightLookbackDays =
     typeof insights?.baseline_lookback_days === "number"
       ? insights.baseline_lookback_days
@@ -582,48 +546,52 @@ const SiteView: React.FC = () => {
     downloadCsv(`cei_${safeSiteId}_timeseries.csv`, rows);
   };
 
-    const handleMarkOpportunityActioned = async (opp: BackendOpportunity) => {
-      if (!siteKey) return;
+  const handleMarkOpportunityActioned = async (opp: OpportunityMeasure) => {
+    if (!siteKey) return;
 
-      const note = (actionNoteById[opp.id] || "").trim();
+    const key = getOppIdKey(opp);
+    const note = (actionNoteByKey[key] || "").trim();
 
-      setActionSavingId(opp.id);
-      try {
-        await createSiteEvent(siteKey, {
-          type: "action_taken",
-          title: `Action taken: ${opp.name}`,
-          body: [
-            `Opportunity ID: ${opp.id}`,
-            `Source: ${opp.source || "auto"}`,
-            opp.est_annual_kwh_saved != null ? `Est kWh/yr saved: ${opp.est_annual_kwh_saved}` : null,
-            opp.simple_roi_years != null ? `Simple ROI (yrs): ${opp.simple_roi_years}` : null,
-            note ? `Operator note: ${note}` : null,
-          ]
-            .filter(Boolean)
-            .join("\n"),
-        });
+    setActionSavingKey(key);
+    try {
+      await createSiteEvent(siteKey, {
+        type: "action_taken",
+        title: `Action taken: ${(opp as any)?.name ?? "Opportunity"}`,
+        body: [
+          `Opportunity ID: ${key}`,
+          `Source: ${(opp as any)?.source || "auto"}`,
+          (opp as any)?.est_annual_kwh_saved != null
+            ? `Est kWh/yr saved: ${(opp as any).est_annual_kwh_saved}`
+            : null,
+          (opp as any)?.simple_roi_years != null
+            ? `Simple ROI (yrs): ${(opp as any).simple_roi_years}`
+            : null,
+          note ? `Operator note: ${note}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      });
 
-        // Clear note and refresh timeline
-        setActionNoteById((prev) => {
-          const next = { ...prev };
-          delete next[opp.id];
-          return next;
-        });
-        setTimelineRefreshKey((k) => k + 1);
-      } catch (e: any) {
-        alert(
-          normalizeApiError(
-            e,
-            t("siteView.opps.markActionedFailed", {
-              defaultValue: "Failed to log action. Please try again.",
-            })
-          )
-        );
-      } finally {
-        setActionSavingId(null);
-      }
-    };
-
+      // Clear note and refresh timeline
+      setActionNoteByKey((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      setTimelineRefreshKey((k) => k + 1);
+    } catch (e: any) {
+      alert(
+        normalizeApiError(
+          e,
+          t("siteView.opps.markActionedFailed", {
+            defaultValue: "Failed to log action. Please try again.",
+          })
+        )
+      );
+    } finally {
+      setActionSavingKey(null);
+    }
+  };
 
   const handleExportKpiCsv = () => {
     if (!siteKey) {
@@ -646,23 +614,14 @@ const SiteView: React.FC = () => {
     const kpiAny = kpi as any;
 
     const currency =
-      typeof kpiAny.currency_code === "string" && kpiAny.currency_code
-        ? kpiAny.currency_code
-        : "EUR";
+      typeof kpiAny.currency_code === "string" && kpiAny.currency_code ? kpiAny.currency_code : "EUR";
 
-    const pricePerKwh =
-      typeof kpiAny.electricity_price_per_kwh === "number"
-        ? kpiAny.electricity_price_per_kwh
-        : null;
+    const pricePerKwh = typeof kpiAny.electricity_price_per_kwh === "number" ? kpiAny.electricity_price_per_kwh : null;
 
-    const pricePerMwh =
-      pricePerKwh !== null && Number.isFinite(pricePerKwh)
-        ? pricePerKwh * 1000
-        : null;
+    const pricePerMwh = pricePerKwh !== null && Number.isFinite(pricePerKwh) ? pricePerKwh * 1000 : null;
 
     const primarySources =
-      Array.isArray(kpiAny.primary_energy_sources) &&
-      kpiAny.primary_energy_sources.length > 0
+      Array.isArray(kpiAny.primary_energy_sources) && kpiAny.primary_energy_sources.length > 0
         ? kpiAny.primary_energy_sources.join(" + ")
         : "";
 
@@ -670,37 +629,17 @@ const SiteView: React.FC = () => {
       typeof val === "number" && Number.isFinite(val) ? val.toFixed(digits) : "";
 
     // Be tolerant to backend naming differences (older vs newer fields)
-    const cost24hActual = pickNumber(kpiAny, [
-      "cost_24h_actual",
-      "last_24h_cost",
-      "actual_cost_24h",
-    ]);
-    const cost24hBaseline = pickNumber(kpiAny, [
-      "cost_24h_baseline",
-      "baseline_24h_cost",
-      "expected_cost_24h",
-    ]);
+    const cost24hActual = pickNumber(kpiAny, ["cost_24h_actual", "last_24h_cost", "actual_cost_24h"]);
+    const cost24hBaseline = pickNumber(kpiAny, ["cost_24h_baseline", "baseline_24h_cost", "expected_cost_24h"]);
     const cost24hDelta =
       pickNumber(kpiAny, ["cost_24h_delta", "delta_24h_cost", "cost_delta_24h"]) ??
-      (cost24hActual != null && cost24hBaseline != null
-        ? cost24hActual - cost24hBaseline
-        : null);
+      (cost24hActual != null && cost24hBaseline != null ? cost24hActual - cost24hBaseline : null);
 
-    const cost7dActual = pickNumber(kpiAny, [
-      "cost_7d_actual",
-      "last_7d_cost",
-      "actual_cost_7d",
-    ]);
-    const cost7dBaseline = pickNumber(kpiAny, [
-      "cost_7d_baseline",
-      "baseline_7d_cost",
-      "expected_cost_7d",
-    ]);
+    const cost7dActual = pickNumber(kpiAny, ["cost_7d_actual", "last_7d_cost", "actual_cost_7d"]);
+    const cost7dBaseline = pickNumber(kpiAny, ["cost_7d_baseline", "baseline_7d_cost", "expected_cost_7d"]);
     const cost7dDelta =
       pickNumber(kpiAny, ["cost_7d_delta", "delta_7d_cost", "cost_delta_7d"]) ??
-      (cost7dActual != null && cost7dBaseline != null
-        ? cost7dActual - cost7dBaseline
-        : null);
+      (cost7dActual != null && cost7dBaseline != null ? cost7dActual - cost7dBaseline : null);
 
     const row = {
       // identifiers
@@ -749,8 +688,7 @@ const SiteView: React.FC = () => {
 
     const confirmed = window.confirm(
       t("siteView.actions.deleteConfirm", {
-        defaultValue:
-          "This will permanently delete this site and its associated data in CEI. Are you sure?",
+        defaultValue: "This will permanently delete this site and its associated data in CEI. Are you sure?",
       })
     );
     if (!confirmed) return;
@@ -810,47 +748,45 @@ const SiteView: React.FC = () => {
   };
 
   const computeEstimatedEurPerYear = (
-      opp: BackendOpportunity,
-      electricityPricePerKwh: number | null
-    ): number | null => {
-      if (!isFiniteNumber(electricityPricePerKwh)) return null;
-      const kwh = opp.est_annual_kwh_saved;
-      if (!isFiniteNumber(kwh) || kwh <= 0) return null;
-      return kwh * electricityPricePerKwh;
-    };
+    opp: OpportunityMeasure,
+    electricityPricePerKwh: number | null
+  ): number | null => {
+    if (!isFiniteNumber(electricityPricePerKwh)) return null;
+    const kwh = (opp as any)?.est_annual_kwh_saved;
+    if (!isFiniteNumber(kwh) || kwh <= 0) return null;
+    return kwh * electricityPricePerKwh;
+  };
 
-    const sortOpportunitiesDecisionReady = (
-      list: BackendOpportunity[],
-      electricityPricePerKwh: number | null
-    ): BackendOpportunity[] => {
-      const scored = list.map((o) => {
-        const eurYr = computeEstimatedEurPerYear(o, electricityPricePerKwh);
-        const kwhYr = isFiniteNumber(o.est_annual_kwh_saved) ? o.est_annual_kwh_saved : null;
-        const roi = isFiniteNumber(o.simple_roi_years) ? o.simple_roi_years : null;
+  const sortOpportunitiesDecisionReady = (
+    list: OpportunityMeasure[],
+    electricityPricePerKwh: number | null
+  ): OpportunityMeasure[] => {
+    const scored = list.map((o) => {
+      const eurYr = computeEstimatedEurPerYear(o, electricityPricePerKwh);
+      const kwhYr = isFiniteNumber((o as any)?.est_annual_kwh_saved) ? (o as any).est_annual_kwh_saved : null;
+      const roi = isFiniteNumber((o as any)?.simple_roi_years) ? (o as any).simple_roi_years : null;
 
-        // Decision-ready scoring:
-        // 1) highest €/yr first (if computable)
-        // 2) else highest kWh/yr
-        // 3) else lowest ROI years
-        // 4) else keep stable
-        const score =
-          (eurYr != null ? eurYr * 1_000_000 : 0) +
-          (eurYr == null && kwhYr != null ? kwhYr * 1_000 : 0) +
-          (eurYr == null && kwhYr == null && roi != null ? (1 / Math.max(roi, 0.1)) : 0);
+      // Decision-ready scoring:
+      // 1) highest €/yr first (if computable)
+      // 2) else highest kWh/yr
+      // 3) else lowest ROI years
+      // 4) else keep stable
+      const score =
+        (eurYr != null ? eurYr * 1_000_000 : 0) +
+        (eurYr == null && kwhYr != null ? kwhYr * 1_000 : 0) +
+        (eurYr == null && kwhYr == null && roi != null ? 1 / Math.max(roi, 0.1) : 0);
 
-        return { o, eurYr, score };
-      });
+      return { o, score };
+    });
 
-      scored.sort((a, b) => b.score - a.score);
-      return scored.map((x) => x.o);
-    };
-
+    scored.sort((a, b) => b.score - a.score);
+    return scored.map((x) => x.o);
+  };
 
   // --- Cost KPI wiring (robust to backend field naming) ---
   const kpiAny = kpi as any;
 
-  const kpiCurrencyCode =
-    (kpiAny?.currency_code as string | null | undefined) ?? null;
+  const kpiCurrencyCode = (kpiAny?.currency_code as string | null | undefined) ?? null;
   const electricityPricePerKwh = pickNumber(kpiAny, ["electricity_price_per_kwh"]);
 
   const cost24hActual = useMemo(
@@ -858,8 +794,7 @@ const SiteView: React.FC = () => {
     [kpiAny]
   );
   const cost24hBaseline = useMemo(
-    () =>
-      pickNumber(kpiAny, ["cost_24h_baseline", "baseline_24h_cost", "expected_cost_24h"]),
+    () => pickNumber(kpiAny, ["cost_24h_baseline", "baseline_24h_cost", "expected_cost_24h"]),
     [kpiAny]
   );
   const cost24hDelta = useMemo(() => {
@@ -873,12 +808,8 @@ const SiteView: React.FC = () => {
     return sortOpportunitiesDecisionReady(opportunities, electricityPricePerKwh ?? null);
   }, [opportunities, electricityPricePerKwh]);
 
-
   const tariffsConfigured =
-    electricityPricePerKwh != null ||
-    cost24hActual != null ||
-    cost24hBaseline != null ||
-    cost24hDelta != null;
+    electricityPricePerKwh != null || cost24hActual != null || cost24hBaseline != null || cost24hDelta != null;
 
   const hasCostKpi = tariffsConfigured;
 
@@ -977,8 +908,7 @@ const SiteView: React.FC = () => {
               }}
             >
               {t("siteView.forecast.subtitle", {
-                defaultValue:
-                  "Baseline-driven preview of expected energy over the next 24 hours.",
+                defaultValue: "Baseline-driven preview of expected energy over the next 24 hours.",
               })}
             </p>
           </div>
@@ -1000,7 +930,6 @@ const SiteView: React.FC = () => {
               method: localForecast.method,
             })}
           </span>
-
         </div>
 
         <div
@@ -1207,15 +1136,23 @@ const SiteView: React.FC = () => {
         description: description || undefined,
       });
 
-      setOpportunities((prev) => [
-        {
-          id: created.id,
-          name: created.name,
-          description: created.description,
-          source: "manual",
-        },
-        ...prev,
-      ]);
+      // If backend returns a full OpportunityMeasure, keep it.
+      // If it returns a minimal object, pad it to OpportunityMeasure shape (feature-preserving).
+      const createdAny = created as any;
+
+      const next: OpportunityMeasure = {
+        id: createdAny?.id,
+        name: createdAny?.name ?? (name || "Opportunity"),
+        description: createdAny?.description ?? description ?? null,
+        source: "manual",
+
+        est_annual_kwh_saved: createdAny?.est_annual_kwh_saved ?? null,
+        est_capex_eur: createdAny?.est_capex_eur ?? null,
+        simple_roi_years: createdAny?.simple_roi_years ?? null,
+        est_co2_tons_saved_per_year: createdAny?.est_co2_tons_saved_per_year ?? null,
+      } as OpportunityMeasure;
+
+      setOpportunities((prev) => [next, ...prev]);
 
       setManualOppForm({ name: "", description: "" });
     } catch (err: any) {
@@ -1274,8 +1211,7 @@ const SiteView: React.FC = () => {
             }}
           >
             {t("siteView.header.subtitle", {
-              defaultValue:
-                "Per-site performance view. Energy metrics are filtered by",
+              defaultValue: "Per-site performance view. Energy metrics are filtered by",
             })}{" "}
             <code>site_id = {siteKey ?? "?"}</code>{" "}
             {t("siteView.header.subtitleTail", {
@@ -1398,28 +1334,22 @@ const SiteView: React.FC = () => {
           >
             {hasSummaryData ? (
               <>
-                {t("siteView.kpis.energy24h.bodyA", {
-                  defaultValue: "Aggregated from",
-                })}{" "}
+                {t("siteView.kpis.energy24h.bodyA", { defaultValue: "Aggregated from" })}{" "}
                 <strong>
                   {summary!.points.toLocaleString()}{" "}
                   {t("siteView.kpis.energy24h.readings", { defaultValue: "readings" })}
                 </strong>{" "}
-                {t("siteView.kpis.energy24h.bodyB", {
-                  defaultValue: "in the last",
-                })}{" "}
-                {summary!.window_hours}{" "}
-                {t("siteView.kpis.energy24h.hours", { defaultValue: "hours" })}{" "}
+                {t("siteView.kpis.energy24h.bodyB", { defaultValue: "in the last" })}{" "}
+                {summary!.window_hours} {t("siteView.kpis.energy24h.hours", { defaultValue: "hours" })}{" "}
                 {t("siteView.kpis.energy24h.bodyC", { defaultValue: "for this site." })}
               </>
             ) : summaryLoading ? (
-              t("siteView.kpis.energy24h.loading", {
-                defaultValue: "Loading per-site energy data…",
-              })
+              t("siteView.kpis.energy24h.loading", { defaultValue: "Loading per-site energy data…" })
             ) : (
               <>
                 {t("siteView.kpis.energy24h.noDataA", {
-                  defaultValue: "No recent data for this site. Either ensure your uploaded timeseries includes",
+                  defaultValue:
+                    "No recent data for this site. Either ensure your uploaded timeseries includes",
                 })}{" "}
                 <code>site_id = {siteKey ?? "site-N"}</code>
                 {t("siteView.kpis.energy24h.noDataB", {
@@ -1442,22 +1372,10 @@ const SiteView: React.FC = () => {
           >
             {t("siteView.kpis.coverage.title", { defaultValue: "Data coverage" })}
           </div>
-          <div
-            style={{
-              marginTop: "0.35rem",
-              fontSize: "1.4rem",
-              fontWeight: 600,
-            }}
-          >
+          <div style={{ marginTop: "0.35rem", fontSize: "1.4rem", fontWeight: 600 }}>
             {hasSummaryData ? summary!.points.toLocaleString() : "—"}
           </div>
-          <div
-            style={{
-              marginTop: "0.25rem",
-              fontSize: "0.8rem",
-              color: "var(--cei-text-muted)",
-            }}
-          >
+          <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
             {t("siteView.kpis.coverage.subtitle", {
               defaultValue: "Number of records for this site in the selected window.",
             })}
@@ -1475,24 +1393,12 @@ const SiteView: React.FC = () => {
           >
             {t("siteView.kpis.status.title", { defaultValue: "Status" })}
           </div>
-          <div
-            style={{
-              marginTop: "0.35rem",
-              fontSize: "1.2rem",
-              fontWeight: 600,
-            }}
-          >
+          <div style={{ marginTop: "0.35rem", fontSize: "1.2rem", fontWeight: 600 }}>
             {hasSummaryData
               ? t("siteView.kpis.status.active", { defaultValue: "Active" })
               : t("siteView.kpis.status.noRecentData", { defaultValue: "No recent data" })}
           </div>
-          <div
-            style={{
-              marginTop: "0.25rem",
-              fontSize: "0.8rem",
-              color: "var(--cei-text-muted)",
-            }}
-          >
+          <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
             {t("siteView.kpis.status.subtitle", {
               defaultValue:
                 "Simple heuristic status based on whether we see any recent timeseries for this site.",
@@ -1509,13 +1415,7 @@ const SiteView: React.FC = () => {
               <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
                 {t("siteView.snapshot.title", { defaultValue: "Performance snapshot" })}
               </div>
-              <div
-                style={{
-                  marginTop: "0.2rem",
-                  fontSize: "0.8rem",
-                  color: "var(--cei-text-muted)",
-                }}
-              >
+              <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
                 {t("siteView.snapshot.subtitle", {
                   defaultValue:
                     "Last 24h vs baseline, and last 7 days vs previous 7 days for this site. Cost metrics use your org's configured tariffs.",
@@ -1537,9 +1437,7 @@ const SiteView: React.FC = () => {
                     defaultValue: "Configure tariffs under Settings to enable € KPIs.",
                   })}
                 >
-                  {t("siteView.snapshot.noTariffs", {
-                    defaultValue: "No tariffs configured – showing kWh only",
-                  })}
+                  {t("siteView.snapshot.noTariffs", { defaultValue: "No tariffs configured – showing kWh only" })}
                 </span>
               )}
 
@@ -1593,8 +1491,7 @@ const SiteView: React.FC = () => {
                   </div>
                   <div style={{ marginTop: "0.25rem" }}>
                     <span className={`cei-pill ${kpiDeltaBadgeClass(kpi.deviation_pct_24h)}`}>
-                      {formatPct(kpi.deviation_pct_24h)}{" "}
-                      {t("siteView.snapshot.vsBaseline", { defaultValue: "vs baseline" })}
+                      {formatPct(kpi.deviation_pct_24h)} {t("siteView.snapshot.vsBaseline", { defaultValue: "vs baseline" })}
                     </span>
                   </div>
                 </div>
@@ -1609,9 +1506,7 @@ const SiteView: React.FC = () => {
                       marginBottom: "0.25rem",
                     }}
                   >
-                    {t("siteView.snapshot.last7dVsPrev7d", {
-                      defaultValue: "Last 7 days vs previous 7 days",
-                    })}
+                    {t("siteView.snapshot.last7dVsPrev7d", { defaultValue: "Last 7 days vs previous 7 days" })}
                   </div>
                   <div>
                     <span style={{ fontFamily: "var(--cei-font-mono, monospace)", fontWeight: 500 }}>
@@ -1624,8 +1519,7 @@ const SiteView: React.FC = () => {
                   </div>
                   <div style={{ marginTop: "0.25rem" }}>
                     <span className={`cei-pill ${kpiDeltaBadgeClass(kpi.deviation_pct_7d)}`}>
-                      {formatPct(kpi.deviation_pct_7d)}{" "}
-                      {t("siteView.snapshot.vsPrev7d", { defaultValue: "vs previous 7d" })}
+                      {formatPct(kpi.deviation_pct_7d)} {t("siteView.snapshot.vsPrev7d", { defaultValue: "vs previous 7d" })}
                     </span>
                   </div>
                 </div>
@@ -1662,13 +1556,7 @@ const SiteView: React.FC = () => {
               </div>
 
               {/* Cost snapshot – 24h cost, expected 24h cost, savings/overspend */}
-              <div
-                style={{
-                  marginTop: "0.9rem",
-                  paddingTop: "0.75rem",
-                  borderTop: "1px solid var(--cei-border-subtle)",
-                }}
-              >
+              <div style={{ marginTop: "0.9rem", paddingTop: "0.75rem", borderTop: "1px solid var(--cei-border-subtle)" }}>
                 <div
                   style={{
                     display: "flex",
@@ -1735,12 +1623,9 @@ const SiteView: React.FC = () => {
                       <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
                         <span style={{ fontFamily: "var(--cei-font-mono, monospace)", fontWeight: 500 }}>
                           {formatCurrency(costDeltaAbs, kpiCurrencyCode)}{" "}
-                          {costDirectionLabel !==
-                            t("siteView.cost.onBaseline", { defaultValue: "On baseline" }) &&
+                          {costDirectionLabel !== t("siteView.cost.onBaseline", { defaultValue: "On baseline" }) &&
                           costDirectionLabel !==
-                            t("siteView.cost.directionUnknown", {
-                              defaultValue: "Savings / overspend vs baseline",
-                            }) ? (
+                            t("siteView.cost.directionUnknown", { defaultValue: "Savings / overspend vs baseline" }) ? (
                             <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
                               ({costDirectionLabel})
                             </span>
@@ -1788,9 +1673,7 @@ const SiteView: React.FC = () => {
                 {t("siteView.trend.title", { defaultValue: "Site energy trend – last 24 hours" })}
               </div>
               <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-                {t("siteView.trend.subtitle", {
-                  defaultValue: "Per-site series aggregated by hour. Uses",
-                })}{" "}
+                {t("siteView.trend.subtitle", { defaultValue: "Per-site series aggregated by hour. Uses" })}{" "}
                 <code>site_id = {siteKey}</code>{" "}
                 {t("siteView.trend.subtitleTail", { defaultValue: "from timeseries." })}
               </div>
@@ -1810,9 +1693,7 @@ const SiteView: React.FC = () => {
                 type="button"
                 className="cei-btn cei-btn-ghost"
                 onClick={handleExportTimeseriesCsv}
-                disabled={
-                  seriesLoading || !series || !Array.isArray(series.points) || series.points.length === 0
-                }
+                disabled={seriesLoading || !series || !Array.isArray(series.points) || series.points.length === 0}
                 style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }}
               >
                 {seriesLoading
@@ -1891,13 +1772,7 @@ const SiteView: React.FC = () => {
                             gap: "0.25rem",
                           }}
                         >
-                          <span
-                            style={{
-                              fontSize: "0.6rem",
-                              color: "var(--cei-text-muted)",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
+                          <span style={{ fontSize: "0.6rem", color: "var(--cei-text-muted)", whiteSpace: "nowrap" }}>
                             {val.toFixed(0)}
                           </span>
                           <div
@@ -1911,13 +1786,7 @@ const SiteView: React.FC = () => {
                               border: "1px solid rgba(226, 232, 240, 0.8)",
                             }}
                           />
-                          <span
-                            style={{
-                              fontSize: "0.65rem",
-                              color: "var(--cei-text-muted)",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
+                          <span style={{ fontSize: "0.65rem", color: "var(--cei-text-muted)", whiteSpace: "nowrap" }}>
                             {p.label}
                           </span>
                         </div>
@@ -2030,9 +1899,7 @@ const SiteView: React.FC = () => {
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                   <input
                     type="text"
-                    placeholder={t("siteView.notes.titlePlaceholder", {
-                      defaultValue: "Short title (optional)",
-                    })}
+                    placeholder={t("siteView.notes.titlePlaceholder", { defaultValue: "Short title (optional)" })}
                     value={noteTitle}
                     onChange={(e) => setNoteTitle(e.target.value)}
                     style={{
@@ -2092,14 +1959,7 @@ const SiteView: React.FC = () => {
       {hybrid && (
         <section style={{ marginTop: "0.75rem" }}>
           <div className="cei-card">
-            <div
-              style={{
-                fontSize: "0.75rem",
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                color: "var(--cei-text-muted)",
-              }}
-            >
+            <div style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--cei-text-muted)" }}>
               {t("siteView.hybrid.title", { defaultValue: "CEI hybrid view" })}
             </div>
             <div style={{ marginTop: "0.3rem", fontSize: "0.9rem", fontWeight: 600 }}>{hybrid.headline}</div>
@@ -2151,9 +2011,7 @@ const SiteView: React.FC = () => {
                   p90: baselineProfile.global_p90_kwh.toFixed(1),
                   window: insightWindowHours.toFixed(0),
                   deviation:
-                    deviationPct !== null
-                      ? `${deviationPct >= 0 ? "+" : ""}${deviationPct.toFixed(1)}%`
-                      : "—",
+                    deviationPct !== null ? `${deviationPct >= 0 ? "+" : ""}${deviationPct.toFixed(1)}%` : "—",
                 })}
               </div>
             )}
@@ -2187,30 +2045,33 @@ const SiteView: React.FC = () => {
                 </div>
                 <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.8rem", lineHeight: 1.5 }}>
                   {decisionReadyOpps.map((o, idx) => {
-                    const roiYears = typeof o.simple_roi_years === "number" ? o.simple_roi_years : null;
-                    const savingsKwhYr = typeof o.est_annual_kwh_saved === "number" ? o.est_annual_kwh_saved : null;
-                    const co2 =
-                      typeof o.est_co2_tons_saved_per_year === "number" ? o.est_co2_tons_saved_per_year : null;
+                    const roiYears = isFiniteNumber((o as any)?.simple_roi_years) ? (o as any).simple_roi_years : null;
+                    const savingsKwhYr = isFiniteNumber((o as any)?.est_annual_kwh_saved)
+                      ? (o as any).est_annual_kwh_saved
+                      : null;
+                    const co2 = isFiniteNumber((o as any)?.est_co2_tons_saved_per_year)
+                      ? (o as any).est_co2_tons_saved_per_year
+                      : null;
 
                     const eurYr = computeEstimatedEurPerYear(o, electricityPricePerKwh ?? null);
+                    const key = getOppIdKey(o);
 
                     return (
-                      <li key={`${o.source || "auto"}-${o.id}-${idx}`} style={{ marginBottom: "0.55rem" }}>
+                      <li key={`${(o as any)?.source || "auto"}-${key}-${idx}`} style={{ marginBottom: "0.55rem" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem" }}>
                           <div style={{ minWidth: 0 }}>
                             <strong>
-                              {o.source === "manual"
+                              {(o as any)?.source === "manual"
                                 ? t("siteView.opps.manualTag", { defaultValue: "[Manual] " })
                                 : ""}
-                              {o.name}
+                              {(o as any)?.name ?? t("siteView.manualOpp.defaultName", { defaultValue: "Opportunity" })}
                             </strong>
-                            {o.description ? ` – ${o.description}` : ""}
+                            {(o as any)?.description ? ` – ${(o as any).description}` : ""}
 
                             <span style={{ display: "block", fontSize: "0.78rem", marginTop: "0.15rem" }}>
                               {eurYr != null && (
                                 <>
-                                  ≈{" "}
-                                  <strong>{formatCurrency(eurYr, kpiCurrencyCode)}</strong>{" "}
+                                  ≈ <strong>{formatCurrency(eurYr, kpiCurrencyCode)}</strong>{" "}
                                   {t("siteView.opps.perYear", { defaultValue: "/ year" })}
                                 </>
                               )}
@@ -2245,9 +2106,9 @@ const SiteView: React.FC = () => {
                             <div style={{ marginTop: "0.35rem", display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
                               <input
                                 type="text"
-                                value={actionNoteById[o.id] || ""}
+                                value={actionNoteByKey[key] || ""}
                                 onChange={(e) =>
-                                  setActionNoteById((prev) => ({ ...prev, [o.id]: e.target.value }))
+                                  setActionNoteByKey((prev) => ({ ...prev, [key]: e.target.value }))
                                 }
                                 placeholder={t("siteView.opps.actionNotePlaceholder", {
                                   defaultValue: "Optional note (who/when/what changed)…",
@@ -2268,13 +2129,13 @@ const SiteView: React.FC = () => {
                                 type="button"
                                 className="cei-btn cei-btn-primary"
                                 onClick={() => handleMarkOpportunityActioned(o)}
-                                disabled={actionSavingId === o.id}
+                                disabled={actionSavingKey === key}
                                 style={{ fontSize: "0.78rem", padding: "0.35rem 0.85rem" }}
                                 title={t("siteView.opps.markActionedTooltip", {
                                   defaultValue: "Logs an action event into the site timeline for auditability.",
                                 })}
                               >
-                                {actionSavingId === o.id
+                                {actionSavingKey === key
                                   ? t("common.savingEllipsis", { defaultValue: "Saving…" })
                                   : t("siteView.opps.markActioned", { defaultValue: "Mark as actioned" })}
                               </button>
@@ -2283,14 +2144,13 @@ const SiteView: React.FC = () => {
 
                           <div style={{ flex: "0 0 auto", textAlign: "right" }}>
                             <span className="cei-pill cei-pill-neutral" style={{ fontSize: "0.7rem" }}>
-                              {t("siteView.opps.rank", { defaultValue: "Rank #{{n}}" , n: idx + 1 })}
+                              {t("siteView.opps.rank", { defaultValue: "Rank #{{n}}", n: idx + 1 })}
                             </span>
                           </div>
                         </div>
                       </li>
                     );
                   })}
-
                 </ul>
               </div>
             )}

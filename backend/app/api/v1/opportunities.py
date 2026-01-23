@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.api.v1.auth import get_current_user
 from app.services.opportunities import OpportunityEngine
-from app.services.analytics import AnalyticsService
-from app.models import Opportunity, User
+from app.models import Opportunity, User, Organization
+from app.services.analytics import compute_site_insights
 
 router = APIRouter()
 
@@ -46,22 +46,96 @@ class ManualOpportunityOut(ManualOpportunityBase):
 def get_opportunities(
     site_id: int,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """
     Unified opportunities view for a site.
 
-    - PRESERVES existing behaviour: returns a JSON object with an "opportunities" key.
-    - Auto-generated measures still come from AnalyticsService + OpportunityEngine.
-    - Manual, DB-backed Opportunity rows for this site are appended into the same list,
-      normalized into the same shape the frontend expects.
+    Level B accuracy wiring:
+    - Uses compute_site_insights() to get actual vs expected (baseline).
+    - Uses org electricity tariff (€/kWh) + currency_code.
+    - Computes annualized kWh + cost + CO2 savings off measured "excess vs baseline".
 
     NOTE:
-    - Endpoint remains unauthenticated for now (to avoid breaking existing
-      consumers/tests). Manual CRUD endpoints are auth-protected.
+    - Now auth-protected so we can safely fetch org tariff and enforce org-scoped reads.
+    - Manual CRUD endpoints remain auth-protected as before.
     """
 
-    # 1) Auto-generated opportunities from analytics KPIs
-    kpis = AnalyticsService(db).compute_kpis(site_id)
+    # Map numeric /sites/{id} to CEI string key used in timeseries: "site-<id>"
+    site_key = f"site-{int(site_id)}"
+
+    org_id = getattr(user, "organization_id", None)
+
+    org: Optional[Organization] = None
+    if org_id is not None:
+        org = db.query(Organization).filter(Organization.id == org_id).first()
+
+    # Tariff + currency (Level B)
+    electricity_price_per_kwh: Optional[float] = None
+    currency_code: Optional[str] = None
+    if org is not None:
+        try:
+            # Numeric may come back as Decimal
+            v = org.electricity_price_per_kwh
+            electricity_price_per_kwh = float(v) if v is not None else None
+        except Exception:
+            electricity_price_per_kwh = None
+        try:
+            currency_code = str(org.currency_code) if org.currency_code else None
+        except Exception:
+            currency_code = None
+
+    # 1) Auto-generated opportunities from measured baseline delta
+    # Use 7-day window for stability (Level B), 30-day baseline lookback
+    insights = compute_site_insights(
+        db=db,
+        site_id=site_key,
+        window_hours=168,
+        lookback_days=30,
+        organization_id=org_id,
+        allowed_site_ids=[site_key],
+    )
+
+    # If no data, still return manual opps (operators may have entered items)
+    kpis: Dict[str, Any] = {
+        "site_id": site_key,
+        "window_hours": 168,
+        "baseline_lookback_days": 30,
+        "total_actual_kwh": None,
+        "total_expected_kwh": None,
+        "excess_kwh_window": None,
+        "electricity_price_per_kwh": electricity_price_per_kwh,
+        "currency_code": currency_code,
+    }
+
+    if insights:
+        try:
+            total_actual = float(insights.get("total_actual_kwh") or 0.0)
+        except Exception:
+            total_actual = 0.0
+
+        try:
+            total_expected = float(insights.get("total_expected_kwh") or 0.0)
+        except Exception:
+            total_expected = 0.0
+
+        excess = total_actual - total_expected
+        if excess < 0:
+            excess = 0.0  # savings potential = clamp to positive "waste" only
+
+        kpis.update(
+            {
+                "total_actual_kwh": total_actual,
+                "total_expected_kwh": total_expected,
+                "excess_kwh_window": float(excess),
+                "deviation_pct": insights.get("deviation_pct"),
+                "generated_at": insights.get("generated_at"),
+                "baseline_confidence_level": insights.get("confidence_level"),
+                "baseline_is_warming_up": insights.get("is_baseline_warming_up"),
+                "baseline_total_history_days": insights.get("total_history_days"),
+            }
+        )
+
     engine = OpportunityEngine()
     auto_opps = engine.suggest_measures(kpis)
 
@@ -72,7 +146,7 @@ def get_opportunities(
         data.setdefault("source", "auto")
         normalized_auto.append(data)
 
-    # 2) Manual, persisted opportunities for this site
+    # 2) Manual, persisted opportunities for this site (numeric site FK)
     manual_rows: List[Opportunity] = (
         db.query(Opportunity)
         .filter(Opportunity.site_id == site_id)
@@ -87,21 +161,20 @@ def get_opportunities(
                 "id": row.id,
                 "name": row.name,
                 "description": row.description,
-                # These fields may or may not exist on your Opportunity model;
-                # getattr() keeps this tolerant.
-                "est_annual_kwh_saved": getattr(row, "est_annual_kwh_saved", None),
-                "est_capex_eur": getattr(row, "est_capex_eur", None),
-                "simple_roi_years": getattr(row, "simple_roi_years", None),
-                "est_co2_tons_saved_per_year": getattr(
-                    row, "est_co2_tons_saved_per_year", None
-                ),
+                # Manual table does NOT currently store savings fields.
+                # Keep these nullable so frontend can render safely.
+                "est_annual_kwh_saved": None,
+                "est_capex_eur": None,
+                "simple_roi_years": None,
+                "est_co2_tons_saved_per_year": None,
+                "est_annual_cost_saved": None,
+                "currency_code": currency_code,
                 "source": "manual",
             }
         )
 
     # Manual first, then auto – so operator-entered measures are more visible.
     combined = manual_opps + normalized_auto
-
     return {"opportunities": combined}
 
 
@@ -117,7 +190,7 @@ def get_opportunities(
 def list_manual_opportunities_for_site(
     site_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),  # kept for auth, but not used for lookup
+    user: User = Depends(get_current_user),
 ) -> List[ManualOpportunityOut]:
     """
     List manually entered opportunities for a given site.
@@ -128,10 +201,10 @@ def list_manual_opportunities_for_site(
       mismatched demo/org wiring in local dev.
     """
     rows: List[Opportunity] = (
-      db.query(Opportunity)
-      .filter(Opportunity.site_id == site_id)
-      .order_by(Opportunity.created_at.desc())
-      .all()
+        db.query(Opportunity)
+        .filter(Opportunity.site_id == site_id)
+        .order_by(Opportunity.created_at.desc())
+        .all()
     )
     return rows
 
@@ -145,7 +218,7 @@ def create_manual_opportunity_for_site(
     site_id: int,
     payload: ManualOpportunityCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),  # kept for auth, but not used for lookup
+    user: User = Depends(get_current_user),
 ) -> ManualOpportunityOut:
     """
     Create a manual opportunity for a given site.
