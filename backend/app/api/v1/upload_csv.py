@@ -377,7 +377,6 @@ def _is_duplicate_ingest_error(e: Any) -> bool:
     response_model=CsvUploadResult,
     status_code=status.HTTP_200_OK,
     dependencies=[Depends(csv_upload_rate_limit)],
-    include_in_schema=False,  # avoid duplicate operation in OpenAPI
 )
 @router.post(
     "/",  # supports POST /api/v1/upload-csv/
