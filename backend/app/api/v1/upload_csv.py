@@ -40,7 +40,10 @@ from app.services.ingest import (
 logger = logging.getLogger("cei")
 
 # NOTE: prefix is /upload-csv, and main.py mounts router under /api/v1
-# => POST /api/v1/upload-csv/
+# We explicitly support BOTH:
+#   POST /api/v1/upload-csv
+#   POST /api/v1/upload-csv/
+# to avoid 307 redirects that can break some multipart clients.
 router = APIRouter(prefix="/upload-csv", tags=["upload"])
 
 # -----------------------------------------------------------------------------
@@ -370,7 +373,14 @@ def _is_duplicate_ingest_error(e: Any) -> bool:
 
 
 @router.post(
-    "/",
+    "",  # ✅ supports POST /api/v1/upload-csv (no trailing slash) with NO redirect
+    response_model=CsvUploadResult,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(csv_upload_rate_limit)],
+    include_in_schema=False,  # avoid duplicate operation in OpenAPI
+)
+@router.post(
+    "/",  # supports POST /api/v1/upload-csv/
     response_model=CsvUploadResult,
     status_code=status.HTTP_200_OK,
     dependencies=[Depends(csv_upload_rate_limit)],
