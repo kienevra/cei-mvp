@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models import TimeseriesRecord  # TimeseriesRecord lives here
@@ -50,12 +51,6 @@ ALLOWED_UNITS = {CANONICAL_UNIT_KWH}
 
 
 def normalize_unit(unit: Any) -> str:
-    """
-    Option A: backend is NOT case-sensitive for unit.
-    Accepts variations like: "kwh", "KWH", " kWh " and normalizes to canonical "kWh".
-
-    Raises ValueError for missing/invalid units when the caller expects a unit.
-    """
     raw = ("" if unit is None else str(unit)).strip()
     if not raw:
         raise ValueError("unit missing")
@@ -72,20 +67,6 @@ def normalize_unit(unit: Any) -> str:
 
 
 def save_raw_timeseries(job_id: str, payload: List[Dict[str, Any]]) -> str:
-    """
-    Save raw timeseries payload into a staging file and return a job_id.
-
-    Legacy behavior, aligned with tests/test_ingest.py:
-
-    - Signature: save_raw_timeseries(job_id, payload)
-    - If STAGING_FILE is set (e.g. in tests), always write a single
-      newline-delimited JSON object to that path:
-
-        {"job_id": "<job_id>", "records": [...]}
-
-    - Otherwise, write the raw payload array to STAGING_DIR/<job_id>.json
-      so that process_job(job_id) can json.load() and iterate records.
-    """
     if STAGING_FILE:
         path = STAGING_FILE
         entry = {"job_id": job_id, "records": payload}
@@ -102,11 +83,6 @@ def save_raw_timeseries(job_id: str, payload: List[Dict[str, Any]]) -> str:
 
 
 def validate_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
-    """
-    Legacy validator used by process_job and older tests.
-
-    NOTE: Unit checking is now case-insensitive and normalizes to canonical "kWh".
-    """
     errs: List[str] = []
 
     if not r.get("site_id"):
@@ -144,9 +120,6 @@ def validate_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
 
 def process_job(job_id: str) -> int:
-    """
-    Back-compat staging job processor. (No DB writes.)
-    """
     path = os.path.join(STAGING_DIR, f"{job_id}.json")
     if not os.path.exists(path):
         raise FileNotFoundError(path)
@@ -170,17 +143,6 @@ def process_job(job_id: str) -> int:
 
 
 def _parse_timestamp_utc(ts_raw: Any) -> datetime:
-    """
-    Parse timestamp (ISO8601) and normalize to timezone-aware UTC with microseconds stripped.
-
-    Accepts:
-    - "2025-12-29T11:00:00Z"
-    - "2025-12-29T11:00:00+00:00"
-
-    Rejects:
-    - naive timestamps (no tzinfo)
-    - non-ISO8601 formats
-    """
     s = str(ts_raw).strip()
     if not s:
         raise ValueError("timestamp_utc missing")
@@ -190,7 +152,6 @@ def _parse_timestamp_utc(ts_raw: Any) -> datetime:
 
     dt = datetime.fromisoformat(s)
 
-    # enforce aware
     if dt.tzinfo is None:
         raise ValueError("timestamp_utc must be timezone-aware (UTC)")
 
@@ -199,13 +160,11 @@ def _parse_timestamp_utc(ts_raw: Any) -> datetime:
 
 
 def _validate_timestamp_guardrails(ts: datetime, *, now_utc: datetime) -> None:
-    # Future guard
     if ts > (now_utc + timedelta(seconds=FUTURE_SKEW_SECONDS)):
         raise ValueError(
             f"Timestamp is in the future (>{FUTURE_SKEW_SECONDS//60}m skew): {ts.isoformat()}"
         )
 
-    # Too-old guard (optional)
     if MAX_PAST_DAYS > 0:
         oldest = now_utc - timedelta(days=MAX_PAST_DAYS)
         if ts < oldest:
@@ -230,13 +189,6 @@ def _parse_value_kwh(raw: Any) -> Decimal:
 
 
 def validate_batch_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
-    """
-    Strict schema/format validator for the /timeseries/batch API.
-    Deeper correctness (future timestamps, max age, numeric bounds) is enforced
-    in ingest_timeseries_batch so ALL ingest paths share the same guardrails.
-
-    NOTE: Unit checking is now case-insensitive and normalizes to canonical "kWh".
-    """
     errs: List[str] = []
 
     if not r.get("site_id"):
@@ -274,7 +226,6 @@ def validate_batch_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
 
 def _guess_code_from_validation_errors(errs: List[str]) -> TimeseriesIngestErrorCode:
-    # Timestamp-related
     for e in errs:
         if (
             "timestamp_utc missing" in e
@@ -284,17 +235,14 @@ def _guess_code_from_validation_errors(errs: List[str]) -> TimeseriesIngestError
         ):
             return TimeseriesIngestErrorCode.INVALID_TIMESTAMP
 
-    # Value-related (includes bounds)
     for e in errs:
         if "value" in e:
             return TimeseriesIngestErrorCode.INVALID_VALUE
 
-    # Unit-related
     for e in errs:
         if "unit must be 'kWh'" in e or "Unit must be 'kWh'" in e:
             return TimeseriesIngestErrorCode.INVALID_UNIT
 
-    # Org mismatch is emitted explicitly elsewhere
     return TimeseriesIngestErrorCode.INTERNAL_ERROR
 
 
@@ -306,7 +254,6 @@ def _normalize_idempotency_key(raw: Any) -> Optional[str]:
 
 
 def _record_model_supports_org() -> bool:
-    # Support both historical field names across snapshots
     return hasattr(TimeseriesRecord, "organization_id") or hasattr(TimeseriesRecord, "org_id")
 
 
@@ -326,35 +273,8 @@ def _set_org_field(record_kwargs: Dict[str, Any], organization_id: Optional[int]
 
 
 def _is_likely_idempotency_integrity_error(exc: IntegrityError) -> bool:
-    """
-    Best-effort classifier so we don't mislabel *every* IntegrityError as idempotency.
-    This is DB-specific, so we use string heuristics.
-    """
     msg = str(getattr(exc, "orig", exc)).lower()
     return ("unique" in msg or "duplicate" in msg) and ("idempotency" in msg or "idempotency_key" in msg)
-
-
-def _idempotency_exists(
-    db: Session,
-    *,
-    organization_id: Optional[int],
-    idempotency_key: str,
-) -> bool:
-    """
-    Deterministic idempotency gate.
-
-    - If model supports org scoping: enforce (org_id/organization_id, idempotency_key)
-    - Else: enforce global (idempotency_key)
-    """
-    q = db.query(TimeseriesRecord).filter(TimeseriesRecord.idempotency_key == idempotency_key)
-
-    if organization_id is not None:
-        if hasattr(TimeseriesRecord, "org_id"):
-            q = q.filter(TimeseriesRecord.org_id == organization_id)  # type: ignore[attr-defined]
-        elif hasattr(TimeseriesRecord, "organization_id"):
-            q = q.filter(TimeseriesRecord.organization_id == organization_id)  # type: ignore[attr-defined]
-
-    return db.query(q.exists()).scalar() is True
 
 
 def _build_fallback_idempotency_key(
@@ -364,16 +284,6 @@ def _build_fallback_idempotency_key(
     meter_id: str,
     ts: datetime,
 ) -> str:
-    """
-    Pilot-grade guardrail:
-    If a client doesn't send idempotency_key, we still want deterministic idempotency
-    (especially for retrying factory agents).
-
-    Format is stable and aligned with CSV behavior, but distinct:
-      auto:<org>:<site>:<meter>:<ts_iso>
-
-    Truncated to 128 chars to match typical DB column limits.
-    """
     org_part = str(organization_id) if organization_id is not None else "none"
     ts_norm = ts.astimezone(timezone.utc).replace(microsecond=0).isoformat()
     key = f"auto:{org_part}:{site_id}:{meter_id}:{ts_norm}"
@@ -385,35 +295,13 @@ def ingest_timeseries_batch(
     organization_id: Optional[int] = None,
     source: Optional[str] = None,
     db: Optional[Session] = None,
-    # --- compatibility aliases (upload_csv and other callers may use these) ---
     org_id: Optional[int] = None,
     session: Optional[Session] = None,
     request_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Ingest a batch of timeseries records directly into TimeseriesRecord.
-
-    Correctness guardrails (central, applies to ALL ingest paths):
-    - timestamp_utc must be timezone-aware UTC ISO8601 (Z or +00:00)
-    - reject future timestamps beyond FUTURE_SKEW_SECONDS
-    - (optional) reject overly old timestamps beyond MAX_PAST_DAYS
-    - value must be numeric, finite, non-negative, and within MAX_VALUE_KWH (optional)
-    - unit must be 'kWh' (if provided; case-insensitive accepted + normalized)
-
-    Idempotency guarantee:
-    - If TimeseriesRecord supports idempotency_key, we enforce deterministic idempotency.
-      If the client provides idempotency_key -> use it.
-      Else -> we auto-generate a stable fallback key from (org, site, meter, timestamp).
-
-    Compatibility:
-    - Accepts organization_id or org_id
-    - Accepts db or session
-    - Accepts request_id (optional) for log correlation
-    """
     if not records:
         return {"ingested": 0, "skipped_duplicate": 0, "failed": 0, "errors": []}
 
-    # Resolve aliases
     if organization_id is None:
         organization_id = org_id
     if db is None and session is not None:
@@ -430,7 +318,6 @@ def ingest_timeseries_batch(
 
     now_utc = datetime.now(timezone.utc).replace(microsecond=0)
 
-    # Allowed site_ids for org, once per batch
     allowed_site_ids: Optional[Set[str]] = None
     if organization_id:
         try:
@@ -448,9 +335,48 @@ def ingest_timeseries_batch(
     model_has_org = _record_model_supports_org()
     model_has_idem = _record_model_supports_idempotency()
 
+    # --- Precompute all idempotency keys (client + fallback) ---
+    existing_idem_keys: Set[str] = set()
+    if model_has_idem:
+        all_keys_to_check: Set[str] = set()
+        for r in records:
+            idem = _normalize_idempotency_key(r.get("idempotency_key"))
+            site_id_str = str(r.get("site_id", "")).strip()
+            meter_id_str = str(r.get("meter_id", "")).strip()
+            ts_raw = r.get("timestamp_utc") or r.get("timestamp")
+            try:
+                ts = _parse_timestamp_utc(ts_raw)
+            except Exception:
+                ts = now_utc  # fallback; will fail per-record later
+
+            if not idem:
+                idem = _build_fallback_idempotency_key(
+                    organization_id=organization_id,
+                    site_id=site_id_str,
+                    meter_id=meter_id_str,
+                    ts=ts,
+                )
+            all_keys_to_check.add(idem)
+
+        if all_keys_to_check:
+            q = select(TimeseriesRecord.idempotency_key)
+            if hasattr(TimeseriesRecord, "org_id") and organization_id is not None:
+                q = q.where(
+                    TimeseriesRecord.idempotency_key.in_(all_keys_to_check),
+                    TimeseriesRecord.org_id == organization_id,
+                )
+            elif hasattr(TimeseriesRecord, "organization_id") and organization_id is not None:
+                q = q.where(
+                    TimeseriesRecord.idempotency_key.in_(all_keys_to_check),
+                    TimeseriesRecord.organization_id == organization_id,
+                )
+            else:
+                q = q.where(TimeseriesRecord.idempotency_key.in_(all_keys_to_check))
+
+            existing_idem_keys = set(row[0] for row in db.execute(q).all())
+
     try:
         for idx, r in enumerate(records):
-            # --- schema/format validation first ---
             ok, errs = validate_batch_record(r)
             if not ok:
                 failed += 1
@@ -458,7 +384,6 @@ def ingest_timeseries_batch(
                 errors.append({"index": idx, "code": code_enum.value, "detail": "; ".join(errs)})
                 continue
 
-            # --- org/site scoping ---
             site_id_str = str(r["site_id"]).strip()
             if allowed_site_ids is not None and site_id_str not in allowed_site_ids:
                 failed += 1
@@ -483,8 +408,7 @@ def ingest_timeseries_batch(
                 )
                 continue
 
-            # --- correctness parsing (timestamp/value/unit) ---
-            unit_canonical = CANONICAL_UNIT_KWH  # default if omitted
+            unit_canonical = CANONICAL_UNIT_KWH
             try:
                 ts_raw = r.get("timestamp_utc") or r.get("timestamp")
                 ts = _parse_timestamp_utc(ts_raw)
@@ -492,7 +416,6 @@ def ingest_timeseries_batch(
 
                 v = _parse_value_kwh(r.get("value"))
 
-                # Unit is optional: if provided, accept any casing and normalize to canonical.
                 if r.get("unit") is not None and str(r.get("unit")).strip():
                     unit_canonical = normalize_unit(r.get("unit"))
             except Exception as exc:
@@ -501,7 +424,6 @@ def ingest_timeseries_batch(
                 errors.append({"index": idx, "code": code_enum.value, "detail": str(exc)})
                 continue
 
-            # --- idempotency key normalization + fallback (pilot guardrail) ---
             idem_key = _normalize_idempotency_key(r.get("idempotency_key"))
             if model_has_idem and not idem_key:
                 idem_key = _build_fallback_idempotency_key(
@@ -511,35 +433,23 @@ def ingest_timeseries_batch(
                     ts=ts,
                 )
 
-            # Deterministic idempotency pre-check (works even without DB constraints)
-            if model_has_idem and idem_key:
-                try:
-                    if _idempotency_exists(db, organization_id=organization_id, idempotency_key=idem_key):
-                        skipped_duplicate += 1
-                        errors.append(
-                            {
-                                "index": idx,
-                                "code": TimeseriesIngestErrorCode.DUPLICATE_IDEMPOTENCY_KEY.value,
-                                "detail": "Duplicate idempotency_key (pre-check)",
-                            }
-                        )
-                        continue
-                except Exception as exc:
-                    logger.warning(
-                        "idempotency pre-check failed (idx=%s) request_id=%s: %s",
-                        idx,
-                        request_id,
-                        exc,
-                    )
+            if model_has_idem and idem_key and idem_key in existing_idem_keys:
+                skipped_duplicate += 1
+                errors.append(
+                    {
+                        "index": idx,
+                        "code": TimeseriesIngestErrorCode.DUPLICATE_IDEMPOTENCY_KEY.value,
+                        "detail": "Duplicate idempotency_key (pre-check)",
+                    }
+                )
+                continue
 
-            # --- build ORM row ---
             record_kwargs: Dict[str, Any] = {
                 "site_id": site_id_str,
                 "meter_id": meter_id_str,
                 "value": float(v),
             }
 
-            # timestamp field name drift across snapshots
             if hasattr(TimeseriesRecord, "timestamp_utc"):
                 record_kwargs["timestamp_utc"] = ts
             elif hasattr(TimeseriesRecord, "timestamp"):
@@ -556,15 +466,12 @@ def ingest_timeseries_batch(
             if model_has_idem and idem_key:
                 setattr(record, "idempotency_key", idem_key)
 
-            if hasattr(TimeseriesRecord, "source"):
-                if source:
-                    setattr(record, "source", source)
+            if hasattr(TimeseriesRecord, "source") and source:
+                setattr(record, "source", source)
 
-            # --- insert with integrity handling ---
             try:
-                with db.begin_nested():
-                    db.add(record)
-                    db.flush()
+                db.add(record)
+                db.flush()
             except IntegrityError as exc:
                 if model_has_idem and idem_key and _is_likely_idempotency_integrity_error(exc):
                     skipped_duplicate += 1
@@ -606,10 +513,6 @@ def ingest_timeseries_batch(
             "failed": failed,
             "errors": errors,
         }
-
-    except Exception:
-        db.rollback()
-        raise
     finally:
         if not session_provided:
             db.close()

@@ -26,7 +26,7 @@ from pathlib import Path
 DAYS = 200
 FILES_PER_MODE = 5
 
-SITES_WITH_IDS = ["site-30", "site-31", "site-32"]
+SITES_WITH_IDS = ["site-20", "site-21", "site-22"]
 METERS = ["meter-main-1"]
 UNIT = "kWh"
 
@@ -43,7 +43,7 @@ TIME_SHIFT_DAYS = 0
 
 # Optional deterministic offset (in hours) to make "new" timestamps without going future.
 # Applied AFTER TIME_SHIFT_DAYS and still respects future safety margin.
-UNIQUE_RUN_OFFSET_HOURS: int = 0
+UNIQUE_RUN_OFFSET_HOURS: int = -24
 
 # Reproducible synthetic values
 random.seed(42)
