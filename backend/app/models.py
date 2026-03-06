@@ -58,6 +58,46 @@ class Organization(Base):
 
     currency_code = Column(String(8), nullable=True)  # "EUR", "USD"
 
+    # -------- Phase 1: Managing org hierarchy --------
+    # org_type:
+    #   "standalone" — default; a regular self-managed org (existing pilot orgs)
+    #   "managing"   — an ESCO/consultant that manages client orgs; pays the subscription
+    #   "client"     — a client org managed by a managing org; billing handled by managing org
+    org_type = Column(
+        String(32),
+        nullable=False,
+        default="standalone",
+        server_default=text("'standalone'"),
+    )
+
+    # Self-referential FK: client orgs point to their managing org.
+    # NULL for "standalone" and "managing" orgs.
+    managed_by_org_id = Column(
+        Integer,
+        ForeignKey("organization.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # Max number of client orgs this managing org is allowed to create.
+    # Enforced at the API layer (Phase 3). NULL = unlimited (e.g. enterprise plan).
+    client_limit = Column(Integer, nullable=True)
+
+    # Self-referential relationships:
+    # managed_by  → the managing org (parent), if this org is a client
+    # client_orgs → all client orgs under this managing org
+    managed_by = relationship(
+        "Organization",
+        foreign_keys=[managed_by_org_id],
+        back_populates="client_orgs",
+        remote_side="Organization.id",
+    )
+    client_orgs = relationship(
+        "Organization",
+        foreign_keys=[managed_by_org_id],
+        back_populates="managed_by",
+    )
+
 
 class User(Base):
     """
@@ -375,6 +415,8 @@ class OrgInvite(Base):
         Index("ix_org_invites_org_active", "org_id", "is_active"),
         Index("ix_org_invites_token_hash", "token_hash"),
     )
+
+
 class PasswordResetToken(Base):
     """
     One-time password reset token.

@@ -349,7 +349,7 @@ const Login: React.FC = () => {
 
             <div className="auth-title">
               {t("auth.hero.title", {
-                defaultValue: "We use A.I to reduce your factorys carbon footprint.",
+                defaultValue: "We use A.I to reduce your factorys energy costs.",
               })}
             </div>
 

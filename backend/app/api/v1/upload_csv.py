@@ -502,6 +502,13 @@ async def upload_csv(
                 unit = DEFAULT_UNIT
 
             if forced_site_id is not None:
+                # If CSV also includes site_id column, it must not conflict
+                if raw_site:
+                    coerced = _coerce_site_id(raw_site)
+                    if coerced != forced_site_id:
+                        raise ValueError(
+                            f"CSV contains site_id '{coerced}' which conflicts with forced query site_id '{forced_site_id}'"
+                        )
                 site_id_value = forced_site_id
             else:
                 site_id_value = _coerce_site_id(raw_site) or ""
