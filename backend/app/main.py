@@ -157,9 +157,7 @@ def _http_exception_payload(exc: HTTPException, *, request_id: str) -> dict:
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     request_id = _rid_from_request(request)
-
     payload = _http_exception_payload(exc, request_id=request_id)
-
     resp = JSONResponse(
         status_code=exc.status_code,
         content=payload,
@@ -325,6 +323,7 @@ from app.api.v1 import (  # noqa: E402
     org,
     org_leave,
     password_recovery,
+    manage,                 # Phase 3: managing org CRUD API
 )
 
 app.include_router(auth.router, prefix="/api/v1")
@@ -345,6 +344,7 @@ app.include_router(org.router, prefix="/api/v1")
 app.include_router(org_members.router, prefix="/api/v1")
 app.include_router(org_leave.router, prefix="/api/v1")
 app.include_router(org_offboard.router, prefix="/api/v1")
+app.include_router(manage.router, prefix="/api/v1")  # Phase 3
 
 
 @app.post("/auth/signup", include_in_schema=False)
