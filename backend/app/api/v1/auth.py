@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.rate_limit import login_rate_limit, refresh_rate_limit
 from app.core.security import get_current_user
-from app.models import IntegrationToken  # integration tokens live here (shim)
+from app.models import IntegrationToken
 from app.db.session import get_db
 from app.models import Organization, User
 from app.api.deps import require_owner, create_org_audit_event
@@ -37,7 +37,6 @@ ALGORITHM = settings.jwt_algorithm
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 REFRESH_TOKEN_EXPIRE_DAYS = settings.refresh_token_expire_days
 
-# Hard guard: never allow the default secret in production-like envs
 if settings.is_prod and SECRET_KEY in {"supersecret", "changeme", "secret", "", None}:
     raise RuntimeError(
         "Insecure JWT_SECRET configured in production environment. "
@@ -50,9 +49,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 REFRESH_COOKIE_NAME = "cei_refresh_token"
 INTEGRATION_TOKEN_PREFIX = "cei_int_"
+INVITE_TOKEN_PREFIX = "cei_inv_"
 
-# NOTE: invite tokens are owned by /api/v1/org/invites (org_invites router).
-INVITE_TOKEN_PREFIX = "cei_inv_"  # kept for consistency across the codebase
+# Phase 5: valid roles in the system
+# "owner"   — org creator / full admin
+# "member"  — standard org member (default)
+# "manager" — managing org user who can administer client orgs
+#             but cannot perform destructive actions (delete org, revoke tokens)
+VALID_ROLES = {"owner", "member", "manager"}
 
 
 # === Schemas ===
@@ -62,12 +66,10 @@ class UserCreate(BaseModel):
     password: str
     full_name: Optional[str] = None
 
-    # Support both canonical `organization_id` and legacy `org_id`.
     organization_id: Optional[int] = None
     org_id: Optional[int] = None
     organization_name: Optional[str] = None
 
-    # Optional org-level cost config at signup
     primary_energy_sources: Optional[str] = None
     electricity_price_per_kwh: Optional[float] = None
     gas_price_per_kwh: Optional[float] = None
@@ -90,6 +92,11 @@ class OrgSummaryOut(BaseModel):
     enable_reports: bool = True
     subscription_status: Optional[str] = None
 
+    # Phase 1: managing org hierarchy fields
+    org_type: Optional[str] = None
+    managed_by_org_id: Optional[int] = None
+    client_limit: Optional[int] = None
+
     primary_energy_sources: Optional[str] = None
     electricity_price_per_kwh: Optional[float] = None
     gas_price_per_kwh: Optional[float] = None
@@ -104,6 +111,8 @@ class AccountMeOut(BaseModel):
     organization_id: Optional[int] = None
 
     full_name: Optional[str] = None
+
+    # Phase 5: "owner" | "member" | "manager"
     role: Optional[str] = None
 
     org: Optional[OrgSummaryOut] = None
@@ -138,20 +147,23 @@ class IntegrationTokenWithSecret(IntegrationTokenOut):
     token: str
 
 
+# Phase 5: schema for role assignment endpoint
+class AssignRoleIn(BaseModel):
+    user_id: int
+    role: str = Field(..., description="'owner' | 'member' | 'manager'")
+
+    model_config = {"extra": "forbid"}
+
+
 # === Access kill-switch helpers ===
 
 def _is_user_active(user: Optional[User]) -> bool:
-    """
-    Treat user.is_active as int 0/1 (legacy) but tolerate bool.
-    Missing field => assume active (back-compat).
-    """
     if not user:
         return False
     if not hasattr(user, "is_active"):
         return True
     v = getattr(user, "is_active", 1)
     try:
-        # int 0/1 or bool
         return bool(int(v))
     except Exception:
         return bool(v)
@@ -218,16 +230,16 @@ def _normalize_currency_code(code: Optional[str]) -> Optional[str]:
 
 def _normalize_user_role(*, user: User) -> str:
     """
-    Canonical roles for CEI SaaS: owner/member.
+    Canonical roles for CEI SaaS: owner / member / manager (Phase 5).
 
-    - Returns the DB role if it's valid.
-    - If missing/unknown, default to member.
-    - If legacy superuser is set but role missing, default to owner (practical compatibility).
+    - Returns the DB role if it's a known valid role.
+    - If missing/unknown, defaults to "member".
+    - If legacy superuser is set but role missing, defaults to "owner".
     """
     db_role = getattr(user, "role", None)
     if isinstance(db_role, str):
         r = db_role.strip().lower()
-        if r in {"owner", "member"}:
+        if r in VALID_ROLES:
             return r
 
     is_super = bool(getattr(user, "is_superuser", 0) or 0)
@@ -239,11 +251,6 @@ def _normalize_user_role(*, user: User) -> str:
 
 # === Compatibility shim for /api/v1/org/invites ===
 def _require_owner(user: User) -> None:
-    """
-    Backward-compatible guard used by org_invites router.
-
-    org_invites.py imports `_require_owner` from here.
-    """
     require_owner(user, message="Only the organization owner can manage organization invites.")
 
 
@@ -284,7 +291,6 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) 
         if org_obj is None:
             raise HTTPException(status_code=400, detail=f"Organization with id={organization_id} not found")
 
-        # Best-effort cost engine config
         try:
             if primary_energy_sources:
                 org_obj.primary_energy_sources = primary_energy_sources
@@ -334,7 +340,6 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) 
         created_new_org = True
         owner_exists = False
 
-        # Best-effort plan defaults
         for k, v in (
             ("plan_key", "cei-starter"),
             ("subscription_plan_key", "cei-starter"),
@@ -347,7 +352,6 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) 
             except Exception:
                 pass
 
-        # Seed cost engine config
         try:
             if primary_energy_sources:
                 org_obj.primary_energy_sources = primary_energy_sources
@@ -373,7 +377,6 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) 
         db.flush()
         organization_id = org_obj.id
 
-    # Hash password
     try:
         hashed_password = pwd_context.hash(str(user.password))
     except Exception as e:
@@ -388,7 +391,6 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) 
         except Exception:
             pass
 
-    # Role assignment
     try:
         if created_new_org or (organization_id is not None and owner_exists is False):
             db_user.role = "owner"
@@ -397,7 +399,6 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) 
     except Exception:
         pass
 
-    # Ensure active by default (int flag 1/0)
     if hasattr(db_user, "is_active"):
         try:
             db_user.is_active = 1
@@ -433,18 +434,11 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ) -> Token:
-    """
-    Canonical login endpoint.
-    Expects application/x-www-form-urlencoded with fields: username, password.
-    """
     email_norm = (form_data.username or "").strip().lower()
     user = db.query(User).filter(User.email == email_norm).first()
     if not user or not pwd_context.verify(form_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-    # ✅ Enforce revoked access at login
     _ensure_user_active_or_403(user)
-
     access = create_access_token({"sub": user.email})
     refresh = create_refresh_token({"sub": user.email})
     _set_refresh_cookie(response, refresh)
@@ -466,10 +460,8 @@ def refresh_access_token(
         detail="Could not refresh credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-
     if not refresh_token:
         raise credentials_exception
-
     try:
         payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("type") != "refresh":
@@ -483,8 +475,6 @@ def refresh_access_token(
     user = db.query(User).filter(User.email == email).first()
     if user is None:
         raise credentials_exception
-
-    # ✅ Enforce revoked access at refresh
     _ensure_user_active_or_403(user)
 
     new_access = create_access_token({"sub": user.email})
@@ -504,7 +494,6 @@ def read_me(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AccountMeOut:
-    # ✅ Enforce revoked access for active sessions
     _ensure_user_active_or_403(current_user)
 
     org: Optional[Organization] = None
@@ -516,7 +505,6 @@ def read_me(
     enable_alerts: bool = True
     enable_reports: bool = True
     subscription_status: Optional[str] = None
-
     primary_energy_sources: Optional[str] = None
     electricity_price_per_kwh: Optional[float] = None
     gas_price_per_kwh: Optional[float] = None
@@ -536,7 +524,6 @@ def read_me(
         enable_reports = bool(raw_enable_reports) if raw_enable_reports is not None else default_enabled
 
         subscription_status = getattr(org, "subscription_status", None)
-
         primary_energy_sources = getattr(org, "primary_energy_sources", None)
         electricity_price_per_kwh = getattr(org, "electricity_price_per_kwh", None)
         gas_price_per_kwh = getattr(org, "gas_price_per_kwh", None)
@@ -556,13 +543,17 @@ def read_me(
             enable_alerts=enable_alerts,
             enable_reports=enable_reports,
             subscription_status=subscription_status,
+            # Phase 1: hierarchy fields now surfaced in /auth/me
+            org_type=getattr(org, "org_type", "standalone"),
+            managed_by_org_id=getattr(org, "managed_by_org_id", None),
+            client_limit=getattr(org, "client_limit", None),
             primary_energy_sources=primary_energy_sources,
             electricity_price_per_kwh=electricity_price_per_kwh,
             gas_price_per_kwh=gas_price_per_kwh,
             currency_code=currency_code,
         )
 
-    # ✅ SaaS canonical roles: owner/member (no "admin" role emitted)
+    # Phase 5: canonical roles include "manager"
     role = _normalize_user_role(user=current_user)
 
     return AccountMeOut(
@@ -584,7 +575,7 @@ def read_me(
     )
 
 
-# === Integration token management endpoints ===
+# === Integration token management ===
 
 @router.post("/integration-tokens", response_model=IntegrationTokenWithSecret)
 def create_integration_token(
@@ -592,7 +583,6 @@ def create_integration_token(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> IntegrationTokenWithSecret:
-    # ✅ Enforce revoked access
     _ensure_user_active_or_403(current_user)
 
     if not current_user.organization_id:
@@ -610,7 +600,6 @@ def create_integration_token(
         token_hash=token_hash,
         is_active=True,
     )
-
     db.add(db_token)
     db.commit()
     db.refresh(db_token)
@@ -638,7 +627,6 @@ def list_integration_tokens(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> List[IntegrationTokenOut]:
-    # ✅ Enforce revoked access
     _ensure_user_active_or_403(current_user)
 
     if not current_user.organization_id:
@@ -646,13 +634,12 @@ def list_integration_tokens(
 
     require_owner(current_user, message="Only the organization owner can manage integration tokens.")
 
-    tokens = (
+    return (
         db.query(IntegrationToken)
         .filter(IntegrationToken.organization_id == current_user.organization_id)
         .order_by(IntegrationToken.created_at.desc())
         .all()
     )
-    return tokens
 
 
 @router.delete("/integration-tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -661,7 +648,6 @@ def revoke_integration_token(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
-    # ✅ Enforce revoked access
     _ensure_user_active_or_403(current_user)
 
     if not current_user.organization_id:
@@ -696,3 +682,123 @@ def revoke_integration_token(
     )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# === Phase 5: Role assignment ===
+
+@router.patch(
+    "/users/{user_id}/role",
+    status_code=status.HTTP_200_OK,
+)
+def assign_user_role(
+    user_id: int,
+    payload: AssignRoleIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Assign a role to a user in the same organization.
+
+    Phase 5 adds the "manager" role for managing org users.
+
+    Valid roles: "owner" | "member" | "manager"
+
+    Rules:
+    - Caller must be the org owner.
+    - Target user must be in the same organization.
+    - An org must always have at least one owner — cannot demote the
+      last owner to member/manager.
+    - Only managing orgs can assign the "manager" role.
+    """
+    _ensure_user_active_or_403(current_user)
+    require_owner(current_user, message="Only the organization owner can assign roles.")
+
+    if not current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "NO_ORG", "message": "You are not attached to an organization."},
+        )
+
+    new_role = (payload.role or "").strip().lower()
+    if new_role not in VALID_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "INVALID_ROLE",
+                "message": f"Invalid role '{new_role}'. Valid roles: {sorted(VALID_ROLES)}",
+            },
+        )
+
+    # Validate "manager" can only be assigned in a managing org
+    if new_role == "manager":
+        org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+        org_type = getattr(org, "org_type", "standalone") or "standalone"
+        if org_type != "managing":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "NOT_A_MANAGING_ORG",
+                    "message": (
+                        "The 'manager' role can only be assigned in a managing organization. "
+                        "Upgrade your org to managing first via POST /api/v1/org/upgrade-to-managing."
+                    ),
+                },
+            )
+
+    target_user = db.query(User).filter(
+        User.id == user_id,
+        User.organization_id == current_user.organization_id,
+    ).first()
+
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "USER_NOT_FOUND", "message": f"User id={user_id} not found in your organization."},
+        )
+
+    # Prevent demoting the last owner
+    if target_user.role == "owner" and new_role != "owner":
+        owner_count = (
+            db.query(User)
+            .filter(
+                User.organization_id == current_user.organization_id,
+                User.role == "owner",
+            )
+            .count()
+        )
+        if owner_count <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "LAST_OWNER",
+                    "message": (
+                        "Cannot demote the last owner. "
+                        "Assign another user as owner first."
+                    ),
+                },
+            )
+
+    old_role = target_user.role
+    target_user.role = new_role
+    db.add(target_user)
+    db.commit()
+    db.refresh(target_user)
+
+    create_org_audit_event(
+        db,
+        org_id=current_user.organization_id,
+        user_id=getattr(current_user, "id", None),
+        title="User role changed",
+        description=(
+            f"target_user_id={target_user.id}; target_email={target_user.email}; "
+            f"old_role={old_role}; new_role={new_role}; "
+            f"changed_by={current_user.email}"
+        ),
+    )
+
+    return {
+        "user_id": target_user.id,
+        "email": target_user.email,
+        "role": target_user.role,
+        "organization_id": target_user.organization_id,
+    }

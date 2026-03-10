@@ -6,7 +6,7 @@
     "authRequired": "Accedi per continuare.",
     "sessionExpired": "La sessione è scaduta. Accedi di nuovo.",
     "hero": {
-      "title": "Usiamo l’IA per ridurre l’impronta di carbonio della tua fabbrica.",
+      "title": "Usiamo l’IA per ridurre i costi energetici della tua fabbrica.",
       "subtitle": "CEI acquisisce i dati dei contatori e SCADA, costruisce baseline statistiche per ogni sito e trasforma inefficienze notturne, del weekend e di processo in avvisi e report operativi — senza installare nuovo hardware."
     },
     "invite": {

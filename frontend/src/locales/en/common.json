@@ -6,7 +6,7 @@
     "authRequired": "Please sign in to continue.",
     "sessionExpired": "Your session expired. Please sign in again.",
     "hero": {
-      "title": "We use A.I to reduce your factorys carbon footprint.",
+      "title": "We use A.I to reduce your factorys energy costs.",
       "subtitle": "CEI ingests your meter and SCADA data, builds statistical baselines for each site, and turns night, weekend, and process inefficiencies into actionable alerts and reports – without installing new hardware."
     },
     "invite": {

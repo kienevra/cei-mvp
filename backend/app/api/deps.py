@@ -42,6 +42,15 @@ def get_current_org(
 # Role guards
 # ---------------------------------------------------------------------------
 
+# Roles that are allowed to perform managing-org operations.
+# Phase 5: "manager" is a managing-org user who can create/read/update
+# client orgs and their resources but cannot perform destructive actions.
+MANAGING_ROLES = {"owner", "manager"}
+
+# Subscription statuses that allow active use of the managing org features.
+ACTIVE_SUBSCRIPTION_STATUSES = {"active", "trialing"}
+
+
 def require_owner(
     current_user: User,
     *,
@@ -65,74 +74,96 @@ def require_owner(
         )
 
 
-def require_managing_org(
-    org_context: OrgContext,
+def require_manager_role(
+    current_user: User,
     *,
-    message: str = "This action requires a managing organization account.",
-) -> Organization:
+    message: str = "Only organization owners or managers can perform this action.",
+) -> None:
     """
-    Guard for Phase 3 /manage/ endpoints.
+    Phase 5: Owner-or-manager guard for managing org operations.
 
-    Ensures the AUTHENTICATED org (not the delegated target) has
-    org_type == 'managing'.
+    Allows:
+    - superusers (legacy back-compat)
+    - role == "owner"
+    - role == "manager"  ← new Phase 5 role
 
-    Works for both:
-    - Direct managing org requests (no X-CEI-ORG-ID)
-    - Delegated requests (X-CEI-ORG-ID present) — checks managing_org_id
+    Blocks:
+    - role == "member" (regular org member, no management rights)
 
-    Returns the managing Organization object for use in the calling endpoint.
-
-    Usage in a router:
-        @router.post("/manage/client-orgs")
-        def create_client_org(
-            payload: ...,
-            db: Session = Depends(get_db),
-            org_context: OrgContext = Depends(get_org_context),
-        ):
-            managing_org = require_managing_org(org_context)
-            ...
+    Use this guard on all /manage/ read + write endpoints.
+    Use require_owner for destructive actions (delete client org, revoke token).
     """
-    # Determine which org_id is the managing one:
-    # - In a delegated context: managing_org_id is the authenticated managing org
-    # - In a direct context: organization_id is the authenticated org
-    managing_org_id = (
-        org_context.managing_org_id
-        if org_context.is_delegated
-        else org_context.organization_id
-    )
+    is_super = bool(getattr(current_user, "is_superuser", 0))
+    if is_super:
+        return
 
-    if not managing_org_id:
+    role = (getattr(current_user, "role", None) or "").strip().lower()
+    if role not in MANAGING_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
-                "code": "NO_ORG",
-                "message": "Authenticated user or token is not attached to any organization.",
+                "code": "FORBIDDEN_MANAGER_ONLY",
+                "message": message,
             },
         )
 
-    # We need a DB session to load the org — callers must pass it in
-    # or we resolve it via a secondary lookup. Since this is a plain function
-    # (not a FastAPI dependency), the caller is responsible for passing db.
-    # See require_managing_org_dep below for the FastAPI dependency variant.
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={
-            "code": "USE_REQUIRE_MANAGING_ORG_DEP",
-            "message": "Use require_managing_org_dep FastAPI dependency instead of calling require_managing_org directly.",
-        },
-    )
 
+# ---------------------------------------------------------------------------
+# Managing org subscription enforcement (Phase 5)
+# ---------------------------------------------------------------------------
+
+def _check_managing_org_subscription(org: Organization) -> None:
+    """
+    Enforce that a managing org has an active subscription before allowing
+    any /manage/ operations.
+
+    Raises HTTP 402 if the subscription is not active/trialing.
+
+    Subscription status values:
+        "active"    → allowed
+        "trialing"  → allowed (grace period / pilot)
+        "past_due"  → blocked (payment overdue)
+        "canceled"  → blocked
+        "unpaid"    → blocked
+        None        → allowed (legacy / no billing configured)
+    """
+    sub_status = (getattr(org, "subscription_status", None) or "").strip().lower()
+
+    # No billing configured → allow (legacy orgs, dev environments)
+    if not sub_status:
+        return
+
+    if sub_status not in ACTIVE_SUBSCRIPTION_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "SUBSCRIPTION_INACTIVE",
+                "message": (
+                    f"Your managing organization's subscription is '{sub_status}'. "
+                    "An active or trialing subscription is required to manage client organizations. "
+                    "Please update your billing details."
+                ),
+            },
+        )
+
+
+# ---------------------------------------------------------------------------
+# Managing org dependency (Phase 2 + Phase 5 hardened)
+# ---------------------------------------------------------------------------
 
 def _check_managing_org(
     db: Session,
     org_context: OrgContext,
     message: str = "This action requires a managing organization account.",
+    *,
+    check_subscription: bool = True,
+    require_role: Optional[str] = None,  # None = no user role check (integration token path)
 ) -> Organization:
     """
-    Internal implementation shared by require_managing_org_dep and
-    endpoint-level manual checks.
+    Internal implementation for require_managing_org_dep.
 
-    Validates the authenticated org is a managing org and returns it.
+    Phase 2: Validates org_type == "managing".
+    Phase 5: Also enforces subscription status and optional user role.
     """
     managing_org_id = (
         org_context.managing_org_id
@@ -159,6 +190,7 @@ def _check_managing_org(
             },
         )
 
+    # Validate org_type
     org_type = getattr(managing_org, "org_type", "standalone") or "standalone"
     if org_type != "managing":
         raise HTTPException(
@@ -169,6 +201,38 @@ def _check_managing_org(
             },
         )
 
+    # Phase 5: Subscription enforcement
+    if check_subscription:
+        _check_managing_org_subscription(managing_org)
+
+    # Phase 5: User role enforcement (skipped for integration token auth)
+    if require_role and org_context.auth_type == "user" and org_context.user:
+        user = org_context.user
+        is_super = bool(getattr(user, "is_superuser", 0))
+        if not is_super:
+            role = (getattr(user, "role", None) or "").strip().lower()
+            if require_role == "manager_or_owner":
+                if role not in MANAGING_ROLES:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail={
+                            "code": "FORBIDDEN_MANAGER_ONLY",
+                            "message": (
+                                "Only organization owners or managers can perform this action. "
+                                "Ask your org owner to assign you the 'manager' role."
+                            ),
+                        },
+                    )
+            elif require_role == "owner":
+                if role != "owner":
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail={
+                            "code": "FORBIDDEN_OWNER_ONLY",
+                            "message": "Only the organization owner can perform this action.",
+                        },
+                    )
+
     return managing_org
 
 
@@ -176,47 +240,70 @@ class require_managing_org_dep:
     """
     FastAPI dependency that validates the authenticated org is a managing org.
 
-    Inject this in any /manage/ endpoint to get the managing Organization
-    object back, with full validation already done.
+    Phase 5 hardened:
+    - Checks org_type == "managing"
+    - Checks subscription_status is active/trialing (402 if not)
+    - Checks user role if auth_type == "user" (integration tokens bypass role check)
 
-    Example:
-        @router.post("/manage/client-orgs")
-        def create_client_org(
-            payload: ClientOrgCreateIn,
-            db: Session = Depends(get_db),
-            org_context: OrgContext = Depends(get_org_context),
-            managing_org: Organization = Depends(require_managing_org_dep()),
-        ):
-            ...
+    Parameters:
+        message          Custom 403 message.
+        check_subscription   Default True. Set False for read-only health checks
+                              that should work even if subscription lapses.
+        require_role     "manager_or_owner" (default) | "owner" | None
+                         Controls which user roles can use this endpoint.
 
-    Or inline for endpoints that also need org_context:
+    Usage — standard (owner or manager allowed):
+        managing_org: Organization = Depends(require_managing_org_dep())
+
+    Usage — destructive (owner only):
+        managing_org: Organization = Depends(require_managing_org_dep(require_role="owner"))
+
+    Usage — inline check:
         managing_org = require_managing_org_dep.check(db, org_context)
     """
 
     def __init__(
         self,
         message: str = "This action requires a managing organization account.",
+        check_subscription: bool = True,
+        require_role: Optional[str] = "manager_or_owner",
     ):
         self.message = message
+        self.check_subscription = check_subscription
+        self.require_role = require_role
 
     def __call__(
         self,
         db: Session = Depends(get_db),
         org_context: OrgContext = Depends(get_org_context),
     ) -> Organization:
-        return _check_managing_org(db, org_context, self.message)
+        return _check_managing_org(
+            db,
+            org_context,
+            self.message,
+            check_subscription=self.check_subscription,
+            require_role=self.require_role,
+        )
 
     @staticmethod
     def check(
         db: Session,
         org_context: OrgContext,
         message: str = "This action requires a managing organization account.",
+        check_subscription: bool = True,
+        require_role: Optional[str] = "manager_or_owner",
     ) -> Organization:
         """
         Synchronous helper for use inside endpoint bodies where you already
         have db and org_context in scope.
         """
-        return _check_managing_org(db, org_context, message)
+        return _check_managing_org(
+            db,
+            org_context,
+            message,
+            check_subscription=check_subscription,
+            require_role=require_role,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -286,26 +373,22 @@ def apply_org_scope_to_timeseries_query(
     current user's organization (if any).
 
     Phase 2 note:
-        For managing org delegated requests, the caller should pass
-        org_context.organization_id (the target client org) rather than
-        user.organization_id. The signature accepts any object with an
-        organization_id attribute for flexibility.
+        For managing org delegated requests, pass org_context instead of user
+        so organization_id resolves to the target client org automatically.
 
-    Usage in /timeseries endpoints:
+    Usage:
         query = db.query(TimeseriesRecord).filter(...)
         query = apply_org_scope_to_timeseries_query(query, db, user)
 
-    Or with org_context for delegated managing org requests:
+    Or with org_context for delegated requests:
         query = apply_org_scope_to_timeseries_query(query, db, org_context)
     """
     org_id = getattr(user, "organization_id", None)
     if not org_id:
-        # No org concept → single-tenant/dev, no restriction
         return query
 
     allowed = get_org_allowed_site_ids(db, org_id)
     if not allowed:
-        # Force an empty result set
         return query.filter(TimeseriesRecord.site_id == "__no_such_site__")
 
     return query.filter(TimeseriesRecord.site_id.in_(allowed))
