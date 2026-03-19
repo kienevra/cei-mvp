@@ -26,11 +26,13 @@ from app.api.deps import (
     create_org_audit_event,
     require_managing_org_dep,
 )
+from app.api.v1.alerts import DEFAULT_THRESHOLDS
 from app.core.security import OrgContext, get_org_context
 from app.db.session import get_db
 from app.models import (
     AlertEvent,
     IntegrationToken,
+    OrgAlertThreshold, 
     Organization,
     Site,
     SiteEvent,
@@ -822,4 +824,156 @@ def get_client_org_report(
         active_site_ids=active_sids, open_alerts=oa, critical_alerts=ca, alerts_last_7d=a7d,
         active_tokens=at, total_tokens=tt, total_users=total_u,
         recent_audit_events=[RecentAuditEvent(id=e.id, title=e.title, type=e.type, created_at=e.created_at) for e in audit_raw],
+    )
+
+# ---------------------------------------------------------------------------
+# Phase 3+: Alert threshold schemas
+# ---------------------------------------------------------------------------
+
+class AlertThresholdsIn(BaseModel):
+    scope: str = Field(default="org", pattern="^(org|site)$")
+    site_id: Optional[str] = Field(default=None)
+    night_warning_ratio: Optional[float] = Field(default=None, ge=0.0, le=5.0)
+    night_critical_ratio: Optional[float] = Field(default=None, ge=0.0, le=5.0)
+    spike_warning_ratio: Optional[float] = Field(default=None, ge=0.0, le=20.0)
+    portfolio_share_info_ratio: Optional[float] = Field(default=None, ge=0.0, le=20.0)
+    weekend_warning_ratio: Optional[float] = Field(default=None, ge=0.0, le=5.0)
+    weekend_critical_ratio: Optional[float] = Field(default=None, ge=0.0, le=5.0)
+    min_points: Optional[int] = Field(default=None, ge=0, le=1000)
+    min_total_kwh: Optional[float] = Field(default=None, ge=0.0)
+    model_config = {"extra": "forbid"}
+
+
+class AlertThresholdsOut(BaseModel):
+    org_id: int
+    scope: str
+    site_id: Optional[str] = None
+    has_custom_thresholds: bool
+    night_warning_ratio: float
+    night_critical_ratio: float
+    spike_warning_ratio: float
+    portfolio_share_info_ratio: float
+    weekend_warning_ratio: float
+    weekend_critical_ratio: float
+    min_points: int
+    min_total_kwh: float
+    updated_at: Optional[datetime] = None
+
+
+# ---------------------------------------------------------------------------
+# Phase 3+: Alert threshold endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/client-orgs/{client_org_id}/alert-thresholds", response_model=AlertThresholdsOut)
+def get_client_org_alert_thresholds(
+    client_org_id: int,
+    site_id: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+) -> AlertThresholdsOut:
+    """Get effective alert thresholds for a client org or specific site."""
+    managing_org_id = _get_managing_org_id(org_context)
+    _get_client_org_or_404(db, client_org_id, managing_org_id)
+
+    q = db.query(OrgAlertThreshold).filter(OrgAlertThreshold.organization_id == client_org_id)
+    if site_id:
+        q = q.filter(OrgAlertThreshold.site_id == site_id)
+    else:
+        q = q.filter(OrgAlertThreshold.site_id.is_(None))
+    db_row = q.first()
+
+    d = DEFAULT_THRESHOLDS
+    def _v(attr, default):
+        if db_row and getattr(db_row, attr, None) is not None:
+            return getattr(db_row, attr)
+        return default
+
+    return AlertThresholdsOut(
+        org_id=client_org_id, scope="site" if site_id else "org", site_id=site_id,
+        has_custom_thresholds=db_row is not None,
+        night_warning_ratio=_v("night_warning_ratio", d.night_warning_ratio),
+        night_critical_ratio=_v("night_critical_ratio", d.night_critical_ratio),
+        spike_warning_ratio=_v("spike_warning_ratio", d.spike_warning_ratio),
+        portfolio_share_info_ratio=_v("portfolio_share_info_ratio", d.portfolio_share_info_ratio),
+        weekend_warning_ratio=_v("weekend_warning_ratio", d.weekend_warning_ratio),
+        weekend_critical_ratio=_v("weekend_critical_ratio", d.weekend_critical_ratio),
+        min_points=_v("min_points", d.min_points),
+        min_total_kwh=_v("min_total_kwh", d.min_total_kwh),
+        updated_at=getattr(db_row, "updated_at", None) if db_row else None,
+    )
+
+
+@router.patch("/client-orgs/{client_org_id}/alert-thresholds", response_model=AlertThresholdsOut)
+def set_client_org_alert_thresholds(
+    client_org_id: int,
+    payload: AlertThresholdsIn,
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+) -> AlertThresholdsOut:
+    """Upsert alert thresholds for a client org or specific site."""
+    managing_org_id = _get_managing_org_id(org_context)
+    _get_client_org_or_404(db, client_org_id, managing_org_id)
+
+    scope = payload.scope or "org"
+    site_id: Optional[str] = None
+
+    if scope == "site":
+        if not payload.site_id:
+            raise HTTPException(status_code=422, detail={"code": "SITE_ID_REQUIRED", "message": "site_id is required when scope='site'."})
+        raw_id = payload.site_id.replace("site-", "")
+        try:
+            numeric_id = int(raw_id)
+        except ValueError:
+            raise HTTPException(status_code=422, detail={"code": "INVALID_SITE_ID", "message": f"Invalid site_id format: {payload.site_id}"})
+        site = db.query(Site).filter(Site.id == numeric_id, Site.org_id == client_org_id).first()
+        if not site:
+            raise HTTPException(status_code=404, detail={"code": "SITE_NOT_FOUND", "message": f"Site {payload.site_id} not found in client org {client_org_id}."})
+        site_id = payload.site_id
+
+    q = db.query(OrgAlertThreshold).filter(OrgAlertThreshold.organization_id == client_org_id)
+    q = q.filter(OrgAlertThreshold.site_id == site_id) if site_id else q.filter(OrgAlertThreshold.site_id.is_(None))
+    db_row = q.first()
+
+    if db_row is None:
+        db_row = OrgAlertThreshold(organization_id=client_org_id, site_id=site_id)
+        db.add(db_row)
+
+    fields = ["night_warning_ratio", "night_critical_ratio", "spike_warning_ratio",
+              "portfolio_share_info_ratio", "weekend_warning_ratio", "weekend_critical_ratio",
+              "min_points", "min_total_kwh"]
+    updated = []
+    for field in fields:
+        val = getattr(payload, field, None)
+        if val is not None:
+            setattr(db_row, field, val)
+            updated.append(field)
+
+    db_row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(db_row)
+
+    create_org_audit_event(
+        db, org_id=managing_org_id, user_id=_actor_user_id(org_context),
+        title="Alert thresholds updated for client org",
+        description=f"client_org_id={client_org_id}; scope={scope}; site_id={site_id}; updated_fields={','.join(updated)}",
+    )
+
+    d = DEFAULT_THRESHOLDS
+    def _v(attr, default):
+        v = getattr(db_row, attr, None)
+        return v if v is not None else default
+
+    return AlertThresholdsOut(
+        org_id=client_org_id, scope=scope, site_id=site_id, has_custom_thresholds=True,
+        night_warning_ratio=_v("night_warning_ratio", d.night_warning_ratio),
+        night_critical_ratio=_v("night_critical_ratio", d.night_critical_ratio),
+        spike_warning_ratio=_v("spike_warning_ratio", d.spike_warning_ratio),
+        portfolio_share_info_ratio=_v("portfolio_share_info_ratio", d.portfolio_share_info_ratio),
+        weekend_warning_ratio=_v("weekend_warning_ratio", d.weekend_warning_ratio),
+        weekend_critical_ratio=_v("weekend_critical_ratio", d.weekend_critical_ratio),
+        min_points=_v("min_points", d.min_points),
+        min_total_kwh=_v("min_total_kwh", d.min_total_kwh),
+        updated_at=db_row.updated_at,
     )

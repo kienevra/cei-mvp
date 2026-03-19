@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Numeric,
     Boolean,
+     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import text
@@ -311,6 +312,69 @@ class AlertEvent(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW, onupdate=DB_NOW)
 
+# -----------------------------------------------------------------------
+# ADD THIS CLASS TO backend/app/models.py
+# Place it after the AlertEvent class.
+# -----------------------------------------------------------------------
+
+class OrgAlertThreshold(Base):
+    """
+    Per-org (and optionally per-site) alert threshold overrides.
+
+    Lookup priority in get_thresholds_for_org_site():
+      1. DB row where org_id matches AND site_id matches exactly
+      2. DB row where org_id matches AND site_id IS NULL  (org-wide default)
+      3. Hardcoded DEFAULT_THRESHOLDS (no DB row at all)
+
+    Managing orgs set these via PATCH /manage/client-orgs/{id}/alert-thresholds.
+    Client orgs can also set their own via future self-service endpoints.
+    """
+    __tablename__ = "org_alert_thresholds"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Which org these thresholds apply to
+    organization_id = Column(
+        Integer,
+        ForeignKey("organization.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Optional site scope — NULL means "applies to all sites in this org"
+    site_id = Column(String(128), nullable=True, index=True)
+
+    # --- Threshold fields (all nullable — NULL = use system default) ---
+
+    # Night vs day baseline (fraction of daytime average)
+    night_warning_ratio = Column(Float, nullable=True)   # default 0.4
+    night_critical_ratio = Column(Float, nullable=True)  # default 0.7
+
+    # Short-window spike detection (multiple of recent average)
+    spike_warning_ratio = Column(Float, nullable=True)   # default 2.5
+
+    # Portfolio share info threshold (multiple of portfolio average)
+    portfolio_share_info_ratio = Column(Float, nullable=True)  # default 1.5
+
+    # Weekend vs weekday baseline
+    weekend_warning_ratio = Column(Float, nullable=True)   # default 0.6
+    weekend_critical_ratio = Column(Float, nullable=True)  # default 0.8
+
+    # Data quality guards
+    min_points = Column(Integer, nullable=True)       # default 4
+    min_total_kwh = Column(Float, nullable=True)      # default 0.0
+
+    created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=True)
+
+    # Unique: one row per (org, site_id) pair — site_id NULL = org-wide
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "site_id",
+            name="uq_org_alert_thresholds_org_site",
+        ),
+    )
 
 class SiteEvent(Base):
     __tablename__ = "site_events"

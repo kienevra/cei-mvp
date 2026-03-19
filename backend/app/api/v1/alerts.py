@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.db.session import get_db
-from app.models import TimeseriesRecord, AlertEvent, SiteEvent, Site  # ✅ include Site (optional cleanup)
+from app.models import TimeseriesRecord, AlertEvent, SiteEvent, Site, OrgAlertThreshold
 from app.services.analytics import compute_site_insights  # statistical engine
 
 logger = logging.getLogger("cei")
@@ -117,9 +117,114 @@ SITE_THRESHOLDS: Dict[str, AlertThresholdsConfig] = {
 
 
 def get_thresholds_for_site(site_id: Optional[str]) -> AlertThresholdsConfig:
+    """
+    Legacy in-memory lookup — kept for back-compat with any existing callers
+    that don't have a db session available.
+    Prefer get_thresholds_for_org_site() for all new call sites.
+    """
     if not site_id:
         return DEFAULT_THRESHOLDS
     return SITE_THRESHOLDS.get(site_id, DEFAULT_THRESHOLDS)
+ 
+ 
+def get_thresholds_for_org_site(
+    db,  # Session — untyped to avoid circular import
+    org_id: Optional[int],
+    site_id: Optional[str],
+) -> AlertThresholdsConfig:
+    """
+    DB-aware threshold lookup with three-level priority:
+ 
+      1. DB row where organization_id == org_id AND site_id == site_id  (site-specific)
+      2. DB row where organization_id == org_id AND site_id IS NULL     (org-wide)
+      3. In-memory SITE_THRESHOLDS dict (legacy per-site overrides)
+      4. DEFAULT_THRESHOLDS                                              (hardcoded fallback)
+ 
+    All DB columns are nullable — a NULL value means "use the system default
+    for that field", so we only override fields that are explicitly set.
+    """
+    if not org_id:
+        return get_thresholds_for_site(site_id)
+ 
+    db_row = None
+ 
+    # Priority 1: site-specific row
+    if site_id:
+        try:
+            db_row = (
+                db.query(OrgAlertThreshold)
+                .filter(
+                    OrgAlertThreshold.organization_id == org_id,
+                    OrgAlertThreshold.site_id == site_id,
+                )
+                .first()
+            )
+        except Exception:
+            pass  # DB unavailable — fall through to defaults
+ 
+    # Priority 2: org-wide row (site_id IS NULL)
+    if db_row is None:
+        try:
+            db_row = (
+                db.query(OrgAlertThreshold)
+                .filter(
+                    OrgAlertThreshold.organization_id == org_id,
+                    OrgAlertThreshold.site_id.is_(None),
+                )
+                .first()
+            )
+        except Exception:
+            pass
+ 
+    # Priority 3 & 4: in-memory fallback
+    if db_row is None:
+        return get_thresholds_for_site(site_id)
+ 
+    # Merge DB row with defaults — only override fields that are not NULL
+    defaults = SITE_THRESHOLDS.get(site_id, DEFAULT_THRESHOLDS) if site_id else DEFAULT_THRESHOLDS
+ 
+    return AlertThresholdsConfig(
+        night_warning_ratio=(
+            db_row.night_warning_ratio
+            if db_row.night_warning_ratio is not None
+            else defaults.night_warning_ratio
+        ),
+        night_critical_ratio=(
+            db_row.night_critical_ratio
+            if db_row.night_critical_ratio is not None
+            else defaults.night_critical_ratio
+        ),
+        spike_warning_ratio=(
+            db_row.spike_warning_ratio
+            if db_row.spike_warning_ratio is not None
+            else defaults.spike_warning_ratio
+        ),
+        portfolio_share_info_ratio=(
+            db_row.portfolio_share_info_ratio
+            if db_row.portfolio_share_info_ratio is not None
+            else defaults.portfolio_share_info_ratio
+        ),
+        weekend_warning_ratio=(
+            db_row.weekend_warning_ratio
+            if db_row.weekend_warning_ratio is not None
+            else defaults.weekend_warning_ratio
+        ),
+        weekend_critical_ratio=(
+            db_row.weekend_critical_ratio
+            if db_row.weekend_critical_ratio is not None
+            else defaults.weekend_critical_ratio
+        ),
+        min_points=(
+            db_row.min_points
+            if db_row.min_points is not None
+            else defaults.min_points
+        ),
+        min_total_kwh=(
+            db_row.min_total_kwh
+            if db_row.min_total_kwh is not None
+            else defaults.min_total_kwh
+        ),
+    )
 
 
 # -------------------------
@@ -895,7 +1000,7 @@ def _generate_alerts_for_window(
         last_ts = row.last_ts or now
         site_name = site_name_map.get(sid)
 
-        thresholds = get_thresholds_for_site(sid)
+        thresholds = get_thresholds_for_org_site(db, org_id, sid)
 
         if points < thresholds.min_points or total_value <= thresholds.min_total_kwh:
             continue
