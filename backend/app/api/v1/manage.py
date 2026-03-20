@@ -39,6 +39,8 @@ from app.models import (
     TimeseriesRecord,
     User,
 )
+from fastapi.responses import StreamingResponse
+from app.services.reporting import generate_client_org_pdf
 
 router = APIRouter(prefix="/manage", tags=["manage"])
 
@@ -976,4 +978,59 @@ def set_client_org_alert_thresholds(
         min_points=_v("min_points", d.min_points),
         min_total_kwh=_v("min_total_kwh", d.min_total_kwh),
         updated_at=db_row.updated_at,
+    )
+
+@router.get(
+    "/client-orgs/{client_org_id}/report/pdf",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "content": {"application/pdf": {}},
+            "description": "PDF report for the client org.",
+        }
+    },
+)
+def get_client_org_report_pdf(
+    client_org_id: int,
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+) -> StreamingResponse:
+    """
+    Download a PDF report for a client org.
+ 
+    Internally calls the same logic as GET /manage/client-orgs/{id}/report
+    and renders the result as a downloadable multi-section PDF.
+ 
+    Sections:
+      - Cover (managing org, client org, generation date)
+      - Summary KPIs
+      - Energy configuration (pricing, sources, currency)
+      - Sites table (with active/silent status)
+      - Ingestion detail
+      - Alert summary
+      - Integration tokens
+      - Recent audit trail (last 20 events)
+ 
+    Accessible by owner or manager.
+    """
+    # Reuse the existing JSON report logic
+    report = get_client_org_report(
+        client_org_id=client_org_id,
+        db=db,
+        org_context=org_context,
+        managing_org=managing_org,
+    )
+ 
+    pdf_bytes = generate_client_org_pdf(report)
+ 
+    filename = (
+        f"cei_report_{report.client_org_name.lower().replace(' ', '_')}"
+        f"_{report.generated_at.strftime('%Y%m%d')}.pdf"
+    )
+ 
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
