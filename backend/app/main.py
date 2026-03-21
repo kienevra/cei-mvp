@@ -14,6 +14,7 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.api.v1 import sites as sites_api
+from app.api.v1.onboarding import router as onboarding_router
 
 # --- request context / db metrics (tolerant to module drift) ---
 from app.core.request_context import (
@@ -345,6 +346,7 @@ app.include_router(org_members.router, prefix="/api/v1")
 app.include_router(org_leave.router, prefix="/api/v1")
 app.include_router(org_offboard.router, prefix="/api/v1")
 app.include_router(manage.router, prefix="/api/v1")  # Phase 3
+app.include_router(onboarding_router, prefix="/api/v1")
 
 
 @app.post("/auth/signup", include_in_schema=False)
