@@ -3,6 +3,7 @@ import React, { useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
+  FiBriefcase,
   FiHome,
   FiList,
   FiAlertTriangle,
@@ -11,17 +12,41 @@ import {
   FiSettings,
   FiUpload,
 } from "react-icons/fi";
+import { useAuth } from "../hooks/useAuth";
 
 /**
  * Sidebar navigation for CEI app.
- * Uses button-like pills for each nav item.
+ *
+ * Managing orgs (ESCOs / consultants):
+ *   Dashboard · Manage · Account · Settings
+ *
+ * Standalone / client orgs:
+ *   Dashboard · Sites · Alerts · Upload CSV · Reports · Account · Settings
  */
 const Sidebar: React.FC = () => {
   const { pathname } = useLocation();
   const { t } = useTranslation();
+  const { user } = useAuth();
 
-  const navItems = useMemo(
-    () => [
+  const isManagingOrg =
+    user?.org?.org_type === "managing" ||
+    user?.organization?.org_type === "managing";
+
+  const navItems = useMemo(() => {
+    if (isManagingOrg) {
+      // ESCOs manage everything through the /manage pages.
+      // Sites, Alerts, CSV upload, and Reports belong to their client orgs,
+      // not to the consultant account itself.
+      return [
+        { label: t("nav.dashboard", { defaultValue: "Dashboard" }), path: "/", icon: <FiHome /> },
+        { label: t("nav.manage", { defaultValue: "Manage" }), path: "/manage", icon: <FiBriefcase /> },
+        { label: t("nav.account", { defaultValue: "Account" }), path: "/account", icon: <FiUser /> },
+        { label: t("nav.settings", { defaultValue: "Settings" }), path: "/settings", icon: <FiSettings /> },
+      ];
+    }
+
+    // Standard org — full menu
+    return [
       { label: t("nav.dashboard", { defaultValue: "Dashboard" }), path: "/", icon: <FiHome /> },
       { label: t("nav.sites", { defaultValue: "Sites" }), path: "/sites", icon: <FiList /> },
       { label: t("nav.alerts", { defaultValue: "Alerts" }), path: "/alerts", icon: <FiAlertTriangle /> },
@@ -29,9 +54,8 @@ const Sidebar: React.FC = () => {
       { label: t("nav.reports", { defaultValue: "Reports" }), path: "/reports", icon: <FiFileText /> },
       { label: t("nav.account", { defaultValue: "Account" }), path: "/account", icon: <FiUser /> },
       { label: t("nav.settings", { defaultValue: "Settings" }), path: "/settings", icon: <FiSettings /> },
-    ],
-    [t]
-  );
+    ];
+  }, [t, isManagingOrg]);
 
   return (
     <aside
@@ -45,7 +69,6 @@ const Sidebar: React.FC = () => {
         padding: "0.9rem 0.8rem 1.2rem",
       }}
     >
-      {/* Lightweight label to anchor the column */}
       <div
         style={{
           padding: "0.2rem 0.6rem 0.1rem",
@@ -61,7 +84,7 @@ const Sidebar: React.FC = () => {
 
       <nav
         style={{
-          marginTop: "0.6rem", // pushes Dashboard down a bit from top edge
+          marginTop: "0.6rem",
           display: "flex",
           flexDirection: "column",
           gap: "0.25rem",
@@ -69,7 +92,9 @@ const Sidebar: React.FC = () => {
         }}
       >
         {navItems.map((item) => {
-          const active = pathname === item.path || (item.path !== "/" && pathname.startsWith(item.path));
+          const active =
+            pathname === item.path ||
+            (item.path !== "/" && pathname.startsWith(item.path));
 
           return (
             <Link
@@ -85,7 +110,9 @@ const Sidebar: React.FC = () => {
                 textDecoration: "none",
                 color: active ? "#e5e7eb" : "var(--cei-text-muted)",
                 background: active ? "rgba(15, 23, 42, 0.98)" : "transparent",
-                border: active ? "1px solid rgba(148, 163, 184, 0.55)" : "1px solid transparent",
+                border: active
+                  ? "1px solid rgba(148, 163, 184, 0.55)"
+                  : "1px solid transparent",
                 transition:
                   "background 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out, transform 0.08s ease-out",
               }}

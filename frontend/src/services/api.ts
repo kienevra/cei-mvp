@@ -857,6 +857,14 @@ export async function acceptInvite(payload: {
   return resp.data as { access_token: string; token_type: string };
 }
 
+export async function upgradeToManaging(clientLimit?: number | null) {
+  const resp = await api.post("/org/upgrade-to-managing", {
+    client_limit: clientLimit ?? null,
+  });
+  return resp.data;
+}
+
+
 /* ===== Org lifecycle (Leave + Offboard) ===== */
 
 export type OffboardMode = "soft" | "nuke";

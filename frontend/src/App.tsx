@@ -21,16 +21,16 @@ const Reports = lazy(() => import("./pages/Reports"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const ManageDashboard = lazy(() => import("./pages/ManageDashboard"));
+const ManageClientOrg = lazy(() => import("./pages/ManageClientOrg"));
 
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
-      {/* Sidebar: visibility controlled via .sidebar-shell in global.css */}
       <div className="sidebar-shell">
         <Sidebar />
       </div>
-
       <div className="flex-1 flex flex-col">
         <TopNav />
         <main>{children}</main>
@@ -49,9 +49,6 @@ const App: React.FC = () => (
           <Route path="/signup" element={<Signup />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
-
-
-          {/* Optional convenience alias */}
           <Route path="/join" element={<Navigate to="/signup" replace />} />
 
           {/* Protected app routes */}
@@ -61,6 +58,28 @@ const App: React.FC = () => (
               <Layout>
                 <ProtectedRoute>
                   <Dashboard />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          <Route
+            path="/manage"
+            element={
+              <Layout>
+                <ProtectedRoute>
+                  <ManageDashboard />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          <Route
+            path="/manage/client-orgs/:id"
+            element={
+              <Layout>
+                <ProtectedRoute>
+                  <ManageClientOrg />
                 </ProtectedRoute>
               </Layout>
             }
