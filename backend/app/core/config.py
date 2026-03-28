@@ -132,6 +132,11 @@ class Settings(BaseSettings):
     )
 
     # ===== Email (password reset, support notifications later) =====
+    frontend_url: Optional[str] = Field(
+        default=None,
+        env="FRONTEND_URL",
+        description="Base URL of the frontend app, used for invite links in emails.",
+    )
     email_provider: str = Field(
         default="log",
         env="EMAIL_PROVIDER",

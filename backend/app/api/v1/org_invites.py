@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import get_current_user  # ✅ canonical location
+from app.core.email import send_email
 from app.db.session import get_db
-from app.models import User, OrgInvite
+from app.models import User, OrgInvite, Organization
 from app.db.models import SiteEvent  # ✅ canonical SiteEvent model import (matches alerts.py usage)
 from app.api.v1.auth import (
     create_access_token,
@@ -336,6 +337,43 @@ def _require_org(current_user: User) -> int:
         )
     return int(org_id)
 
+def _send_invite_email(
+    *,
+    to_email: str,
+    raw_token: str,
+    org_name: str,
+    role: str,
+    expires_days: int,
+    invited_by: str,
+) -> None:
+    """Best-effort invite email — never raises."""
+    try:
+        origin = getattr(settings, "frontend_url", None) or "https://app.carbonefficiencyintel.com"
+        invite_link = f"{origin}/login?invite={raw_token}"
+        subject = f"You've been invited to join {org_name} on CEI"
+        text_body = (
+            f"Hi,\n\n"
+            f"{invited_by} has invited you to join {org_name} on CEI "
+            f"(Carbon Efficiency Intelligence) as a {role}.\n\n"
+            f"Click the link below to create your account and accept the invite:\n"
+            f"{invite_link}\n\n"
+            f"This invite expires in {expires_days} day(s).\n\n"
+            f"If you weren't expecting this, you can safely ignore this email.\n\n"
+            f"— The CEI Team"
+        )
+        html_body = f"""
+<p>Hi,</p>
+<p><strong>{invited_by}</strong> has invited you to join <strong>{org_name}</strong> on
+<strong>CEI – Carbon Efficiency Intelligence</strong> as a <strong>{role}</strong>.</p>
+<p><a href="{invite_link}" style="display:inline-block;padding:10px 20px;background:#22c55e;color:#0f172a;border-radius:6px;text-decoration:none;font-weight:600;">Accept invite</a></p>
+<p>Or copy this link: <code>{invite_link}</code></p>
+<p>This invite expires in {expires_days} day(s).</p>
+<p style="color:#64748b;font-size:0.85em;">If you weren't expecting this, you can safely ignore this email.</p>
+"""
+        send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
+    except Exception:
+        logger.exception("Failed to send invite email to %s", to_email)
+
 
 # ---------- Routes ----------
 
@@ -405,6 +443,17 @@ def create_invite(
             created_by_user_id=current_user.id,  # ✅ human action
         )
 
+        if raw_token:
+            org = db.query(Organization).filter(Organization.id == org_id).first()
+            _send_invite_email(
+                to_email=invited_email,
+                raw_token=raw_token,
+                org_name=org.name if org else "your organization",
+                role=role,
+                expires_days=expires_days,
+                invited_by=getattr(current_user, "email", "Your administrator"),
+            )
+
         return InviteCreateResponse(
             id=existing.id,
             email=email_raw,
@@ -442,6 +491,16 @@ def create_invite(
         title="Invite created",
         body=f"email={invited_email}; invite_id={inv.id}; role={role}; expires_at={expires_at.isoformat()}",
         created_by_user_id=current_user.id,  # ✅ human action
+    )
+
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    _send_invite_email(
+        to_email=invited_email,
+        raw_token=raw_token,
+        org_name=org.name if org else "your organization",
+        role=role,
+        expires_days=expires_days,
+        invited_by=getattr(current_user, "email", "Your administrator"),
     )
 
     return InviteCreateResponse(

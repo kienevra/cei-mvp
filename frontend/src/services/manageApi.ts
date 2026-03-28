@@ -362,3 +362,48 @@ export async function orgRejectLinkRequest(requestId: number): Promise<LinkReque
 export async function orgCancelLinkRequest(requestId: number): Promise<void> {
   await api.delete(`/org/link-requests/${requestId}`);
 }
+
+
+
+export type RecentAuditEvent = {
+  id: number;
+  title: string;
+  type: string | null;
+  created_at: string | null;
+};
+
+export type ClientReportOut = {
+  generated_at: string;
+  managing_org_id: number;
+  managing_org_name: string;
+  client_org_id: number;
+  client_org_name: string;
+  client_org_created_at: string | null;
+  primary_energy_sources: string | null;
+  electricity_price_per_kwh: number | string | null;
+  gas_price_per_kwh: number | string | null;
+  currency_code: string | null;
+  sites: Site[];
+  total_sites: number;
+  total_timeseries_records: number;
+  records_last_24h: number;
+  records_last_7d: number;
+  last_ingestion_at: string | null;
+  active_site_ids: string[];
+  open_alerts: number;
+  critical_alerts: number;
+  alerts_last_7d: number;
+  active_tokens: number;
+  total_tokens: number;
+  total_users: number;
+  recent_audit_events: RecentAuditEvent[];
+};
+
+// ---------------------------------------------------------------------------
+// Function — get client org report
+// ---------------------------------------------------------------------------
+
+export async function getClientOrgReport(clientOrgId: number): Promise<ClientReportOut> {
+  const resp = await api.get(`/manage/client-orgs/${clientOrgId}/report`);
+  return resp.data as ClientReportOut;
+}

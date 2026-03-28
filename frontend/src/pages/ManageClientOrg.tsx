@@ -9,8 +9,9 @@ import {
   listClientOrgTokens, createClientOrgToken, revokeClientOrgToken,
   listClientOrgUsers, inviteClientOrgUser, getClientOrgThresholds,
   updateClientOrgThresholds, updateClientOrgPricing, downloadClientReport,
+  getClientOrgReport,
   type ClientOrg, type Site, type IntegrationToken, type IntegrationTokenWithSecret,
-  type ClientOrgUser, type AlertThresholds,
+  type ClientOrgUser, type AlertThresholds, type ClientReportOut,
 } from "../services/manageApi";
 
 function fmtDt(raw: string | null | undefined): string {
@@ -51,18 +52,325 @@ const btnDanger: React.CSSProperties = { padding: "0.3rem 0.8rem", borderRadius:
 // ---------------------------------------------------------------------------
 // Tab bar
 // ---------------------------------------------------------------------------
-const TAB_KEYS = ["overview", "sites", "tokens", "users", "thresholds"] as const;
+const TAB_KEYS = ["overview", "sites", "tokens", "users", "thresholds", "energy", "alerts", "reports"] as const;
 type TabKey = typeof TAB_KEYS[number];
 
 function TabBar({ active, onChange }: { active: TabKey; onChange: (t: TabKey) => void }) {
   const { t } = useTranslation();
   return (
-    <div style={{ display: "flex", gap: "0.25rem", borderBottom: "1px solid var(--cei-border-subtle)", marginBottom: "1.25rem" }}>
+    <div style={{ display: "flex", gap: "0.25rem", borderBottom: "1px solid var(--cei-border-subtle)", marginBottom: "1.25rem", overflowX: "auto" }}>
       {TAB_KEYS.map((key) => (
-        <button key={key} onClick={() => onChange(key)} style={{ padding: "0.5rem 1rem", fontSize: "0.85rem", background: "transparent", border: "none", borderBottom: active === key ? "2px solid var(--cei-green, #22c55e)" : "2px solid transparent", color: active === key ? "var(--cei-text-main)" : "var(--cei-text-muted)", cursor: "pointer", fontWeight: active === key ? 600 : 400, marginBottom: "-1px" }}>
-          {t(`manage.client.tabs.${key}`)}
+        <button key={key} onClick={() => onChange(key)} style={{ padding: "0.5rem 1rem", fontSize: "0.85rem", background: "transparent", border: "none", borderBottom: active === key ? "2px solid var(--cei-green, #22c55e)" : "2px solid transparent", color: active === key ? "var(--cei-text-main)" : "var(--cei-text-muted)", cursor: "pointer", fontWeight: active === key ? 600 : 400, marginBottom: "-1px", whiteSpace: "nowrap" }}>
+          {t(`manage.client.tabs.${key}`, { defaultValue: key.charAt(0).toUpperCase() + key.slice(1) })}
         </button>
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// KPI chip helper
+// ---------------------------------------------------------------------------
+function KpiChip({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
+  return (
+    <div style={{ background: "rgba(148,163,184,0.06)", border: "1px solid var(--cei-border-subtle)", borderRadius: "0.6rem", padding: "0.85rem 1rem", minWidth: "140px" }}>
+      <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", marginBottom: "0.35rem" }}>{label}</div>
+      <div style={{ fontSize: "1.4rem", fontWeight: 600 }}>{value}</div>
+      {sub && <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginTop: "0.2rem" }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Energy tab
+// ---------------------------------------------------------------------------
+function EnergyTab({ orgId }: { orgId: number }) {
+  const { t } = useTranslation();
+  const [report, setReport] = useState<ClientReportOut | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    getClientOrgReport(orgId)
+      .then(setReport)
+      .catch((e: unknown) => setError(toUiMsg(e, "Failed to load energy data.")))
+      .finally(() => setLoading(false));
+  }, [orgId]);
+
+  if (loading) return <LoadingSpinner />;
+  if (error) return <ErrorBanner message={error} onClose={() => setError(null)} />;
+  if (!report) return null;
+
+  const hasElec = report.electricity_price_per_kwh != null;
+  const tariff = hasElec ? Number(report.electricity_price_per_kwh) : null;
+
+  const cost24h = tariff != null ? (report.records_last_24h * tariff).toFixed(2) : null;
+  const cost7d = tariff != null ? (report.records_last_7d * tariff).toFixed(2) : null;
+
+  return (
+    <div>
+      <div style={{ fontWeight: 600, marginBottom: "1rem" }}>Energy overview</div>
+
+      {/* KPI chips */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1.5rem" }}>
+        <KpiChip label="Total records" value={report.total_timeseries_records.toLocaleString()} sub="All time" />
+        <KpiChip label="Records (24h)" value={report.records_last_24h.toLocaleString()} />
+        <KpiChip label="Records (7d)" value={report.records_last_7d.toLocaleString()} />
+        <KpiChip label="Last ingestion" value={report.last_ingestion_at ? fmtDt(report.last_ingestion_at) : "—"} />
+        {cost24h && <KpiChip label="Est. cost (24h)" value={`€${cost24h}`} sub={`@ €${tariff}/kWh`} />}
+        {cost7d && <KpiChip label="Est. cost (7d)" value={`€${cost7d}`} />}
+      </div>
+
+      {/* Ingestion status */}
+      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Ingestion status</div>
+      <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", marginBottom: "1.25rem" }}>
+        {report.last_ingestion_at
+          ? `Last data received: ${fmtDt(report.last_ingestion_at)}`
+          : "No data ingested yet for this organization. Use the Tokens tab to create an integration token and start pushing data."}
+      </div>
+
+      {/* Active sites with data */}
+      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Sites ({report.total_sites})</div>
+      {report.sites.length === 0 ? (
+        <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>No sites configured yet.</div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.84rem" }}>
+          <thead>
+            <tr>
+              {["Site", "Site ID", "Location", "Has recent data"].map((h) => (
+                <th key={h} style={{ textAlign: "left", padding: "0.4rem 0.6rem", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", borderBottom: "1px solid var(--cei-border-subtle)" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {report.sites.map((site, idx) => {
+              const hasData = report.active_site_ids.includes(site.site_id ?? `site-${site.id}`);
+              return (
+                <tr key={site.id} style={{ background: idx % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)" }}>
+                  <td style={{ padding: "0.5rem 0.6rem", fontWeight: 500 }}>{site.name}</td>
+                  <td style={{ padding: "0.5rem 0.6rem" }}><code style={{ fontSize: "0.78rem", background: "rgba(148,163,184,0.1)", padding: "0.1rem 0.4rem", borderRadius: "0.25rem" }}>{site.site_id ?? `site-${site.id}`}</code></td>
+                  <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</td>
+                  <td style={{ padding: "0.5rem 0.6rem" }}>
+                    <span style={{ color: hasData ? "var(--cei-green, #22c55e)" : "var(--cei-text-muted)", fontSize: "0.8rem" }}>
+                      {hasData ? "● Active" : "○ No recent data"}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+
+      {/* Energy pricing */}
+      <div style={{ borderTop: "1px solid var(--cei-border-subtle)", margin: "1.5rem 0" }} />
+      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Energy pricing</div>
+      <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", lineHeight: 1.7 }}>
+        <div><strong>Sources:</strong> {report.primary_energy_sources ?? "—"}</div>
+        <div><strong>Electricity:</strong> {report.electricity_price_per_kwh != null ? `€${report.electricity_price_per_kwh}/kWh` : "Not configured"}</div>
+        <div><strong>Gas:</strong> {report.gas_price_per_kwh != null ? `€${report.gas_price_per_kwh}/kWh` : "Not configured"}</div>
+        <div><strong>Currency:</strong> {report.currency_code ?? "—"}</div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Alerts tab
+// ---------------------------------------------------------------------------
+function AlertsTab({ orgId }: { orgId: number }) {
+  const [report, setReport] = useState<ClientReportOut | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    getClientOrgReport(orgId)
+      .then(setReport)
+      .catch((e: unknown) => setError(toUiMsg(e, "Failed to load alert data.")))
+      .finally(() => setLoading(false));
+  }, [orgId]);
+
+  if (loading) return <LoadingSpinner />;
+  if (error) return <ErrorBanner message={error} onClose={() => setError(null)} />;
+  if (!report) return null;
+
+  const alertStatusColor = report.open_alerts === 0
+    ? "var(--cei-green, #22c55e)"
+    : report.critical_alerts > 0
+    ? "var(--cei-red, #ef4444)"
+    : "var(--cei-amber, #f59e0b)";
+
+  return (
+    <div>
+      <div style={{ fontWeight: 600, marginBottom: "1rem" }}>Alert summary</div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1.5rem" }}>
+        <KpiChip
+          label="Open alerts"
+          value={<span style={{ color: alertStatusColor }}>{report.open_alerts}</span>}
+        />
+        <KpiChip
+          label="Critical"
+          value={<span style={{ color: report.critical_alerts > 0 ? "var(--cei-red, #ef4444)" : "var(--cei-text-muted)" }}>{report.critical_alerts}</span>}
+        />
+        <KpiChip label="Alerts (7d)" value={report.alerts_last_7d} sub="All severities" />
+      </div>
+
+      {/* Alert status summary */}
+      <div style={{ padding: "1rem", borderRadius: "0.6rem", border: `1px solid ${alertStatusColor}33`, background: `${alertStatusColor}0d`, marginBottom: "1.25rem" }}>
+        <div style={{ fontWeight: 600, color: alertStatusColor, marginBottom: "0.3rem" }}>
+          {report.open_alerts === 0
+            ? "✓ No open alerts"
+            : report.critical_alerts > 0
+            ? `⚠ ${report.critical_alerts} critical alert${report.critical_alerts > 1 ? "s" : ""} require attention`
+            : `${report.open_alerts} open alert${report.open_alerts > 1 ? "s" : ""}`}
+        </div>
+        <div style={{ fontSize: "0.82rem", color: "var(--cei-text-muted)" }}>
+          {report.alerts_last_7d} alerts triggered in the last 7 days.
+          {report.open_alerts > 0 && " Review the alert thresholds in the Thresholds tab to adjust sensitivity."}
+        </div>
+      </div>
+
+      {/* Recent audit events that may relate to alerts */}
+      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Recent activity</div>
+      {report.recent_audit_events.length === 0 ? (
+        <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>No recent activity recorded.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+          {report.recent_audit_events.slice(0, 10).map((ev) => (
+            <div key={ev.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", borderRadius: "0.4rem", background: "rgba(148,163,184,0.05)", border: "1px solid var(--cei-border-subtle)", fontSize: "0.82rem" }}>
+              <span>{ev.title}</span>
+              <span style={{ color: "var(--cei-text-muted)", fontSize: "0.76rem", flexShrink: 0, marginLeft: "1rem" }}>{fmtDt(ev.created_at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginTop: "1rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+        Alert thresholds can be customized per organization in the <strong>Thresholds</strong> tab.
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Reports tab
+// ---------------------------------------------------------------------------
+function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
+  const [report, setReport] = useState<ClientReportOut | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    getClientOrgReport(orgId)
+      .then(setReport)
+      .catch((e: unknown) => setError(toUiMsg(e, "Failed to load report data.")))
+      .finally(() => setLoading(false));
+  }, [orgId]);
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try { await downloadClientReport(orgId); }
+    catch (e: unknown) { setError(toUiMsg(e, "Failed to download PDF report.")); }
+    finally { setDownloading(false); }
+  };
+
+  if (loading) return <LoadingSpinner />;
+  if (error) return <ErrorBanner message={error} onClose={() => setError(null)} />;
+  if (!report) return null;
+
+  const hasElec = report.electricity_price_per_kwh != null;
+  const tariff = hasElec ? Number(report.electricity_price_per_kwh) : null;
+  const totalCostEst = tariff != null ? (report.records_last_7d * tariff).toFixed(2) : null;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: "0.75rem" }}>
+        <div style={{ fontWeight: 600 }}>7-day portfolio report</div>
+        <button style={btnPrimary} onClick={handleDownload} disabled={downloading}>
+          {downloading ? "Downloading…" : "↓ Download PDF report"}
+        </button>
+      </div>
+
+      <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", marginBottom: "1.25rem" }}>
+        Generated: {fmtDt(report.generated_at)} · Managing org: {report.managing_org_name}
+      </div>
+
+      {/* Summary KPIs */}
+      <div style={{ fontWeight: 600, marginBottom: "0.75rem" }}>Summary</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1.5rem" }}>
+        <KpiChip label="Total records" value={report.total_timeseries_records.toLocaleString()} sub="All time" />
+        <KpiChip label="Records (7d)" value={report.records_last_7d.toLocaleString()} />
+        <KpiChip label="Records (24h)" value={report.records_last_24h.toLocaleString()} />
+        <KpiChip label="Total sites" value={report.total_sites} />
+        <KpiChip label="Active sites" value={report.active_site_ids.length} sub="With recent data" />
+        <KpiChip label="Open alerts" value={report.open_alerts} />
+        <KpiChip label="Critical alerts" value={report.critical_alerts} />
+        <KpiChip label="Users" value={report.total_users} />
+        <KpiChip label="Active tokens" value={report.active_tokens} />
+        {totalCostEst && <KpiChip label="Est. cost (7d)" value={`€${totalCostEst}`} sub={`@ €${tariff}/kWh`} />}
+      </div>
+
+      {/* Sites breakdown */}
+      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Sites breakdown</div>
+      {report.sites.length === 0 ? (
+        <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", marginBottom: "1.25rem" }}>No sites configured.</div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.84rem", marginBottom: "1.5rem" }}>
+          <thead>
+            <tr>
+              {["Site", "Site ID", "Location", "Status"].map((h) => (
+                <th key={h} style={{ textAlign: "left", padding: "0.4rem 0.6rem", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", borderBottom: "1px solid var(--cei-border-subtle)" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {report.sites.map((site, idx) => {
+              const active = report.active_site_ids.includes(site.site_id ?? `site-${site.id}`);
+              return (
+                <tr key={site.id} style={{ background: idx % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)" }}>
+                  <td style={{ padding: "0.5rem 0.6rem", fontWeight: 500 }}>{site.name}</td>
+                  <td style={{ padding: "0.5rem 0.6rem" }}><code style={{ fontSize: "0.78rem", background: "rgba(148,163,184,0.1)", padding: "0.1rem 0.4rem", borderRadius: "0.25rem" }}>{site.site_id ?? `site-${site.id}`}</code></td>
+                  <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</td>
+                  <td style={{ padding: "0.5rem 0.6rem" }}>
+                    <span style={{ color: active ? "var(--cei-green, #22c55e)" : "var(--cei-text-muted)", fontSize: "0.8rem" }}>
+                      {active ? "● Active" : "○ Silent"}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+
+      {/* Energy config */}
+      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Energy configuration</div>
+      <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", lineHeight: 1.8, marginBottom: "1.5rem" }}>
+        <div><strong>Primary sources:</strong> {report.primary_energy_sources ?? "Not configured"}</div>
+        <div><strong>Electricity tariff:</strong> {report.electricity_price_per_kwh != null ? `€${report.electricity_price_per_kwh}/kWh` : "Not configured"}</div>
+        <div><strong>Gas tariff:</strong> {report.gas_price_per_kwh != null ? `€${report.gas_price_per_kwh}/kWh` : "Not configured"}</div>
+        <div><strong>Currency:</strong> {report.currency_code ?? "—"}</div>
+      </div>
+
+      {/* Recent audit events */}
+      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Recent audit trail</div>
+      {report.recent_audit_events.length === 0 ? (
+        <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>No audit events yet.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+          {report.recent_audit_events.map((ev) => (
+            <div key={ev.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", borderRadius: "0.4rem", background: "rgba(148,163,184,0.05)", border: "1px solid var(--cei-border-subtle)", fontSize: "0.82rem" }}>
+              <span>{ev.title}</span>
+              <span style={{ color: "var(--cei-text-muted)", fontSize: "0.76rem", flexShrink: 0, marginLeft: "1rem" }}>{fmtDt(ev.created_at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -596,11 +904,14 @@ const ManageClientOrg: React.FC = () => {
       <section style={{ marginTop: "1.5rem" }}>
         <div className="cei-card">
           <TabBar active={activeTab} onChange={setActiveTab} />
-          {activeTab === "overview" && org && <OverviewTab org={org} onSaved={loadOrg} />}
-          {activeTab === "sites" && <SitesTab orgId={orgId} />}
-          {activeTab === "tokens" && <TokensTab orgId={orgId} />}
-          {activeTab === "users" && <UsersTab orgId={orgId} />}
-          {activeTab === "thresholds" && <ThresholdsTab orgId={orgId} />}
+          {activeTab === "overview"    && org && <OverviewTab org={org} onSaved={loadOrg} />}
+          {activeTab === "sites"       && <SitesTab orgId={orgId} />}
+          {activeTab === "tokens"      && <TokensTab orgId={orgId} />}
+          {activeTab === "users"       && <UsersTab orgId={orgId} />}
+          {activeTab === "thresholds"  && <ThresholdsTab orgId={orgId} />}
+          {activeTab === "energy"      && <EnergyTab orgId={orgId} />}
+          {activeTab === "alerts"      && <AlertsTab orgId={orgId} />}
+          {activeTab === "reports"     && <ReportsTab orgId={orgId} orgName={org?.name ?? ""} />}
         </div>
       </section>
     </div>

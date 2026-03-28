@@ -686,6 +686,15 @@ def unlink_from_consultant(
     org.org_type = "standalone"
     org.managed_by_org_id = None
     db.add(org)
+
+    # Remove the accepted link request so the pair can be re-linked in future
+    old_req = db.query(OrgLinkRequest).filter(
+        OrgLinkRequest.client_org_id == org_id,
+        OrgLinkRequest.status == "accepted",
+    ).first()
+    if old_req:
+        db.delete(old_req)
+
     db.commit()
     db.refresh(org)
 
