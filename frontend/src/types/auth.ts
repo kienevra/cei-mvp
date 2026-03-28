@@ -18,9 +18,10 @@ export interface LoginRequest {
 export interface OrganizationSummary {
   id: number;
   name: string;
-
+  org_type?: string | null;
+  managed_by_org_id?: number | null;
   // Plan / feature gating
-  plan_key?: string | null; // backend may include this
+  plan_key?: string | null;
   subscription_plan_key?: string | null;
   subscription_status?: string | null;
   enable_alerts?: boolean | null;

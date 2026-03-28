@@ -10,6 +10,8 @@ import {
 } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth";
 
 type SummaryResponse = {
   site_id: string | null;
@@ -100,6 +102,15 @@ function formatTimeRange(from?: string | null, to?: string | null): string | nul
 
 const Dashboard: React.FC = () => {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const orgType = user?.org?.org_type ?? user?.organization?.org_type;
+    if (orgType === "managing") {
+      navigate("/manage", { replace: true });
+    }
+  }, [user, navigate]);
 
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);

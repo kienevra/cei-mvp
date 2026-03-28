@@ -32,30 +32,37 @@ const Sidebar: React.FC = () => {
     user?.org?.org_type === "managing" ||
     user?.organization?.org_type === "managing";
 
+  const isClientOrg =
+    user?.org?.org_type === "client" ||
+    user?.organization?.org_type === "client";
+
   const navItems = useMemo(() => {
     if (isManagingOrg) {
-      // ESCOs manage everything through the /manage pages.
-      // Sites, Alerts, CSV upload, and Reports belong to their client orgs,
-      // not to the consultant account itself.
       return [
-        { label: t("nav.dashboard", { defaultValue: "Dashboard" }), path: "/", icon: <FiHome /> },
-        { label: t("nav.manage", { defaultValue: "Manage" }), path: "/manage", icon: <FiBriefcase /> },
-        { label: t("nav.account", { defaultValue: "Account" }), path: "/account", icon: <FiUser /> },
-        { label: t("nav.settings", { defaultValue: "Settings" }), path: "/settings", icon: <FiSettings /> },
+        { label: t("nav.manage"), path: "/manage", icon: <FiBriefcase /> },
+        { label: t("nav.account"), path: "/account", icon: <FiUser /> },
+        { label: t("nav.settings"), path: "/settings", icon: <FiSettings /> },
       ];
     }
 
-    // Standard org — full menu
+    if (isClientOrg) {
+      return [
+        { label: t("nav.dashboard"), path: "/", icon: <FiHome /> },
+        { label: t("nav.account"), path: "/account", icon: <FiUser /> },
+        { label: t("nav.settings"), path: "/settings", icon: <FiSettings /> },
+      ];
+    }
+
     return [
-      { label: t("nav.dashboard", { defaultValue: "Dashboard" }), path: "/", icon: <FiHome /> },
-      { label: t("nav.sites", { defaultValue: "Sites" }), path: "/sites", icon: <FiList /> },
-      { label: t("nav.alerts", { defaultValue: "Alerts" }), path: "/alerts", icon: <FiAlertTriangle /> },
-      { label: t("nav.uploadCsv", { defaultValue: "Upload CSV" }), path: "/upload", icon: <FiUpload /> },
-      { label: t("nav.reports", { defaultValue: "Reports" }), path: "/reports", icon: <FiFileText /> },
-      { label: t("nav.account", { defaultValue: "Account" }), path: "/account", icon: <FiUser /> },
-      { label: t("nav.settings", { defaultValue: "Settings" }), path: "/settings", icon: <FiSettings /> },
+      { label: t("nav.dashboard"), path: "/", icon: <FiHome /> },
+      { label: t("nav.sites"), path: "/sites", icon: <FiList /> },
+      { label: t("nav.alerts"), path: "/alerts", icon: <FiAlertTriangle /> },
+      { label: t("nav.uploadCsv"), path: "/upload", icon: <FiUpload /> },
+      { label: t("nav.reports"), path: "/reports", icon: <FiFileText /> },
+      { label: t("nav.settings"), path: "/settings", icon: <FiSettings /> },
+      { label: t("nav.account"), path: "/account", icon: <FiUser /> },
     ];
-  }, [t, isManagingOrg]);
+  }, [t, isManagingOrg, isClientOrg]);
 
   return (
     <aside

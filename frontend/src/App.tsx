@@ -51,90 +51,13 @@ const App: React.FC = () => (
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/join" element={<Navigate to="/signup" replace />} />
 
-          {/* Protected app routes */}
+          {/* Protected app routes — accessible to all org types */}
           <Route
             path="/"
             element={
               <Layout>
                 <ProtectedRoute>
                   <Dashboard />
-                </ProtectedRoute>
-              </Layout>
-            }
-          />
-
-          <Route
-            path="/manage"
-            element={
-              <Layout>
-                <ProtectedRoute>
-                  <ManageDashboard />
-                </ProtectedRoute>
-              </Layout>
-            }
-          />
-
-          <Route
-            path="/manage/client-orgs/:id"
-            element={
-              <Layout>
-                <ProtectedRoute>
-                  <ManageClientOrg />
-                </ProtectedRoute>
-              </Layout>
-            }
-          />
-
-          <Route
-            path="/sites"
-            element={
-              <Layout>
-                <ProtectedRoute>
-                  <SitesList />
-                </ProtectedRoute>
-              </Layout>
-            }
-          />
-
-          <Route
-            path="/sites/:id"
-            element={
-              <Layout>
-                <ProtectedRoute>
-                  <SiteView />
-                </ProtectedRoute>
-              </Layout>
-            }
-          />
-
-          <Route
-            path="/alerts"
-            element={
-              <Layout>
-                <ProtectedRoute>
-                  <Alerts />
-                </ProtectedRoute>
-              </Layout>
-            }
-          />
-
-          <Route
-            path="/reports"
-            element={
-              <Layout>
-                <ProtectedRoute>
-                  <Reports />
-                </ProtectedRoute>
-              </Layout>
-            }
-          />
-
-          <Route
-            path="/upload"
-            element={
-              <Layout>
-                <ProtectedRoute>
-                  <CSVUpload />
                 </ProtectedRoute>
               </Layout>
             }
@@ -157,6 +80,85 @@ const App: React.FC = () => (
               <Layout>
                 <ProtectedRoute>
                   <Settings />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          {/* Managing org only */}
+          <Route
+            path="/manage"
+            element={
+              <Layout>
+                <ProtectedRoute allowedOrgTypes={["managing"]}>
+                  <ManageDashboard />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          <Route
+            path="/manage/client-orgs/:id"
+            element={
+              <Layout>
+                <ProtectedRoute allowedOrgTypes={["managing"]}>
+                  <ManageClientOrg />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          {/* Standalone org only */}
+          <Route
+            path="/sites"
+            element={
+              <Layout>
+                <ProtectedRoute allowedOrgTypes={["standalone"]}>
+                  <SitesList />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          <Route
+            path="/sites/:id"
+            element={
+              <Layout>
+                <ProtectedRoute allowedOrgTypes={["standalone"]}>
+                  <SiteView />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          <Route
+            path="/alerts"
+            element={
+              <Layout>
+                <ProtectedRoute allowedOrgTypes={["standalone"]}>
+                  <Alerts />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          <Route
+            path="/reports"
+            element={
+              <Layout>
+                <ProtectedRoute allowedOrgTypes={["standalone"]}>
+                  <Reports />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          <Route
+            path="/upload"
+            element={
+              <Layout>
+                <ProtectedRoute allowedOrgTypes={["standalone"]}>
+                  <CSVUpload />
                 </ProtectedRoute>
               </Layout>
             }

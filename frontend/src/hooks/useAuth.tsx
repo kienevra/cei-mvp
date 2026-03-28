@@ -27,6 +27,7 @@ export type AuthContextType = {
   user: AuthUser | null;
   login: (data: LoginPayload) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -167,6 +168,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  // Fetch full user profile from /auth/me whenever token changes.
+  // This ensures user.org.org_type is populated so the Sidebar can
+  // conditionally show the Manage nav item for managing orgs.
+  useEffect(() => {
+    if (!token) return;
+    api
+      .get("/auth/me")
+      .then((resp) => setUser(resp.data))
+      .catch(() => {}); // silently ignore — stale token will be caught by the interceptor below
+  }, [token]);
+
   // Global auth sink: if api.ts reports "session expired", reflect it in Auth state and route.
   useEffect(() => {
     const id = api.interceptors.response.use(
@@ -216,10 +228,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Store token in state (and indirectly in localStorage via effect)
       setToken(accessToken);
 
-      // If backend returns user payload, use it; otherwise synthesize minimal user
-      if (data.user && typeof data.user === "object") {
-        setUser(data.user as AuthUser);
-      } else {
+      // Fetch full user profile immediately after login so org_type and other
+      // profile fields are available to Sidebar and other consumers right away.
+      try {
+        const meResp = await api.get("/auth/me", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        setUser(meResp.data);
+      } catch {
+        // Fall back to minimal user if /auth/me fails for any reason
         setUser({ username });
       }
 
@@ -231,7 +248,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       );
     }
   };
-
+  const refreshUser = async () => {
+    if (!token) return;
+    try {
+      const meResp = await api.get("/auth/me");
+      setUser(meResp.data);
+    } catch {
+      // ignore
+    }
+  };
   const logout = () => {
     setToken(null);
     setUser(null);
@@ -249,6 +274,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     user,
     login,
     logout,
+    refreshUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

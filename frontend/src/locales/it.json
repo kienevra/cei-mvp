@@ -23,10 +23,11 @@
   },
   "errors": {
     "generic": "Qualcosa è andato storto. Riprova.",
-    "forbiddenOwnerOnly": "Solo owner. Chiedi al proprietario dell’organizzazione.",
+    "forbiddenOwnerOnly": "Solo owner. Chiedi al proprietario dell'organizzazione.",
     "sessionExpired": "La sessione è scaduta. Accedi di nuovo."
   },
   "nav": {
+    "manage": "Gestione",
     "navigation": "Navigazione",
     "dashboard": "Dashboard",
     "sites": "Siti",
@@ -52,7 +53,7 @@
     "logout": "Esci",
     "signedIn": "Accesso effettuato",
     "hero": {
-      "title": "Usiamo l’A.I. per ridurre l’impronta di carbonio della tua fabbrica.",
+      "title": "Usiamo l'A.I. per ridurre i costi energetici di produzione.",
       "subtitle": "CEI acquisisce i dati dei contatori e SCADA, costruisce baseline statistiche per ogni sito e trasforma inefficienze notturne, del weekend e di processo in avvisi e report azionabili – senza installare nuovo hardware."
     },
     "actions": {
@@ -61,16 +62,16 @@
       "signingInProgress": "Accesso in corso…",
       "creatingAccountProgress": "Creazione account…",
       "joiningViaInvite": "Accesso tramite invito…",
-      "joinOrganization": "Unisciti all’organizzazione"
+      "joinOrganization": "Unisciti all'organizzazione"
     },
     "invite": {
-      "notice": "Stai entrando in un’organizzazione tramite invito. Crea il tuo account per continuare.",
+      "notice": "Stai entrando in un'organizzazione tramite invito. Crea il tuo account per continuare.",
       "badgeTitle": "Invito rilevato.",
-      "badgeBody": "Dopo la creazione dell’account, entrerai in un’organizzazione esistente.",
-      "requiresSignup": "Il flusso invito richiede la creazione dell’account."
+      "badgeBody": "Dopo la creazione dell'account, entrerai in un'organizzazione esistente.",
+      "requiresSignup": "Il flusso invito richiede la creazione dell'account."
     },
     "sessionExpired": "La sessione è scaduta. Accedi di nuovo.",
-    "authRequired": "Effettua l’accesso per continuare.",
+    "authRequired": "Effettua l'accesso per continuare.",
     "fields": {
       "fullName": {
         "label": "Nome completo (facoltativo)",
@@ -80,7 +81,7 @@
       "organizationName": {
         "label": "Nome organizzazione",
         "placeholder": "es. Dev Manufacturing",
-        "help": "Questo crea la tua organizzazione. Usa un link di invito per unirti a un’organizzazione esistente."
+        "help": "Questo crea la tua organizzazione. Usa un link di invito per unirti a un'organizzazione esistente."
       },
       "email": {
         "label": "Email di lavoro",
@@ -105,7 +106,6 @@
       "inviteJoinNotLive": "Il join tramite invito non è ancora attivo su questo backend (manca /org/invites/accept-and-signup). Distribuisci il router inviti e riprova.",
       "inviteMissingAccessToken": "Registrazione tramite invito riuscita ma manca access_token nella risposta."
     },
-
     "passwordReset": {
       "forgot": {
         "link": "Password dimenticata?",
@@ -113,7 +113,7 @@
         "subtitle": "Inserisci la tua email e ti invieremo un link per reimpostare la password.",
         "send": "Invia link di reset",
         "sending": "Invio in corso…",
-        "done": "Se l’email esiste, è stato inviato un link per reimpostare la password.",
+        "done": "Se l'email esiste, è stato inviato un link per reimpostare la password.",
         "error": "Impossibile richiedere il reset della password.",
         "devLink": "Link di reset (dev):"
       },
@@ -128,11 +128,276 @@
       },
       "backToLogin": "Torna al login"
     }
- },
+  },
+  "signup": {
+    "chooseType": {
+      "title": "Crea il tuo account",
+      "subtitle": "Come utilizzerai CEI?",
+      "continue": "Continua →",
+      "alreadyHaveAccount": "Hai già un account?",
+      "loginLink": "Accedi"
+    },
+    "types": {
+      "manager": {
+        "title": "Energy manager / consulente",
+        "description": "Gestisco l'energia per più organizzazioni clienti (ESCO, auditor energetico, consulente)."
+      },
+      "organization": {
+        "title": "Organizzazione",
+        "description": "Rappresento una fabbrica, un impianto o un'azienda e voglio monitorare la mia energia."
+      },
+      "inviteeOrg": {
+        "title": "Invitato da un'organizzazione",
+        "description": "Ho ricevuto un link di invito dalla mia organizzazione per accedere alla piattaforma."
+      },
+      "inviteeConsultant": {
+        "title": "Invitato da una società di consulenza",
+        "description": "Ho ricevuto un link di invito da un consulente energetico o ESCO per entrare nel loro team."
+      }
+    },
+    "selfSignup": {
+      "managerTitle": "Configura il tuo account consulente",
+      "managerSubtitle": "Il tuo account verrà configurato come società di gestione energetica. Potrai aggiungere organizzazioni clienti dalla dashboard Gestione.",
+      "orgTitle": "Configura la tua organizzazione",
+      "orgSubtitle": "Il tuo account verrà configurato come organizzazione autonoma con accesso completo a siti, avvisi e report.",
+      "firmNameLabel": "Nome società / azienda *",
+      "firmNamePlaceholder": "es. GreenEnergy Consulting Srl",
+      "orgNameLabel": "Nome organizzazione *",
+      "orgNamePlaceholder": "es. Ceramica Rossi Srl",
+      "fullNameLabel": "Il tuo nome e cognome",
+      "fullNamePlaceholder": "es. Mario Rossi",
+      "emailLabel": "Indirizzo email *",
+      "emailPlaceholder": "tuo.nome@esempio.it",
+      "passwordLabel": "Password * (min. 6 caratteri)",
+      "passwordPlaceholder": "Scegli una password sicura",
+      "createManagerBtn": "Crea account consulente",
+      "creatingManagerBtn": "Creazione account consulente…",
+      "createOrgBtn": "Crea account",
+      "creatingOrgBtn": "Creazione account…",
+      "errorGeneric": "Registrazione non riuscita. Riprova."
+    },
+    "invitee": {
+      "consultantTitle": "Entra nella tua società di consulenza",
+      "consultantSubtitle": "Incolla il token di invito inviato dalla tua società di gestione energetica. Verrai aggiunto come membro del team.",
+      "orgTitle": "Entra nella tua organizzazione",
+      "orgSubtitle": "Incolla il token di invito inviato dalla tua organizzazione. Verrai aggiunto con il ruolo assegnato dall'amministratore.",
+      "tokenLabel": "Token di invito *",
+      "tokenPlaceholder": "cei_inv_…",
+      "tokenAutoFilled": "Token inserito automaticamente dal link di invito.",
+      "emailLabel": "Indirizzo email * (deve corrispondere all'invito)",
+      "emailPlaceholder": "tuo.nome@esempio.it",
+      "fullNameLabel": "Il tuo nome e cognome",
+      "fullNamePlaceholder": "es. Mario Rossi",
+      "passwordLabel": "Password * (min. 6 caratteri)",
+      "passwordPlaceholder": "Scegli una password sicura",
+      "joinFirmBtn": "Entra nella società",
+      "joinOrgBtn": "Entra nell'organizzazione",
+      "joiningBtn": "Accesso in corso…",
+      "invalidToken": "Token di invito non valido. Deve iniziare con 'cei_inv_'. Controlla il link ricevuto.",
+      "errorGeneric": "Impossibile accettare l'invito. Controlla i dati inseriti e riprova."
+    }
+  },
+  "manage": {
+    "header": {
+      "title": "Gestione portfolio",
+      "subtitle": "Panoramica di tutte le organizzazioni clienti, stato dell'ingestione e avvisi.",
+      "generatedBy": "Generato",
+      "windowBtn7": "7 giorni",
+      "windowBtn14": "14 giorni",
+      "windowBtn30": "30 giorni",
+      "analyticsWindow": "Finestra di analisi:",
+      "analyticsLoading": "Caricamento…"
+    },
+    "kpis": {
+      "clientOrgs": "Org. clienti",
+      "clientOrgsActive": "{{count}} attive nelle ultime 24h",
+      "totalSites": "Siti totali",
+      "totalSitesSub": "Su tutte le org. clienti",
+      "totalRecords": "Record totali",
+      "totalRecordsSub": "Sempre, tutti i clienti",
+      "openAlerts": "Avvisi aperti",
+      "openAlertsSub": "Su tutte le org. clienti",
+      "clientsWithoutData": "Clienti senza dati recenti",
+      "clientsWithoutDataSub": "Nessuna ingestione nelle ultime 24h",
+      "recordsWindow": "Record ({{days}}gg)",
+      "criticalAlerts": "Avvisi critici",
+      "activeTokens": "Token attivi"
+    },
+    "onboarding": {
+      "title": "Stato onboarding",
+      "checklistTitle": "Checklist onboarding",
+      "stepsRemaining_one": "{{count}} passaggio rimanente",
+      "stepsRemaining_other": "{{count}} passaggi rimanenti"
+    },
+    "clients": {
+      "title": "Organizzazioni clienti",
+      "noClients": "Nessuna organizzazione cliente. Usa POST /manage/onboarding/bootstrap per aggiungere il primo cliente.",
+      "table": {
+        "name": "Organizzazione",
+        "status": "Stato",
+        "sites": "Siti",
+        "records24h": "Record (24h)",
+        "records7d": "Record (7gg)",
+        "totalRecords": "Record totali",
+        "lastIngestion": "Ultima ingestione",
+        "openAlerts": "Avvisi aperti",
+        "activeTokens": "Token attivi",
+        "report": "Report"
+      },
+      "status": {
+        "active": "Attivo",
+        "silent": "Silenzioso"
+      },
+      "downloadPdf": "↓ PDF",
+      "downloading": "Download…"
+    },
+    "pdf": {
+      "download": "↓ Scarica report PDF",
+      "downloading": "Download…"
+    },
+    "client": {
+      "title": "Organizzazione cliente",
+      "backToPortfolio": "← Portfolio",
+      "orgId": "Org ID {{id}}",
+      "tabs": {
+        "overview": "Panoramica",
+        "sites": "Siti",
+        "tokens": "Token",
+        "users": "Utenti",
+        "thresholds": "Soglie"
+      },
+      "overview": {
+        "title": "Dettagli organizzazione",
+        "pricingTitle": "Prezzi energia",
+        "name": "Nome",
+        "plan": "Piano",
+        "status": "Stato",
+        "created": "Creato il",
+        "energySources": "Fonti energetiche",
+        "energySourcesPlaceholder": "es. electricity,gas",
+        "electricityPrice": "Elettricità (€/kWh)",
+        "electricityPricePlaceholder": "es. 0.23",
+        "gasPrice": "Gas (€/kWh)",
+        "gasPricePlaceholder": "es. 0.08",
+        "currency": "Valuta",
+        "savePricing": "Salva prezzi",
+        "savingPricing": "Salvataggio…",
+        "savedSuccess": "Salvato ✓",
+        "errorGeneric": "Impossibile salvare i prezzi."
+      },
+      "sites": {
+        "title": "Siti ({{count}})",
+        "noSites": "Nessun sito. Aggiungine uno per iniziare a ingerire dati.",
+        "addBtn": "+ Aggiungi sito",
+        "addTitle": "Aggiungi sito",
+        "nameLabel": "Nome sito *",
+        "namePlaceholder": "es. Stabilimento A",
+        "locationLabel": "Ubicazione",
+        "locationPlaceholder": "es. Milano, Italia",
+        "createBtn": "Crea sito",
+        "creatingBtn": "Creazione…",
+        "cancelBtn": "Annulla",
+        "deleteTitle": "Elimina sito",
+        "deleteConfirm": "Sei sicuro di voler eliminare {{name}}? Verranno rimossi il sito e tutti i dati associati. Questa azione non può essere annullata.",
+        "deleteBtn": "Elimina",
+        "deletingBtn": "Eliminazione…",
+        "errorLoad": "Impossibile caricare i siti.",
+        "errorCreate": "Impossibile creare il sito.",
+        "errorDelete": "Impossibile eliminare il sito.",
+        "table": {
+          "name": "Nome",
+          "location": "Ubicazione",
+          "siteId": "ID sito",
+          "created": "Creato il",
+          "actions": ""
+        }
+      },
+      "tokens": {
+        "title": "Token di integrazione ({{count}} attivi)",
+        "noTokens": "Nessun token.",
+        "createBtn": "+ Crea token",
+        "createTitle": "Crea token di integrazione",
+        "nameLabel": "Nome token",
+        "createAction": "Crea token",
+        "creatingAction": "Creazione…",
+        "cancelBtn": "Annulla",
+        "newTokenBanner": "Token creato — copialo ora, non verrà mostrato di nuovo",
+        "copyBtn": "Copia negli appunti",
+        "dismissBtn": "Chiudi",
+        "revokeTitle": "Revoca token",
+        "revokeConfirm": "Revocare {{name}}? Qualsiasi sistema che utilizza questo token perderà immediatamente l'accesso.",
+        "revokeAction": "Revoca",
+        "revokingAction": "Revoca…",
+        "createHint": "Il token verrà mostrato una sola volta dopo la creazione. Conservalo in modo sicuro — non potrà essere recuperato.",
+        "errorLoad": "Impossibile caricare i token.",
+        "errorCreate": "Impossibile creare il token.",
+        "errorRevoke": "Impossibile revocare il token.",
+        "table": {
+          "name": "Nome",
+          "status": "Stato",
+          "created": "Creato il",
+          "lastUsed": "Ultimo utilizzo",
+          "actions": ""
+        },
+        "statusActive": "Attivo",
+        "statusRevoked": "Revocato"
+      },
+      "users": {
+        "title": "Utenti ({{count}})",
+        "noUsers": "Nessun utente in questa organizzazione. Invita qualcuno per iniziare.",
+        "inviteBtn": "+ Invita utente",
+        "inviteTitle": "Invita utente",
+        "emailLabel": "Email *",
+        "emailPlaceholder": "utente@esempio.it",
+        "roleLabel": "Ruolo",
+        "roleMember": "Membro",
+        "roleOwner": "Proprietario",
+        "expiryLabel": "Scade tra (giorni)",
+        "inviteAction": "Invia invito",
+        "invitingAction": "Invio…",
+        "cancelBtn": "Annulla",
+        "inviteBanner": "Invito creato per {{email}} — condividi questo token con loro",
+        "inviteHint": "Si registrano tramite: POST /api/v1/org/invites/accept-and-signup",
+        "copyToken": "Copia token",
+        "dismissBtn": "Chiudi",
+        "errorLoad": "Impossibile caricare gli utenti.",
+        "errorInvite": "Impossibile inviare l'invito.",
+        "table": {
+          "email": "Email",
+          "role": "Ruolo",
+          "status": "Stato",
+          "created": "Creato il"
+        },
+        "statusActive": "Attivo",
+        "statusDisabled": "Disabilitato"
+      },
+      "thresholds": {
+        "title": "Soglie avvisi",
+        "customActive": "Soglie personalizzate attive per questa organizzazione.",
+        "usingDefaults": "Utilizzo dei valori predefiniti. Modifica e salva per impostare soglie personalizzate.",
+        "saveBtn": "Salva soglie",
+        "savingBtn": "Salvataggio…",
+        "savedSuccess": "Salvato ✓",
+        "errorLoad": "Impossibile caricare le soglie.",
+        "errorSave": "Impossibile salvare le soglie.",
+        "defaultLabel": "predefinito: {{value}}",
+        "fields": {
+          "nightWarning": { "label": "Soglia notte (avviso)", "hint": "Frazione della media diurna" },
+          "nightCritical": { "label": "Soglia notte (critica)", "hint": "Frazione della media diurna" },
+          "spikeWarning": { "label": "Soglia picco (avviso)", "hint": "Multiplo della media recente" },
+          "portfolioShare": { "label": "Quota portfolio", "hint": "Multiplo della media portfolio" },
+          "weekendWarning": { "label": "Soglia weekend (avviso)", "hint": "Frazione della media infrasettimanale" },
+          "weekendCritical": { "label": "Soglia weekend (critica)", "hint": "Frazione della media infrasettimanale" },
+          "minPoints": { "label": "Punti minimi", "hint": "Numero minimo di punti dati richiesti" },
+          "minKwh": { "label": "kWh minimi totali", "hint": "Energia minima per attivare l'avviso" }
+        }
+      }
+    }
+  },
   "dashboard": {
     "errors": {
       "summary": "Impossibile caricare il riepilogo energia.",
-      "trend": "Impossibile caricare l’andamento energia.",
+      "trend": "Impossibile caricare l'andamento energia.",
       "sites": "Impossibile caricare i siti.",
       "ingestHealth": "Impossibile caricare lo stato di ingestione."
     },
@@ -158,7 +423,7 @@
       },
       "coverage": {
         "title": "Copertura dati (punti)",
-        "body": "Numero totale di letture nella finestra selezionata. Usalo per una verifica rapida della “completezza” del dataset."
+        "body": "Numero totale di letture nella finestra selezionata. Usalo per una verifica rapida della \"completezza\" del dataset."
       },
       "fleetStatus": {
         "title": "Stato flotta",
@@ -186,16 +451,16 @@
     },
     "trend": {
       "title": "Andamento energia portfolio – ultime 24 ore",
-      "subtitle": "Profilo orario dell’energia su tutti i siti combinati. Usalo per individuare picchi, minimi e baseline sospettosamente piatte.",
+      "subtitle": "Profilo orario dell'energia su tutti i siti combinati. Usalo per individuare picchi, minimi e baseline sospettosamente piatte.",
       "unit": "kWh · orario",
-      "noData": "Nessun dato di serie recente. Dopo l’ingestione CSV o un feed live, CEI mostrerà qui le ultime 24 ore.",
+      "noData": "Nessun dato di serie recente. Dopo l'ingestione CSV o un feed live, CEI mostrerà qui le ultime 24 ore.",
       "summary": "Ora di picco: {{peakLabel}} a {{maxVal}} kWh · Media: {{avgVal}} kWh/h su {{windowHours}} ore · Minimo orario: {{minVal}} kWh/h."
     },
     "focus": {
       "title": "Cosa controllare oggi",
       "subtitle": "Uno strato qualitativo leggero sopra i grafici grezzi. Qui trasformi i grafici in una lista di azioni operative.",
       "item1": "Controlla se la baseline notturna è piatta e bassa. Una baseline che cresce nel tempo spesso nasconde perdite a impianto fermo.",
-      "item2": "Confronta questo profilo di 24 ore con una giornata “buona”. Cerca nuovi picchi o zone a carico elevato più lunghe del normale.",
+      "item2": "Confronta questo profilo di 24 ore con una giornata \"buona\". Cerca nuovi picchi o zone a carico elevato più lunghe del normale.",
       "item3": {
         "prefix": "Usa la pagina",
         "suffix": "per vedere quali siti stanno guidando eventuali consumi anomali."
@@ -211,7 +476,7 @@
     },
     "header": {
       "title": "Siti",
-      "subtitle": "Gestisci stabilimenti, impianti e linee che stai monitorando. I siti sono l’ancora per dashboard, avvisi e report."
+      "subtitle": "Gestisci stabilimenti, impianti e linee che stai monitorando. I siti sono l'ancora per dashboard, avvisi e report."
     },
     "actions": {
       "goToUpload": "Vai al caricamento CSV"
@@ -228,7 +493,7 @@
     },
     "table": {
       "title": "Siti nella tua organizzazione",
-      "subtitlePrefix": "Clicca sull’ID o sul nome del sito per aprire la sua dashboard. Carica CSV con chiave",
+      "subtitlePrefix": "Clicca sull'ID o sul nome del sito per aprire la sua dashboard. Carica CSV con chiave",
       "subtitleSuffix": "per alimentare trend, avvisi e report.",
       "empty": "Nessun sito ancora. Usa il modulo sopra per creare il primo sito, poi carica dati timeseries collegati a site-1, site-2, ecc.",
       "columns": {
@@ -271,7 +536,7 @@
       "forecast": "Impossibile caricare il forecast.",
       "loadSite": "Impossibile caricare il sito.",
       "loadSummary": "Impossibile caricare il riepilogo energia.",
-      "loadTrend": "Impossibile caricare l’andamento energia.",
+      "loadTrend": "Impossibile caricare l'andamento energia.",
       "loadInsights": "Impossibile caricare gli insight analytics.",
       "loadForecast": "Impossibile caricare il forecast in questo momento.",
       "loadKpi": "Impossibile caricare il confronto KPI.",
@@ -349,8 +614,8 @@
         "hours": "ore",
         "bodyC": "per questo sito.",
         "loading": "Caricamento dati energia per sito…",
-        "noDataA": "Nessun dato recente per questo sito. Assicurati che l’upload timeseries includa",
-        "noDataB": ", oppure usa il pulsante “Carica CSV per questo sito” così CEI instrada automaticamente le righe qui quando il CSV non ha la colonna site_id."
+        "noDataA": "Nessun dato recente per questo sito. Assicurati che l'upload timeseries includa",
+        "noDataB": ", oppure usa il pulsante \"Carica CSV per questo sito\" così CEI instrada automaticamente le righe qui quando il CSV non ha la colonna site_id."
       },
       "coverage": {
         "title": "Copertura dati",
@@ -403,7 +668,7 @@
       "units": "kWh · orario",
       "summary": "Ora di picco per questo sito: {{peakLabel}} con {{maxKwh}} kWh · Media: {{avgKwh}} kWh/h su {{windowHours}} ore · Minimo orario: {{minKwh}} kWh/h.",
       "unit": "kWh · orario",
-      "noData": "Nessun dato di serie recente per questo sito. Quando la timeseries ha site_id coerente, oppure fai upload via “Carica CSV per questo sito” senza colonna site_id, questo grafico si attiverà."
+      "noData": "Nessun dato di serie recente per questo sito. Quando la timeseries ha site_id coerente, oppure fai upload via \"Carica CSV per questo sito\" senza colonna site_id, questo grafico si attiverà."
     },
     "metaCard": {
       "title": "Metadati sito",
@@ -470,21 +735,21 @@
       "errors": {
         "empty": "Inserisci un nome o una descrizione.",
         "missingSiteId": "ID numerico sito mancante.",
-        "createFailed": "Impossibile creare l’opportunità."
+        "createFailed": "Impossibile creare l'opportunità."
       }
     },
     "suggestions": {
       "thisSite": "questo sito",
       "none": "Nessuna opportunità specifica rilevata ancora. Quando questo sito avrà un profilo dati più stabile, CEI mostrerà pattern su cui intervenire qui.",
       "noData": {
-        "1": "Verifica che gli upload per {{name}} includano (a) una colonna site_id coerente, oppure (b) siano inviati tramite il pulsante “Carica CSV per questo sito” così CEI instrada automaticamente le righe.",
+        "1": "Verifica che gli upload per {{name}} includano (a) una colonna site_id coerente, oppure (b) siano inviati tramite il pulsante \"Carica CSV per questo sito\" così CEI instrada automaticamente le righe.",
         "2": "Controlla che i timestamp per questo sito ricadano davvero nelle ultime 24 ore – i backfill più vecchi non alimentano questa vista.",
         "3": "Inizia con uno o due contatori chiave per questo sito (es. incomer principale, compressori) e valida che i profili siano realistici."
       },
       "high": {
         "1": "Identifica quali ore in {{name}} mostrano i kWh più alti e coordina con la produzione per spostare carichi non critici lontano da quei picchi.",
         "2": "Rivedi consumi notturni e del weekend in {{name}} – cerca linee, compressori o HVAC che restano energizzati senza produzione.",
-        "3": "Confronta il profilo kWh di oggi per {{name}} con una giornata “buona” di riferimento per individuare picchi anomali o periodi prolungati ad alto carico."
+        "3": "Confronta il profilo kWh di oggi per {{name}} con una giornata \"buona\" di riferimento per individuare picchi anomali o periodi prolungati ad alto carico."
       },
       "medium": {
         "1": "Controlla se i processi batch in {{name}} si sovrappongono più del necessario e valuta se gli avvii possono essere scaglionati.",
@@ -492,12 +757,12 @@
         "3": "Usa CEI per annotare cambi operativi in {{name}} (setpoint, manutenzione) e confrontare prima/dopo sui kWh giornalieri."
       },
       "low": {
-        "1": "{{name}} sta girando con consumi giornalieri relativamente modesti. Focalizzati sul prevenire l’aumento graduale delle perdite in standby nelle prossime settimane.",
-        "2": "Usa questo sito come sandbox a basso rischio: testa piccoli cambi (illuminazione, modalità idle, scheduling) e cattura l’impatto prima/dopo."
+        "1": "{{name}} sta girando con consumi giornalieri relativamente modesti. Focalizzati sul prevenire l'aumento graduale delle perdite in standby nelle prossime settimane.",
+        "2": "Usa questo sito come sandbox a basso rischio: testa piccoli cambi (illuminazione, modalità idle, scheduling) e cattura l'impatto prima/dopo."
       },
       "common": {
         "1": "Lavora con il team locale in {{name}} per taggare i contatori per processo (es. \"compressori\", \"HVAC\", \"forni\") così le analytics future possono evidenziare sprechi per processo.",
-        "2": "Aggiungi un breve stand-up settimanale per {{name}} in cui rivedi questa pagina con operations e concordi un’azione concreta.",
+        "2": "Aggiungi un breve stand-up settimanale per {{name}} in cui rivedi questa pagina con operations e concordi un'azione concreta.",
         "3": "Documenta con foto o note qualsiasi modifica fisica (isolamento, setpoint, procedure di spegnimento) così i risparmi sono auditabili, non solo aneddotici."
       }
     },
@@ -522,11 +787,11 @@
   "settings": {
     "header": {
       "title": "Impostazioni",
-      "subtitle": "Preferenze locali per la tua esperienza CEI, più impostazioni tecniche per l’ingestione dati."
+      "subtitle": "Preferenze locali per la tua esperienza CEI, più impostazioni tecniche per l'ingestione dati."
     },
     "notifications": {
       "title": "Notifiche",
-      "emailAlertsLabel": "Inviami un’email quando vengono rilevate nuove opportunità ad alto impatto."
+      "emailAlertsLabel": "Inviami un'email quando vengono rilevate nuove opportunità ad alto impatto."
     },
     "units": {
       "title": "Unità",
@@ -542,8 +807,8 @@
       "readOnlyNotice": "Solo owner. Puoi visualizzare le impostazioni, ma la modifica è disabilitata.",
       "loading": "Caricamento impostazioni organizzazione…",
       "accountErrorFallback": "Impossibile caricare i dettagli account.",
-      "accountNotReady": "I dettagli account non sono ancora disponibili. Quando l’organizzazione è pronta, puoi configurare i costi energia qui.",
-      "noOrg": "Nessuna organizzazione associata a questo account. L’analisi dei costi resterà disabilitata finché non viene creata un’org.",
+      "accountNotReady": "I dettagli account non sono ancora disponibili. Quando l'organizzazione è pronta, puoi configurare i costi energia qui.",
+      "noOrg": "Nessuna organizzazione associata a questo account. L'analisi dei costi resterà disabilitata finché non viene creata un'org.",
       "fields": {
         "primaryEnergySources": {
           "label": "Fonti energetiche primarie",
@@ -565,14 +830,14 @@
       },
       "validation": {
         "accountNotLoaded": "I dettagli account non sono ancora caricati.",
-        "ownerOnlyEdit": "Solo owner. Chiedi al proprietario dell’organizzazione di aggiornare le tariffe.",
+        "ownerOnlyEdit": "Solo owner. Chiedi al proprietario dell'organizzazione di aggiornare le tariffe.",
         "noOrg": "Nessuna organizzazione associata a questo account.",
         "currencyCodeInvalid": "Il codice valuta deve avere 3 lettere (es. EUR).",
         "electricityNonNegative": "Il prezzo elettricità deve essere un numero non negativo.",
         "gasNonNegative": "Il prezzo gas deve essere un numero non negativo."
       },
       "messages": {
-        "saved": "Impostazioni salvate. L’analisi dei costi userà ora questi valori.",
+        "saved": "Impostazioni salvate. L'analisi dei costi userà ora questi valori.",
         "fallbackKwhOnly": "Finché le tariffe non sono configurate, CEI userà analisi solo in kWh."
       },
       "actions": {
@@ -585,7 +850,7 @@
       "ownerOnly": "Solo owner",
       "description": "Token API di lunga durata per sistemi SCADA/BMS/historian per inviare dati timeseries direttamente in CEI tramite",
       "endpoint": "POST /api/v1/timeseries/batch",
-      "noPermission": "Non hai permessi per visualizzare o gestire i token di integrazione. Chiedi al proprietario dell’organizzazione.",
+      "noPermission": "Non hai permessi per visualizzare o gestire i token di integrazione. Chiedi al proprietario dell'organizzazione.",
       "createPlaceholder": "es. SCADA Stabilimento 4",
       "createButton": "Crea token",
       "creatingButton": "Creazione...",
@@ -611,8 +876,8 @@
         "load": "Impossibile caricare i token di integrazione.",
         "create": "Impossibile creare il token di integrazione.",
         "revoke": "Impossibile revocare il token di integrazione.",
-        "ownerOnlyCreate": "Solo owner. Chiedi al proprietario dell’organizzazione di creare un token.",
-        "ownerOnlyRevoke": "Solo owner. Chiedi al proprietario dell’organizzazione di revocare i token."
+        "ownerOnlyCreate": "Solo owner. Chiedi al proprietario dell'organizzazione di creare un token.",
+        "ownerOnlyRevoke": "Solo owner. Chiedi al proprietario dell'organizzazione di revocare i token."
       }
     }
   },
@@ -637,20 +902,20 @@
       "accountUnavailable": "Dettagli di piano e prezzi non disponibili al momento. Le analisi core in kWh continueranno a funzionare."
     },
     "errors": {
-      "ownerOnlyBilling": "Solo owner. Solo il proprietario dell’organizzazione può gestire gli abbonamenti.",
-      "ownerOnlyDelete": "Solo owner. Solo il proprietario dell’organizzazione può eliminare l’account in questo deployment.",
-      "ownerOnlyOffboard": "Solo owner. Solo il proprietario dell’organizzazione può fare offboard dell’organizzazione.",
-      "deleteFailed": "Impossibile eliminare l’account.",
-      "leaveOrgFailed": "Impossibile lasciare l’organizzazione.",
+      "ownerOnlyBilling": "Solo owner. Solo il proprietario dell'organizzazione può gestire gli abbonamenti.",
+      "ownerOnlyDelete": "Solo owner. Solo il proprietario dell'organizzazione può eliminare l'account in questo deployment.",
+      "ownerOnlyOffboard": "Solo owner. Solo il proprietario dell'organizzazione può fare offboard dell'organizzazione.",
+      "deleteFailed": "Impossibile eliminare l'account.",
+      "leaveOrgFailed": "Impossibile lasciare l'organizzazione.",
       "softOffboardFailed": "Offboard soft non riuscito.",
       "nukeFailed": "Nuke non riuscito."
     },
     "confirm": {
       "deleteAccount": "Vuoi davvero eliminare il tuo account? Questa azione non può essere annullata.",
-      "leaveOrg": "Lasciare questa organizzazione?\n\nQuesto scollega SOLO il tuo utente dall’org.\nSe sei l’ultimo owner, il server bloccherà l’operazione.",
-      "softOffboard": "Fare offboard soft di questa organizzazione?\n\nQuesto farà:\n- Revoca inviti\n- Disattivazione token di integrazione\n- Scollegamento di TUTTI gli utenti (incluso te)\n- Azzeramento campi billing dell’org\n- MANTENIMENTO del record org\n\nUsalo quando un cliente vuole uscire.",
-      "nukePrompt": "MODALITÀ NUKE.\n\nQuesto elimina definitivamente l’org e i dati associati.\n\nDigita ESATTAMENTE il nome dell’org per confermare:\n{{orgName}}",
-      "revokeInvite": "Revocare questo invito?\n\nQuesto farà:\n- Disabilita il link di invito\n- Impedisce all’utente invitato di accedere di nuovo (se già accettato)"
+      "leaveOrg": "Lasciare questa organizzazione?\n\nQuesto scollega SOLO il tuo utente dall'org.\nSe sei l'ultimo owner, il server bloccherà l'operazione.",
+      "softOffboard": "Fare offboard soft di questa organizzazione?\n\nQuesto farà:\n- Revoca inviti\n- Disattivazione token di integrazione\n- Scollegamento di TUTTI gli utenti (incluso te)\n- Azzeramento campi billing dell'org\n- MANTENIMENTO del record org\n\nUsalo quando un cliente vuole uscire.",
+      "nukePrompt": "MODALITÀ NUKE.\n\nQuesto elimina definitivamente l'org e i dati associati.\n\nDigita ESATTAMENTE il nome dell'org per confermare:\n{{orgName}}",
+      "revokeInvite": "Revocare questo invito?\n\nQuesto farà:\n- Disabilita il link di invito\n- Impedisce all'utente invitato di accedere di nuovo (se già accettato)"
     },
     "plan": {
       "labels": {
@@ -671,10 +936,9 @@
     "subscription": {
       "title": "Abbonamento",
       "currentPlan": "Piano attuale:",
-      "status": "Stato:",
       "alerts": "Avvisi:",
       "reports": "Report:",
-      "ownerOnlyBlurb": "Chiedi al proprietario dell’organizzazione di aggiornare il piano o gestire la fatturazione.",
+      "ownerOnlyBlurb": "Chiedi al proprietario dell'organizzazione di aggiornare il piano o gestire la fatturazione.",
       "upgrade": "Aggiorna a CEI Starter",
       "manage": "Gestisci abbonamento",
       "redirecting": "Reindirizzamento…",
@@ -689,9 +953,9 @@
     },
     "billing": {
       "notConfiguredCheckout": "La fatturazione non è completamente configurata in questo ambiente. Nessuna pagina checkout live disponibile.",
-      "checkoutFailed": "Impossibile avviare il checkout. Riprova o contatta l’amministratore CEI.",
+      "checkoutFailed": "Impossibile avviare il checkout. Riprova o contatta l'amministratore CEI.",
       "portalNotAvailable": "Il portale di fatturazione non è disponibile in questo ambiente. Stripe non è completamente configurato.",
-      "portalFailed": "Impossibile aprire il portale di fatturazione. Riprova o contatta l’amministratore CEI."
+      "portalFailed": "Impossibile aprire il portale di fatturazione. Riprova o contatta l'amministratore CEI."
     },
     "org": {
       "noOrgAttached": "Non sei collegato a nessuna organizzazione.",
@@ -703,7 +967,7 @@
     },
     "orgControls": {
       "title": "Controlli organizzazione",
-      "subtitle": "Lascia l’org o fai offboard di un cliente.",
+      "subtitle": "Lascia l'org o fai offboard di un cliente.",
       "currentOrg": "Org corrente:",
       "role": "Ruolo:",
       "leave": "Lascia organizzazione",
@@ -714,12 +978,12 @@
       "nuking": "Eliminazione…",
       "noOrgAttachedTitle": "Nessuna organizzazione collegata",
       "permanentDeleteTitle": "Pericolo: eliminazione definitiva",
-      "footer": "Offboard organizzazione scollega gli utenti e revoca inviti/token, ma mantiene la riga org. Elimina definitivamente cancella org e dati associati. Lascia organizzazione scollega solo te (bloccato se sei l’ultimo owner)."
+      "footer": "Offboard organizzazione scollega gli utenti e revoca inviti/token, ma mantiene la riga org. Elimina definitivamente cancella org e dati associati. Lascia organizzazione scollega solo te (bloccato se sei l'ultimo owner)."
     },
     "invites": {
       "title": "Inviti organizzazione",
       "subtitle": "Solo owner. Genera link di accesso per questa org.",
-      "notOwnerBlurb": "Non sei owner dell’organizzazione. La generazione inviti è limitata.",
+      "notOwnerBlurb": "Non sei owner dell'organizzazione. La generazione inviti è limitata.",
       "form": {
         "emailLabel": "Email invito",
         "emailPlaceholder": "utente@azienda.com",
@@ -727,14 +991,14 @@
         "expiresLabel": "Scadenza (giorni)",
         "generate": "Genera link invito",
         "creating": "Creazione…",
-        "emailBoundNote": "Gli inviti sono legati all’email. Il destinatario deve registrarsi usando questa stessa email."
+        "emailBoundNote": "Gli inviti sono legati all'email. Il destinatario deve registrarsi usando questa stessa email."
       },
       "created": {
         "linkLabel": "Link invito:",
         "copy": "Copia"
       },
       "list": {
-        "helper": "I link attivi dovrebbero durare poco. Revoca dopo che l’onboarding è completato.",
+        "helper": "I link attivi dovrebbero durare poco. Revoca dopo che l'onboarding è completato.",
         "refresh": "Aggiorna",
         "refreshing": "Aggiornamento…",
         "empty": "Nessun invito ancora."
@@ -755,24 +1019,24 @@
       },
       "actions": {
         "revoke": "Revoca",
-        "revokeTitle": "Revoca l’invito e blocca gli accessi dell’utente invitato",
+        "revokeTitle": "Revoca l'invito e blocca gli accessi dell'utente invitato",
         "extend": "Estendi",
-        "extendTitle": "Estendi/riattiva questo invito e riabilita l’accesso utente",
+        "extendTitle": "Estendi/riattiva questo invito e riabilita l'accesso utente",
         "extending": "Estensione…"
       },
       "errors": {
-        "ownerOnly": "Solo owner. Solo il proprietario dell’organizzazione può generare link invito.",
-        "invalidEmail": "L’email invito è obbligatoria e deve essere valida.",
+        "ownerOnly": "Solo owner. Solo il proprietario dell'organizzazione può generare link invito.",
+        "invalidEmail": "L'email invito è obbligatoria e deve essere valida.",
         "loadFailed": "Impossibile caricare gli inviti.",
-        "createFailed": "Impossibile creare l’invito.",
-        "revokeFailed": "Impossibile revocare l’invito.",
-        "extendFailed": "Impossibile estendere l’invito."
+        "createFailed": "Impossibile creare l'invito.",
+        "revokeFailed": "Impossibile revocare l'invito.",
+        "extendFailed": "Impossibile estendere l'invito."
       },
       "notes": {
-        "linkGenerated": "Link invito generato. Copialo e invialo all’utente.",
-        "createdNoToken": "Invito creato, ma il backend non ha restituito un token. (Atteso: token restituito UNA SOLA VOLTA quando l’invito è utilizzabile.)",
-        "extendedNewLink": "Esteso. Nuovo link invito generato. Copialo e invialo all’utente.",
-        "extendedNoLink": "Esteso. Nessun link restituito perché l’invito era già stato accettato. L’accesso utente è stato riabilitato.",
+        "linkGenerated": "Link invito generato. Copialo e invialo all'utente.",
+        "createdNoToken": "Invito creato, ma il backend non ha restituito un token. (Atteso: token restituito UNA SOLA VOLTA quando l'invito è utilizzabile.)",
+        "extendedNewLink": "Esteso. Nuovo link invito generato. Copialo e invialo all'utente.",
+        "extendedNoLink": "Esteso. Nessun link restituito perché l'invito era già stato accettato. L'accesso utente è stato riabilitato.",
         "copied": "Copiato negli appunti.",
         "copyFailed": "Copia non riuscita in questo browser. Seleziona il link e copialo manualmente."
       }
@@ -781,7 +1045,7 @@
       "title": "Tariffe e mix energetico",
       "subtitle": "Sola lettura. Usato per analisi costi e stime risparmio.",
       "accountUnavailable": "I dettagli account non sono disponibili ora. Dati su tariffe e mix energetico appariranno qui quando il contesto account si carica correttamente.",
-      "noOrg": "Nessuna organizzazione associata a questo account. Dati su tariffe e mix energetico appariranno qui quando l’org è configurata.",
+      "noOrg": "Nessuna organizzazione associata a questo account. Dati su tariffe e mix energetico appariranno qui quando l'org è configurata.",
       "currency": "Valuta:",
       "electricity": "Prezzo elettricità (per kWh):",
       "gas": "Prezzo gas (per kWh):",
@@ -857,19 +1121,19 @@
     "errors": {
       "loadAlertsFailed": "Impossibile caricare gli avvisi.",
       "loadHistoryFailed": "Impossibile caricare la cronologia avvisi.",
-      "updateAlertFailed": "Impossibile aggiornare l’avviso."
+      "updateAlertFailed": "Impossibile aggiornare l'avviso."
     },
     "gating": {
       "title": "Aggiorna per sbloccare gli avvisi",
       "body": "Il tuo piano attuale (<code>{{planKey}}</code>) non include il sistema di avvisi basato su regole. Passa a CEI Starter o superiore per vedere deviazioni baseline, sprechi nel weekend e pattern di dominanza del portfolio direttamente su questa pagina.",
       "cta": "Vedi piani e fatturazione",
-      "footer": "Gli avvisi si attiveranno automaticamente non appena l’abbonamento sarà attivo."
+      "footer": "Gli avvisi si attiveranno automaticamente non appena l'abbonamento sarà attivo."
     },
     "summary": {
       "totalTitle": "Totale avvisi – {{windowLabel}}",
       "totalHelp": "Conteggio di tutti gli avvisi critici, warning e info nella finestra selezionata.",
       "severityMixTitle": "Mix severità",
-      "severityMixHelp": "Usalo per capire se il portfolio è perlopiù “rumore” o se stanno emergendo eccezioni reali."
+      "severityMixHelp": "Usalo per capire se il portfolio è perlopiù \"rumore\" o se stanno emergendo eccezioni reali."
     },
     "playbook": {
       "title": "Playbook operativo",
@@ -957,8 +1221,8 @@
     },
     "alerts": {
       "reportsDisabled": "I report non sono abilitati per questo piano.",
-      "noSiteData": "Nessun dato sito disponibile per l’export.",
-      "noOpportunityData": "Nessun dato opportunità disponibile per l’export."
+      "noSiteData": "Nessun dato sito disponibile per l'export.",
+      "noOpportunityData": "Nessun dato opportunità disponibile per l'export."
     },
     "window": {
       "label": "Finestra:",
@@ -971,7 +1235,7 @@
       "title": "Aggiorna per sbloccare i report",
       "body": "Il tuo piano attuale (<code>{{planKey}}</code>) non include la reportistica. Passa a CEI Starter o superiore per esportare riepiloghi 7 giorni, delta vs baseline e impatto costi.",
       "cta": "Vedi piani e fatturazione",
-      "note": "I report si sbloccheranno automaticamente non appena l’abbonamento sarà attivo."
+      "note": "I report si sbloccheranno automaticamente non appena l'abbonamento sarà attivo."
     },
     "kpis": {
       "energy": {
@@ -980,7 +1244,7 @@
       },
       "sitesWithData": {
         "title": "Siti con dati",
-        "subtitle": "Siti con almeno un punto timeseries nell’ultima settimana."
+        "subtitle": "Siti con almeno un punto timeseries nell'ultima settimana."
       },
       "avgEnergy": {
         "title": "Energia media per sito – 7 giorni",
@@ -993,7 +1257,7 @@
       },
       "avgCost": {
         "title": "Costo medio per sito attivo – 7 giorni",
-        "subtitleActiveSites": "Distribuito su {{count}} siti con dati reali nell’ultima settimana.",
+        "subtitleActiveSites": "Distribuito su {{count}} siti con dati reali nell'ultima settimana.",
         "subtitleNoActiveSites": "Nessun sito attivo con dati ancora – il costo per sito apparirà quando arrivano i timeseries."
       },
       "tariff": {
@@ -1013,7 +1277,7 @@
     },
     "table": {
       "title": "Energia e costi per sito – 7 giorni",
-      "subtitle": "Energia, costi e deviazione vs baseline per sito nell’ultima settimana. Ordinato per impatto € quando le tariffe sono configurate.",
+      "subtitle": "Energia, costi e deviazione vs baseline per sito nell'ultima settimana. Ordinato per impatto € quando le tariffe sono configurate.",
       "empty": "Nessun sito disponibile ancora. Quando siti e timeseries sono configurati, questa tabella mostrerà metriche 7 giorni per sito.",
       "download": "Scarica CSV",
       "preparing": "Preparazione…",
@@ -1038,7 +1302,7 @@
       }
     },
     "chart": {
-      "caption": "L’altezza delle barre scala con l’energia 7 giorni di ciascun sito. Le barre sono ordinate per impatto € quando le tariffe sono configurate."
+      "caption": "L'altezza delle barre scala con l'energia 7 giorni di ciascun sito. Le barre sono ordinate per impatto € quando le tariffe sono configurate."
     },
     "opps": {
       "title": "Top opportunità di efficienza (portfolio)",
@@ -1067,8 +1331,8 @@
       "perSite": "Carica dati timeseries per questo sito"
     },
     "subtitle": {
-      "global": "Trascina un CSV in CEI e ingeriremo le letture energia nel motore timeseries. L’<code>ordine delle colonne non conta</code> purché le intestazioni includano <code>timestamp</code>, <code>value</code>, <code>unit</code>, <code>site_id</code> e <code>meter_id</code>.",
-      "perSite": "Stai caricando dati per <code>{{forcedSiteId}}</code>. CEI ingerirà tutte le righe in questo sito. L’<code>ordine</code> non conta; il motore legge l’header. In modalità sito, il CSV deve includere almeno <code>timestamp</code>, <code>value</code>, <code>unit</code> e <code>meter_id</code>. La colonna <code>site_id</code> è opzionale e verrà ignorata per l’instradamento."
+      "global": "Trascina un CSV in CEI e ingeriremo le letture energia nel motore timeseries. L'<code>ordine delle colonne non conta</code> purché le intestazioni includano <code>timestamp</code>, <code>value</code>, <code>unit</code>, <code>site_id</code> e <code>meter_id</code>.",
+      "perSite": "Stai caricando dati per <code>{{forcedSiteId}}</code>. CEI ingerirà tutte le righe in questo sito. L'<code>ordine</code> non conta; il motore legge l'header. In modalità sito, il CSV deve includere almeno <code>timestamp</code>, <code>value</code>, <code>unit</code> e <code>meter_id</code>. La colonna <code>site_id</code> è opzionale e verrà ignorata per l'instradamento."
     },
     "scopedMode": "Modalità scoped: tutte le righe ingerite useranno <code>site_id = {{forcedSiteId}}</code>.",
     "meta": {
@@ -1088,11 +1352,11 @@
       "meterIdHint": "es. <code>meter-main-1</code> (se omesso, CEI userà un meter id generico)"
     },
     "tips": {
-      "title": "Consigli per un’ingestione fluida",
+      "title": "Consigli per un'ingestione fluida",
       "item1": "Mantieni i timestamp in un solo fuso orario per file.",
       "item2Base": "Usa valori <code>site_id</code> stabili così le dashboard costruiscono trend nel tempo.",
       "item2Scoped": "In modalità sito CEI forzerà <code>{{forcedSiteId}}</code> su ogni riga.",
-      "item3": "Se fai backfill di dati vecchi, non cambierà i KPI “ultime 24 ore” ma apparirà in finestre più ampie."
+      "item3": "Se fai backfill di dati vecchi, non cambierà i KPI \"ultime 24 ore\" ma apparirà in finestre più ampie."
     },
     "button": {
       "uploadCsv": "Carica CSV",
@@ -1103,7 +1367,7 @@
     "status": {
       "idle": "In attesa di un file CSV.",
       "readyWithFile": "Pronto a caricare: {{name}}",
-      "validating": "Validazione header e preparazione righe per l’ingestione…",
+      "validating": "Validazione header e preparazione righe per l'ingestione…",
       "ingesting": "Ingestione righe nel motore timeseries…",
       "doneGlobal": "Upload completato. I dati alimenteranno Dashboard, SiteView, Avvisi e Report.",
       "donePerSite": "Upload completato. I dati alimenteranno grafici, avvisi e report di questo sito.",

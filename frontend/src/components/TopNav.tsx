@@ -12,24 +12,42 @@ const TopNav: React.FC = () => {
 
   const { t, i18n } = useTranslation();
 
-  const navItems = useMemo(
-    () => [
+  const isManagingOrg =
+    user?.org?.org_type === "managing" ||
+    user?.organization?.org_type === "managing";
+
+  const isClientOrg =
+    user?.org?.org_type === "client" ||
+    user?.organization?.org_type === "client";
+
+  const navItems = useMemo(() => {
+    if (isManagingOrg) {
+      return [
+        { label: t("nav.manage", { defaultValue: "Manage" }), path: "/manage" },
+        { label: t("nav.account", { defaultValue: "Account" }), path: "/account" },
+        { label: t("nav.settings", { defaultValue: "Settings" }), path: "/settings" },
+      ];
+    }
+
+    if (isClientOrg) {
+      return [
+        { label: t("nav.dashboard", { defaultValue: "Dashboard" }), path: "/" },
+        { label: t("nav.account", { defaultValue: "Account" }), path: "/account" },
+        { label: t("nav.settings", { defaultValue: "Settings" }), path: "/settings" },
+      ];
+    }
+
+    // Standard org — full menu
+    return [
       { label: t("nav.dashboard", { defaultValue: "Dashboard" }), path: "/" },
       { label: t("nav.sites", { defaultValue: "Sites" }), path: "/sites" },
       { label: t("nav.alerts", { defaultValue: "Alerts" }), path: "/alerts" },
-      {
-        label: t("nav.uploadCsv", { defaultValue: "Upload CSV" }),
-        path: "/upload",
-      },
+      { label: t("nav.uploadCsv", { defaultValue: "Upload CSV" }), path: "/upload" },
       { label: t("nav.reports", { defaultValue: "Reports" }), path: "/reports" },
-      {
-        label: t("nav.settings", { defaultValue: "Settings" }),
-        path: "/settings",
-      },
+      { label: t("nav.settings", { defaultValue: "Settings" }), path: "/settings" },
       { label: t("nav.account", { defaultValue: "Account" }), path: "/account" },
-    ],
-    [t]
-  );
+    ];
+  }, [t, isManagingOrg, isClientOrg]);
 
   const currentLang = (i18n.language || "en").toLowerCase().startsWith("it")
     ? "it"
@@ -145,7 +163,7 @@ const TopNav: React.FC = () => {
           </button>
         </div>
 
-        {/* Mobile menu toggle – 3-dot button */}
+        {/* Mobile menu toggle — 3-dot button */}
         <div className="cei-mobile-menu-toggle">
           <button
             type="button"
@@ -202,7 +220,7 @@ const TopNav: React.FC = () => {
                     <span>{item.label}</span>
                     {active && (
                       <span style={{ fontSize: "0.7rem", opacity: 0.7, marginLeft: 8 }}>
-                        ●
+                        ◀
                       </span>
                     )}
                   </button>

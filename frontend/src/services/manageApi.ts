@@ -282,3 +282,83 @@ export async function updateClientOrgThresholds(
   const resp = await api.patch(`/manage/client-orgs/${clientOrgId}/alert-thresholds`, payload);
   return resp.data as AlertThresholds;
 }
+
+export type LinkRequest = {
+  id: number;
+  managing_org_id: number;
+  managing_org_name: string;
+  client_org_id: number;
+  client_org_name: string;
+  initiated_by: "consultant" | "org_owner";
+  status: "pending" | "accepted" | "rejected" | "cancelled";
+  message: string | null;
+  created_at: string;
+};
+
+// ---------------------------------------------------------------------------
+// Consultant-side link request API
+// ---------------------------------------------------------------------------
+
+export async function consultantSendLinkRequest(
+  targetOrgEmail: string,
+  message?: string
+): Promise<LinkRequest> {
+  const resp = await api.post("/manage/link-requests", {
+    target_org_email: targetOrgEmail,
+    message: message || null,
+  });
+  return resp.data as LinkRequest;
+}
+
+export async function listConsultantLinkRequests(): Promise<LinkRequest[]> {
+  const resp = await api.get("/manage/link-requests");
+  return resp.data as LinkRequest[];
+}
+
+export async function consultantAcceptLinkRequest(requestId: number): Promise<LinkRequest> {
+  const resp = await api.post(`/manage/link-requests/${requestId}/accept`);
+  return resp.data as LinkRequest;
+}
+
+export async function consultantRejectLinkRequest(requestId: number): Promise<LinkRequest> {
+  const resp = await api.post(`/manage/link-requests/${requestId}/reject`);
+  return resp.data as LinkRequest;
+}
+
+export async function consultantCancelLinkRequest(requestId: number): Promise<void> {
+  await api.delete(`/manage/link-requests/${requestId}`);
+}
+
+// ---------------------------------------------------------------------------
+// Org-owner-side link request API
+// ---------------------------------------------------------------------------
+
+export async function orgSendLinkRequest(
+  consultantEmail: string,
+  message?: string
+): Promise<LinkRequest> {
+  const resp = await api.post("/org/link-requests", {
+    consultant_email: consultantEmail,
+    message: message || null,
+  });
+  return resp.data as LinkRequest;
+}
+
+export async function listOrgLinkRequests(): Promise<LinkRequest[]> {
+  const resp = await api.get("/org/link-requests");
+  return resp.data as LinkRequest[];
+}
+
+export async function orgAcceptLinkRequest(requestId: number): Promise<LinkRequest> {
+  const resp = await api.post(`/org/link-requests/${requestId}/accept`);
+  return resp.data as LinkRequest;
+}
+
+export async function orgRejectLinkRequest(requestId: number): Promise<LinkRequest> {
+  const resp = await api.post(`/org/link-requests/${requestId}/reject`);
+  return resp.data as LinkRequest;
+}
+
+export async function orgCancelLinkRequest(requestId: number): Promise<void> {
+  await api.delete(`/org/link-requests/${requestId}`);
+}

@@ -864,6 +864,10 @@ export async function upgradeToManaging(clientLimit?: number | null) {
   return resp.data;
 }
 
+export async function unlinkFromConsultant(): Promise<void> {
+  await api.post("/org/unlink-from-consultant");
+}
+
 
 /* ===== Org lifecycle (Leave + Offboard) ===== */
 

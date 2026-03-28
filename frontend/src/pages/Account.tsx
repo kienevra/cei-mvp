@@ -13,12 +13,14 @@ import {
   // ✅ Offboard + Leave UI wiring
   offboardOrg,
   leaveOrg,
+  unlinkFromConsultant,
 } from "../services/api";
 
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import type { AccountMe, OrganizationSummary } from "../types/auth";
-
+import ConnectConsultant from "../components/ConnectConsultant";
+import { useAuth } from "../hooks/useAuth";
 // Read environment once from Vite
 const rawEnv = (import.meta as any).env || {};
 const appEnvironment: string =
@@ -210,6 +212,7 @@ function toUiError(e: any, fallback: string): string {
 
 const Account: React.FC = () => {
   const { t } = useTranslation();
+  const { refreshUser } = useAuth();
 
   const [account, setAccount] = useState<UiAccount | null>(null);
   const [loading, setLoading] = useState(false);
@@ -228,6 +231,7 @@ const Account: React.FC = () => {
   const [offboardingSoft, setOffboardingSoft] = useState(false);
   const [offboardingNuke, setOffboardingNuke] = useState(false);
   const [leavingOrg, setLeavingOrg] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
 
   // Invites UI state
   const [invites, setInvites] = useState<OrgInvite[]>([]);
@@ -294,6 +298,7 @@ const Account: React.FC = () => {
     let isMounted = true;
 
     async function loadAccount() {
+      await refreshUser();
       setLoading(true);
       setError(null);
       setAccountWarning(null);
@@ -561,6 +566,28 @@ const Account: React.FC = () => {
       setOrgActionMessage(toUiError(e, t("account.errors.nukeFailed")));
     } finally {
       setOffboardingNuke(false);
+    }
+  };
+
+  const handleUnlinkFromConsultant = async () => {
+    setOrgActionMessage(null);
+    setError(null);
+
+    const ok = window.confirm(
+      "Unlink from your consultant? Your organization will become standalone again and you will regain full access to all features."
+    );
+    if (!ok) return;
+
+    setUnlinking(true);
+    try {
+      await unlinkFromConsultant();
+      await refreshUser();
+      await refreshAccount();
+      setOrgActionMessage("Successfully unlinked. Your organization is now standalone.");
+    } catch (e: any) {
+      setOrgActionMessage(toUiError(e, "Failed to unlink from consultant."));
+    } finally {
+      setUnlinking(false);
     }
   };
 
@@ -974,6 +1001,13 @@ const Account: React.FC = () => {
         </div>
       </section>
 
+      {account?.org?.org_type === "standalone" ? (
+        <>
+          <hr style={{ border: "none", borderTop: "1px solid var(--cei-border-subtle)", margin: "1.5rem 0" }} />
+          <ConnectConsultant onLinked={refreshAccount} />
+        </>
+      ) : null}
+
       {/* Organization controls (Offboard + Leave) */}
       <section>
         <div className="cei-card">
@@ -1011,6 +1045,21 @@ const Account: React.FC = () => {
           </div>
 
           <div style={{ marginTop: "0.85rem", display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
+            {account?.org?.org_type === "client" && (
+              <button
+                type="button"
+                className="cei-btn cei-btn-ghost"
+                onClick={handleUnlinkFromConsultant}
+                disabled={!isOwner || unlinking}
+                title={!isOwner ? t("account.labels.ownerOnly") : undefined}
+                style={{
+                  cursor: !isOwner || unlinking ? "not-allowed" : "pointer",
+                  opacity: !isOwner || unlinking ? 0.55 : 1,
+                }}
+              >
+                {unlinking ? "Unlinking…" : "Unlink from consultant"}
+              </button>
+            )}
             <button
               type="button"
               className="cei-btn cei-btn-ghost"

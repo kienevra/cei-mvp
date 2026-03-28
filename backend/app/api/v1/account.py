@@ -110,6 +110,8 @@ def _build_account_me_payload(db: Session, current_user: User) -> Dict[str, Any]
         org_summary = {
             "id": org.id,
             "name": org.name,
+            "org_type": getattr(org, "org_type", "standalone"),
+            "managed_by_org_id": getattr(org, "managed_by_org_id", None),
             "plan_key": plan_key,
             "subscription_plan_key": subscription_plan_key,
             "enable_alerts": enable_alerts,

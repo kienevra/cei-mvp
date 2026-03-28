@@ -5,27 +5,32 @@ import { useAuth } from "../hooks/useAuth";
 
 type ProtectedRouteProps = {
   children: React.ReactElement;
+  allowedOrgTypes?: string[];
 };
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const { isAuthenticated } = useAuth();
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedOrgTypes }) => {
+  const { isAuthenticated, user } = useAuth();
   const location = useLocation();
 
-  // Not authenticated: send to a clean login URL.
-  // We do NOT append ?reason=session_expired here.
-  // Session-expired redirects are handled centrally in the axios interceptor.
   if (!isAuthenticated) {
     return (
       <Navigate
         to="/login"
-        state={{
-          from: location,
-          // additive: gives Login a stable, translatable reason without query params
-          reason: "auth_required",
-        }}
+        state={{ from: location, reason: "auth_required" }}
         replace
       />
     );
+  }
+
+  if (allowedOrgTypes && allowedOrgTypes.length > 0) {
+    const orgType =
+      user?.org?.org_type ?? user?.organization?.org_type ?? "standalone";
+    if (!allowedOrgTypes.includes(orgType)) {
+      // Redirect to the most appropriate page for their org type
+      if (orgType === "managing") return <Navigate to="/manage" replace />;
+      if (orgType === "client") return <Navigate to="/" replace />;
+      return <Navigate to="/" replace />;
+    }
   }
 
   return children;

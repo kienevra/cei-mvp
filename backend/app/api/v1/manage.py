@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -38,6 +38,7 @@ from app.models import (
     SiteEvent,
     TimeseriesRecord,
     User,
+    OrgLinkRequest
 )
 from fastapi.responses import StreamingResponse
 from app.services.reporting import generate_client_org_pdf
@@ -1033,4 +1034,253 @@ def get_client_org_report_pdf(
         iter([pdf_bytes]),
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+# ── Schemas ──
+
+class LinkRequestOut(BaseModel):
+    id: int
+    managing_org_id: int
+    managing_org_name: str
+    client_org_id: int
+    client_org_name: str
+    initiated_by: str
+    status: str
+    message: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class InitiateLinkIn(BaseModel):
+    """Consultant initiates — provide the standalone org's owner email."""
+    target_org_email: EmailStr
+    message: Optional[str] = None
+
+
+# ── Consultant-side endpoints ──
+
+@router.post(
+    "/link-requests",
+    response_model=LinkRequestOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Consultant initiates a link request to an existing standalone org",
+)
+def consultant_initiate_link_request(
+    payload: InitiateLinkIn,
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+):
+    """
+    The consultant sends a link request to a standalone org by the org owner's email.
+    The org owner must accept before the org is linked.
+    """
+    managing_org_id = _get_managing_org_id(org_context)
+    managing_org = db.get(Organization, managing_org_id)
+
+    # Find the target user by email
+    from app.models import User as UserModel
+    target_user = db.query(UserModel).filter(
+        func.lower(UserModel.email) == payload.target_org_email.lower(),
+        UserModel.is_active == True,
+    ).first()
+
+    if not target_user or not target_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active account found with that email address.",
+        )
+
+    target_org = db.get(Organization, target_user.organization_id)
+    if not target_org:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+
+    if target_org.org_type != "standalone":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That organization is already managed or is a managing org itself.",
+        )
+
+    if target_org.id == managing_org_id:
+        raise HTTPException(status_code=400, detail="Cannot link your own organization.")
+
+    # Check for existing pending request
+    existing = db.query(OrgLinkRequest).filter(
+        OrgLinkRequest.managing_org_id == managing_org_id,
+        OrgLinkRequest.client_org_id == target_org.id,
+        OrgLinkRequest.status == "pending",
+    ).first()
+
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A pending link request already exists for this organization.",
+        )
+
+    req = OrgLinkRequest(
+        managing_org_id=managing_org_id,
+        client_org_id=target_org.id,
+        initiated_by="consultant",
+        status="pending",
+        token=OrgLinkRequest.generate_token(),
+        message=payload.message,
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+
+    return LinkRequestOut(
+        id=req.id,
+        managing_org_id=req.managing_org_id,
+        managing_org_name=managing_org.name,
+        client_org_id=req.client_org_id,
+        client_org_name=target_org.name,
+        initiated_by=req.initiated_by,
+        status=req.status,
+        message=req.message,
+        created_at=req.created_at,
+    )
+
+
+@router.get(
+    "/link-requests",
+    response_model=List[LinkRequestOut],
+    summary="List all link requests for this managing org (sent + incoming)",
+)
+def list_consultant_link_requests(
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+):
+    """Returns both consultant-initiated and org-owner-initiated requests."""
+    managing_org_id = _get_managing_org_id(org_context)
+    reqs = db.query(OrgLinkRequest).filter(
+        OrgLinkRequest.managing_org_id == managing_org_id,
+    ).order_by(OrgLinkRequest.created_at.desc()).all()
+
+    result = []
+    for req in reqs:
+        managing_org = db.get(Organization, req.managing_org_id)
+        client_org   = db.get(Organization, req.client_org_id)
+        result.append(LinkRequestOut(
+            id=req.id,
+            managing_org_id=req.managing_org_id,
+            managing_org_name=managing_org.name if managing_org else "—",
+            client_org_id=req.client_org_id,
+            client_org_name=client_org.name if client_org else "—",
+            initiated_by=req.initiated_by,
+            status=req.status,
+            message=req.message,
+            created_at=req.created_at,
+        ))
+    return result
+
+
+@router.post(
+    "/link-requests/{request_id}/accept",
+    response_model=LinkRequestOut,
+    summary="Consultant accepts an org-owner-initiated link request",
+)
+def consultant_accept_link_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+):
+    managing_org_id = _get_managing_org_id(org_context)
+    req = db.query(OrgLinkRequest).filter(
+        OrgLinkRequest.id == request_id,
+        OrgLinkRequest.managing_org_id == managing_org_id,
+        OrgLinkRequest.initiated_by == "org_owner",
+        OrgLinkRequest.status == "pending",
+    ).first()
+
+    if not req:
+        raise HTTPException(status_code=404, detail="Link request not found or not actionable.")
+
+    _enforce_client_limit(db, db.get(Organization, managing_org_id))
+    _apply_link(db, req)
+    return _req_to_out(db, req)
+
+
+@router.post(
+    "/link-requests/{request_id}/reject",
+    response_model=LinkRequestOut,
+    summary="Consultant rejects a link request",
+)
+def consultant_reject_link_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+):
+    managing_org_id = _get_managing_org_id(org_context)
+    req = db.query(OrgLinkRequest).filter(
+        OrgLinkRequest.id == request_id,
+        OrgLinkRequest.managing_org_id == managing_org_id,
+        OrgLinkRequest.status == "pending",
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Link request not found.")
+    req.status = "rejected"
+    req.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(req)
+    return _req_to_out(db, req)
+
+
+@router.delete(
+    "/link-requests/{request_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Consultant cancels a link request they initiated",
+)
+def consultant_cancel_link_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+):
+    managing_org_id = _get_managing_org_id(org_context)
+    req = db.query(OrgLinkRequest).filter(
+        OrgLinkRequest.id == request_id,
+        OrgLinkRequest.managing_org_id == managing_org_id,
+        OrgLinkRequest.initiated_by == "consultant",
+        OrgLinkRequest.status == "pending",
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Link request not found.")
+    req.status = "cancelled"
+    req.updated_at = datetime.utcnow()
+    db.commit()
+
+
+# ── Shared helpers (add near other helpers in manage.py) ──
+
+def _apply_link(db: Session, req: OrgLinkRequest) -> None:
+    """Accept a link request — link the client org to the managing org."""
+    client_org = db.get(Organization, req.client_org_id)
+    if not client_org:
+        raise HTTPException(status_code=404, detail="Client org not found.")
+    client_org.managed_by_org_id = req.managing_org_id
+    client_org.org_type = "client"
+    req.status = "accepted"
+    req.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(req)
+
+
+def _req_to_out(db: Session, req: OrgLinkRequest) -> LinkRequestOut:
+    managing_org = db.get(Organization, req.managing_org_id)
+    client_org   = db.get(Organization, req.client_org_id)
+    return LinkRequestOut(
+        id=req.id,
+        managing_org_id=req.managing_org_id,
+        managing_org_name=managing_org.name if managing_org else "—",
+        client_org_id=req.client_org_id,
+        client_org_name=client_org.name if client_org else "—",
+        initiated_by=req.initiated_by,
+        status=req.status,
+        message=req.message,
+        created_at=req.created_at,
     )

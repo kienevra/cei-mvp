@@ -27,6 +27,7 @@
     "sessionExpired": "Your session expired. Please sign in again."
   },
   "nav": {
+    "manage": "Manage",
     "navigation": "Navigation",
     "dashboard": "Dashboard",
     "sites": "Sites",
@@ -52,7 +53,7 @@
     "logout": "Log out",
     "signedIn": "Signed in",
     "hero": {
-      "title": "We use A.I to reduce your factorys carbon footprint.",
+      "title": "We use A.I to reduce production energy costs.",
       "subtitle": "CEI ingests your meter and SCADA data, builds statistical baselines for each site, and turns night, weekend, and process inefficiencies into actionable alerts and reports – without installing new hardware."
     },
     "actions": {
@@ -64,9 +65,9 @@
       "joinOrganization": "Join organization"
     },
     "invite": {
-      "notice": "You’re joining an organization via invite. Create your account to continue.",
+      "notice": "You're joining an organization via invite. Create your account to continue.",
       "badgeTitle": "Invite detected.",
-      "badgeBody": "You’ll join an existing organization after account creation.",
+      "badgeBody": "You'll join an existing organization after account creation.",
       "requiresSignup": "Invite flow requires account creation."
     },
     "sessionExpired": "Your session expired. Please sign in again.",
@@ -102,14 +103,14 @@
       "emailPasswordRequired": "Email and password are required.",
       "passwordMinLength": "Password must be at least 8 characters.",
       "passwordsNoMatch": "Passwords do not match.",
-      "inviteJoinNotLive": "Invite join isn’t live on this backend yet (missing /org/invites/accept-and-signup). Deploy the invites router, then retry.",
+      "inviteJoinNotLive": "Invite join isn't live on this backend yet (missing /org/invites/accept-and-signup). Deploy the invites router, then retry.",
       "inviteMissingAccessToken": "Invite signup succeeded but response missing access_token."
     },
     "passwordReset": {
       "forgot": {
         "link": "Forgot password?",
         "title": "Reset password",
-        "subtitle": "Enter your email and we’ll send you a reset link.",
+        "subtitle": "Enter your email and we'll send you a reset link.",
         "send": "Send reset link",
         "sending": "Sending…",
         "done": "If the email exists, a password reset link has been sent.",
@@ -125,9 +126,273 @@
         "done": "Password updated. You can now sign in.",
         "error": "Failed to reset password."
       },
-    "backToLogin": "Back to sign in"
+      "backToLogin": "Back to sign in"
     }
-
+  },
+  "signup": {
+    "chooseType": {
+      "title": "Create your account",
+      "subtitle": "How will you be using CEI?",
+      "continue": "Continue →",
+      "alreadyHaveAccount": "Already have an account?",
+      "loginLink": "Log in"
+    },
+    "types": {
+      "manager": {
+        "title": "Energy manager / consultant",
+        "description": "I manage energy for multiple client organizations (ESCO, energy auditor, consultant)."
+      },
+      "organization": {
+        "title": "Organization",
+        "description": "I represent a factory, facility, or company and want to monitor my own energy."
+      },
+      "inviteeOrg": {
+        "title": "Invited to an organization",
+        "description": "I received an invite link from my organization to join their energy platform."
+      },
+      "inviteeConsultant": {
+        "title": "Invited to a consultant firm",
+        "description": "I received an invite link from an energy consultant or ESCO to join their team."
+      }
+    },
+    "selfSignup": {
+      "managerTitle": "Set up your consultant account",
+      "managerSubtitle": "Your account will be set up as an energy management firm. You can add client organizations from the Manage dashboard.",
+      "orgTitle": "Set up your organization",
+      "orgSubtitle": "Your account will be set up as a standalone organization with full access to sites, alerts, and reports.",
+      "firmNameLabel": "Firm / company name *",
+      "firmNamePlaceholder": "e.g. GreenEnergy Consulting Srl",
+      "orgNameLabel": "Organization name *",
+      "orgNamePlaceholder": "e.g. Ceramica Rossi Srl",
+      "fullNameLabel": "Your full name",
+      "fullNamePlaceholder": "e.g. Mario Rossi",
+      "emailLabel": "Email address *",
+      "emailPlaceholder": "you@example.com",
+      "passwordLabel": "Password * (min. 6 characters)",
+      "passwordPlaceholder": "Choose a strong password",
+      "createManagerBtn": "Create consultant account",
+      "creatingManagerBtn": "Creating consultant account…",
+      "createOrgBtn": "Create account",
+      "creatingOrgBtn": "Creating account…",
+      "errorGeneric": "Signup failed. Please try again."
+    },
+    "invitee": {
+      "consultantTitle": "Join your consultant firm",
+      "consultantSubtitle": "Paste the invite token sent by your energy management firm. You'll be added as a team member.",
+      "orgTitle": "Join your organization",
+      "orgSubtitle": "Paste the invite token sent by your organization. You'll be added with the role assigned by your admin.",
+      "tokenLabel": "Invite token *",
+      "tokenPlaceholder": "cei_inv_…",
+      "tokenAutoFilled": "Token auto-filled from your invite link.",
+      "emailLabel": "Email address * (must match the invite)",
+      "emailPlaceholder": "you@example.com",
+      "fullNameLabel": "Your full name",
+      "fullNamePlaceholder": "e.g. Mario Rossi",
+      "passwordLabel": "Password * (min. 6 characters)",
+      "passwordPlaceholder": "Choose a strong password",
+      "joinFirmBtn": "Join firm",
+      "joinOrgBtn": "Join organization",
+      "joiningBtn": "Joining…",
+      "invalidToken": "Invalid invite token. It should start with 'cei_inv_'. Check the link you received.",
+      "errorGeneric": "Failed to accept invite. Please check your details and try again."
+    }
+  },
+  "manage": {
+    "header": {
+      "title": "Portfolio management",
+      "subtitle": "Overview of all client organizations, ingestion health, and alert status.",
+      "generatedBy": "Generated",
+      "windowBtn7": "7 days",
+      "windowBtn14": "14 days",
+      "windowBtn30": "30 days",
+      "analyticsWindow": "Analytics window:",
+      "analyticsLoading": "Loading…"
+    },
+    "kpis": {
+      "clientOrgs": "Client orgs",
+      "clientOrgsActive": "{{count}} active in last 24h",
+      "totalSites": "Total sites",
+      "totalSitesSub": "Across all client orgs",
+      "totalRecords": "Total records",
+      "totalRecordsSub": "All time, all clients",
+      "openAlerts": "Open alerts",
+      "openAlertsSub": "Across all client orgs",
+      "clientsWithoutData": "Clients without recent data",
+      "clientsWithoutDataSub": "No ingestion in last 24h",
+      "recordsWindow": "Records ({{days}}d)",
+      "criticalAlerts": "Critical alerts",
+      "activeTokens": "Active tokens"
+    },
+    "onboarding": {
+      "title": "Onboarding status",
+      "checklistTitle": "Onboarding checklist",
+      "stepsRemaining_one": "{{count}} step remaining",
+      "stepsRemaining_other": "{{count}} steps remaining"
+    },
+    "clients": {
+      "title": "Client organizations",
+      "noClients": "No client organizations yet. Use POST /manage/onboarding/bootstrap to add your first client.",
+      "table": {
+        "name": "Client org",
+        "status": "Status",
+        "sites": "Sites",
+        "records24h": "Records (24h)",
+        "records7d": "Records (7d)",
+        "totalRecords": "Total records",
+        "lastIngestion": "Last ingestion",
+        "openAlerts": "Open alerts",
+        "activeTokens": "Active tokens",
+        "report": "Report"
+      },
+      "status": {
+        "active": "Active",
+        "silent": "Silent"
+      },
+      "downloadPdf": "↓ PDF",
+      "downloading": "Downloading…"
+    },
+    "pdf": {
+      "download": "↓ Download PDF report",
+      "downloading": "Downloading…"
+    },
+    "client": {
+      "title": "Client organization",
+      "backToPortfolio": "← Portfolio",
+      "orgId": "Org ID {{id}}",
+      "tabs": {
+        "overview": "Overview",
+        "sites": "Sites",
+        "tokens": "Tokens",
+        "users": "Users",
+        "thresholds": "Thresholds"
+      },
+      "overview": {
+        "title": "Organization details",
+        "pricingTitle": "Energy pricing",
+        "name": "Name",
+        "plan": "Plan",
+        "status": "Status",
+        "created": "Created",
+        "energySources": "Energy sources",
+        "energySourcesPlaceholder": "e.g. electricity,gas",
+        "electricityPrice": "Electricity (€/kWh)",
+        "electricityPricePlaceholder": "e.g. 0.23",
+        "gasPrice": "Gas (€/kWh)",
+        "gasPricePlaceholder": "e.g. 0.08",
+        "currency": "Currency",
+        "savePricing": "Save pricing",
+        "savingPricing": "Saving…",
+        "savedSuccess": "Saved ✓",
+        "errorGeneric": "Failed to save pricing."
+      },
+      "sites": {
+        "title": "Sites ({{count}})",
+        "noSites": "No sites yet. Add one to start ingesting data.",
+        "addBtn": "+ Add site",
+        "addTitle": "Add site",
+        "nameLabel": "Site name *",
+        "namePlaceholder": "e.g. Plant A",
+        "locationLabel": "Location",
+        "locationPlaceholder": "e.g. Milan, Italy",
+        "createBtn": "Create site",
+        "creatingBtn": "Creating…",
+        "cancelBtn": "Cancel",
+        "deleteTitle": "Delete site",
+        "deleteConfirm": "Are you sure you want to delete {{name}}? This will remove the site and all associated data. This action cannot be undone.",
+        "deleteBtn": "Delete",
+        "deletingBtn": "Deleting…",
+        "errorLoad": "Failed to load sites.",
+        "errorCreate": "Failed to create site.",
+        "errorDelete": "Failed to delete site.",
+        "table": {
+          "name": "Name",
+          "location": "Location",
+          "siteId": "Site ID",
+          "created": "Created",
+          "actions": ""
+        }
+      },
+      "tokens": {
+        "title": "Integration tokens ({{count}} active)",
+        "noTokens": "No tokens yet.",
+        "createBtn": "+ Create token",
+        "createTitle": "Create integration token",
+        "nameLabel": "Token name",
+        "createAction": "Create token",
+        "creatingAction": "Creating…",
+        "cancelBtn": "Cancel",
+        "newTokenBanner": "Token created — copy it now, it won't be shown again",
+        "copyBtn": "Copy to clipboard",
+        "dismissBtn": "Dismiss",
+        "revokeTitle": "Revoke token",
+        "revokeConfirm": "Revoke {{name}}? Any system using this token will lose access immediately.",
+        "revokeAction": "Revoke",
+        "revokingAction": "Revoking…",
+        "createHint": "The raw token will be shown once after creation. Store it securely — it cannot be retrieved again.",
+        "errorLoad": "Failed to load tokens.",
+        "errorCreate": "Failed to create token.",
+        "errorRevoke": "Failed to revoke token.",
+        "table": {
+          "name": "Name",
+          "status": "Status",
+          "created": "Created",
+          "lastUsed": "Last used",
+          "actions": ""
+        },
+        "statusActive": "Active",
+        "statusRevoked": "Revoked"
+      },
+      "users": {
+        "title": "Users ({{count}})",
+        "noUsers": "No users in this org yet. Invite someone to get started.",
+        "inviteBtn": "+ Invite user",
+        "inviteTitle": "Invite user",
+        "emailLabel": "Email *",
+        "emailPlaceholder": "user@example.com",
+        "roleLabel": "Role",
+        "roleMember": "Member",
+        "roleOwner": "Owner",
+        "expiryLabel": "Expires in (days)",
+        "inviteAction": "Send invite",
+        "invitingAction": "Inviting…",
+        "cancelBtn": "Cancel",
+        "inviteBanner": "Invite created for {{email}} — share this token with them",
+        "inviteHint": "They sign up via: POST /api/v1/org/invites/accept-and-signup",
+        "copyToken": "Copy token",
+        "dismissBtn": "Dismiss",
+        "errorLoad": "Failed to load users.",
+        "errorInvite": "Failed to send invite.",
+        "table": {
+          "email": "Email",
+          "role": "Role",
+          "status": "Status",
+          "created": "Created"
+        },
+        "statusActive": "Active",
+        "statusDisabled": "Disabled"
+      },
+      "thresholds": {
+        "title": "Alert thresholds",
+        "customActive": "Custom thresholds are active for this org.",
+        "usingDefaults": "Using system defaults. Edit and save to set custom thresholds.",
+        "saveBtn": "Save thresholds",
+        "savingBtn": "Saving…",
+        "savedSuccess": "Saved ✓",
+        "errorLoad": "Failed to load thresholds.",
+        "errorSave": "Failed to save thresholds.",
+        "defaultLabel": "default: {{value}}",
+        "fields": {
+          "nightWarning": { "label": "Night warning ratio", "hint": "Fraction of daytime avg" },
+          "nightCritical": { "label": "Night critical ratio", "hint": "Fraction of daytime avg" },
+          "spikeWarning": { "label": "Spike warning ratio", "hint": "Multiple of recent avg" },
+          "portfolioShare": { "label": "Portfolio share ratio", "hint": "Multiple of portfolio avg" },
+          "weekendWarning": { "label": "Weekend warning ratio", "hint": "Fraction of weekday avg" },
+          "weekendCritical": { "label": "Weekend critical ratio", "hint": "Fraction of weekday avg" },
+          "minPoints": { "label": "Min points", "hint": "Minimum data points required" },
+          "minKwh": { "label": "Min total kWh", "hint": "Minimum energy for alert to fire" }
+        }
+      }
+    }
   },
   "dashboard": {
     "errors": {
@@ -158,7 +423,7 @@
       },
       "coverage": {
         "title": "Data coverage (points)",
-        "body": "Total number of readings in the selected window. Use this as a quick sense-check of how “complete” your dataset is."
+        "body": "Total number of readings in the selected window. Use this as a quick sense-check of how \"complete\" your dataset is."
       },
       "fleetStatus": {
         "title": "Fleet status",
@@ -350,7 +615,7 @@
         "bodyC": "for this site.",
         "loading": "Loading per-site energy data…",
         "noDataA": "No recent data for this site. Either ensure your uploaded timeseries includes",
-        "noDataB": ", or use the “Upload CSV for this site” button so CEI routes rows here automatically when your CSV has no site_id column."
+        "noDataB": ", or use the \"Upload CSV for this site\" button so CEI routes rows here automatically when your CSV has no site_id column."
       },
       "coverage": {
         "title": "Data coverage",
@@ -377,7 +642,7 @@
       "headlineTitle": "Headline",
       "headline": {
         "above": "Energy use is trending above the previous week. Worth a closer look at this site.",
-        "below": "Energy use is trending below the previous week. Capture what’s working and standardize it.",
+        "below": "Energy use is trending below the previous week. Capture what's working and standardize it.",
         "flat": "Energy use is roughly in line with last week. Focus attention on spike alerts and anomaly windows."
       }
     },
@@ -403,7 +668,7 @@
       "units": "kWh · hourly",
       "summary": "Peak hour at this site: {{peakLabel}} with {{maxKwh}} kWh · Average: {{avgKwh}} kWh/h over {{windowHours}} hours · Min hourly: {{minKwh}} kWh/h.",
       "unit": "kWh · hourly",
-      "noData": "No recent per-site series data. Once your timeseries has matching site_id, or you upload via “Upload CSV for this site” with no site_id column, this chart will light up."
+      "noData": "No recent per-site series data. Once your timeseries has matching site_id, or you upload via \"Upload CSV for this site\" with no site_id column, this chart will light up."
     },
     "metaCard": {
       "title": "Site metadata",
@@ -436,8 +701,8 @@
       },
       "building": "Building a baseline-driven forecast for this site…",
       "stub": "Stub: {{method}}",
-      "expected24h": "Expected next 24h",
-      "peakHour": "Peak hour (forecast)",
+      "expectedNext24h": "Expected next 24h",
+      "peakHourForecast": "Peak hour (forecast)",
       "footer": "Based on a {{lookback}}-day baseline and a {{history}}-hour recent performance window. Use this strip as a forward-looking mirror of the last 24h trend chart above."
     },
     "hybrid": {
@@ -477,14 +742,14 @@
       "thisSite": "this site",
       "none": "No specific opportunities detected yet. Once this site has a more stable data profile, CEI will surface patterns worth acting on here.",
       "noData": {
-        "1": "Confirm that uploads for {{name}} either (a) include a consistent site_id column, or (b) are sent via the “Upload CSV for this site” button so CEI can route rows automatically.",
-        "2": "Check that timestamps for this site actually land in the last 24 hours – older backfills won’t drive this view.",
+        "1": "Confirm that uploads for {{name}} either (a) include a consistent site_id column, or (b) are sent via the \"Upload CSV for this site\" button so CEI can route rows automatically.",
+        "2": "Check that timestamps for this site actually land in the last 24 hours – older backfills won't drive this view.",
         "3": "Start with one or two key meters for this site (e.g. main incomer, compressors) and validate that their profiles look realistic."
       },
       "high": {
         "1": "Identify which hours at {{name}} show the highest kWh and coordinate with production to move non-critical loads away from those peaks.",
         "2": "Review night and weekend consumption at {{name}} – look for lines, compressors, or HVAC that stay energized with no production.",
-        "3": "Compare today’s kWh profile for {{name}} with a “good” reference day to spot abnormal peaks or extended high-load periods."
+        "3": "Compare today's kWh profile for {{name}} with a \"good\" reference day to spot abnormal peaks or extended high-load periods."
       },
       "medium": {
         "1": "Check whether batch processes at {{name}} are overlapping more than necessary and see if start times can be staggered.",
@@ -516,7 +781,7 @@
         "hoursElevated": "elevated:",
         "hoursBelowBaseline": "below baseline:"
       },
-      "empty": "No insights yet. Once enough history exists, CEI will compute baseline deviations and explain what’s driving them."
+      "empty": "No insights yet. Once enough history exists, CEI will compute baseline deviations and explain what's driving them."
     }
   },
   "settings": {
@@ -585,12 +850,12 @@
       "ownerOnly": "Owner only",
       "description": "Long-lived API tokens for SCADA/BMS/historian systems to push timeseries data directly into CEI via",
       "endpoint": "POST /api/v1/timeseries/batch",
-      "noPermission": "You don’t have permission to view or manage integration tokens. Ask your organization owner.",
+      "noPermission": "You don't have permission to view or manage integration tokens. Ask your organization owner.",
       "createPlaceholder": "e.g. Plant 4 SCADA",
       "createButton": "Create token",
       "creatingButton": "Creating...",
       "newTokenTitle": "New integration token (shown once)",
-      "newTokenHelp": "Store this token securely (vault, password manager). You won’t be able to view it again.",
+      "newTokenHelp": "Store this token securely (vault, password manager). You won't be able to view it again.",
       "loading": "Loading integration tokens...",
       "empty": "No integration tokens yet. Create one above to allow external systems to push data into CEI.",
       "labels": {
@@ -663,7 +928,7 @@
       "title": "Profile",
       "emailLabel": "Email:",
       "nameLabel": "Name:",
-      "readOnlyNote": "For now this is read-only. In a production deployment, this is where you’d manage passwords, SSO, and org membership.",
+      "readOnlyNote": "For now this is read-only. In a production deployment, this is where you'd manage passwords, SSO, and org membership.",
       "deleteButton": "Delete account",
       "deleting": "Deleting…",
       "deletedMessage": "Your account has been deleted on this environment. You may need to log out manually or clear your token in local storage."
@@ -671,7 +936,6 @@
     "subscription": {
       "title": "Subscription",
       "currentPlan": "Current plan:",
-      "status": "Status:",
       "alerts": "Alerts:",
       "reports": "Reports:",
       "ownerOnlyBlurb": "Ask your org owner to upgrade or manage billing.",
@@ -714,7 +978,7 @@
       "nuking": "Nuking…",
       "noOrgAttachedTitle": "No organization attached",
       "permanentDeleteTitle": "Danger: permanent delete",
-      "footer": "Offboard Organization detaches users and revokes invites/tokens, but keeps the org row. Permanently Delete deletes the org and org-scoped data. Leave Organization detaches only you (blocked if you’re the last owner)."
+      "footer": "Offboard Organization detaches users and revokes invites/tokens, but keeps the org row. Permanently Delete deletes the org and org-scoped data. Leave Organization detaches only you (blocked if you're the last owner)."
     },
     "invites": {
       "title": "Organization invites",
@@ -869,7 +1133,7 @@
       "totalTitle": "Total alerts – {{windowLabel}}",
       "totalHelp": "Count of all critical, warning, and info-level alerts raised in the selected window.",
       "severityMixTitle": "Severity mix",
-      "severityMixHelp": "Use this to understand whether the portfolio is mostly “noise” or if true exceptions are creeping in."
+      "severityMixHelp": "Use this to understand whether the portfolio is mostly \"noise\" or if true exceptions are creeping in."
     },
     "playbook": {
       "title": "Operational playbook",
@@ -922,7 +1186,7 @@
     },
     "defaults": {
       "title": "Energy anomaly detected",
-      "message": "This site’s recent energy pattern deviates from its baseline. Review the dashboard for confirmation."
+      "message": "This site's recent energy pattern deviates from its baseline. Review the dashboard for confirmation."
     },
     "stats": {
       "deltaVsBaseline": "Δ vs baseline:",
@@ -1038,7 +1302,7 @@
       }
     },
     "chart": {
-      "caption": "Bar height scales with each site’s 7-day energy. Bars are ordered by € impact when tariffs are configured."
+      "caption": "Bar height scales with each site's 7-day energy. Bars are ordered by € impact when tariffs are configured."
     },
     "opps": {
       "title": "Top efficiency opportunities (portfolio)",
@@ -1068,7 +1332,7 @@
     },
     "subtitle": {
       "global": "Drag a CSV into CEI and we'll ingest energy readings into the timeseries engine. Column <code>order doesn't matter</code> as long as the headers include <code>timestamp</code>, <code>value</code>, <code>unit</code>, <code>site_id</code>, and <code>meter_id</code>.",
-      "perSite": "You’re uploading data for <code>{{forcedSiteId}}</code>. CEI will ingest all rows into this site. Column <code>order</code> doesn’t matter; the engine reads the header row. For this scoped upload, your CSV must include at least <code>timestamp</code>, <code>value</code>, <code>unit</code>, and <code>meter_id</code>. A <code>site_id</code> column is optional and will be ignored for routing."
+      "perSite": "You're uploading data for <code>{{forcedSiteId}}</code>. CEI will ingest all rows into this site. Column <code>order</code> doesn't matter; the engine reads the header row. For this scoped upload, your CSV must include at least <code>timestamp</code>, <code>value</code>, <code>unit</code>, and <code>meter_id</code>. A <code>site_id</code> column is optional and will be ignored for routing."
     },
     "scopedMode": "Scoped mode: all ingested rows will use <code>site_id = {{forcedSiteId}}</code>.",
     "meta": {
@@ -1092,7 +1356,7 @@
       "item1": "Keep timestamps in a single timezone per file.",
       "item2Base": "Use stable <code>site_id</code> values so dashboards can build trends over time.",
       "item2Scoped": "For this scoped upload CEI will enforce <code>{{forcedSiteId}}</code> on every row.",
-      "item3": "If you backfill older data, it will not change the “last 24 hours” KPIs but will appear in broader windows later."
+      "item3": "If you backfill older data, it will not change the \"last 24 hours\" KPIs but will appear in broader windows later."
     },
     "button": {
       "uploadCsv": "Upload CSV",
@@ -1106,7 +1370,7 @@
       "validating": "Validating headers and preparing rows for ingestion…",
       "ingesting": "Ingesting rows into the timeseries engine…",
       "doneGlobal": "Upload complete. The latest data will feed Dashboard, SiteView, Alerts, and Reports.",
-      "donePerSite": "Upload complete. The latest data will feed this site’s charts, alerts, and reports.",
+      "donePerSite": "Upload complete. The latest data will feed this site's charts, alerts, and reports.",
       "error": "Upload failed. Review the error message and adjust the CSV."
     },
     "errors": {
