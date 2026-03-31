@@ -476,16 +476,26 @@ def org_initiate_link_request(
         raise HTTPException(status_code=400, detail="Cannot link to your own organization.")
  
     # Check for existing pending request
-    existing = db.query(OrgLinkRequest).filter(
+    # Block if there's already a pending request
+    existing_pending = db.query(OrgLinkRequest).filter(
         OrgLinkRequest.managing_org_id == consultant_org.id,
         OrgLinkRequest.client_org_id == org_id,
         OrgLinkRequest.status == "pending",
     ).first()
-    if existing:
+    if existing_pending:
         raise HTTPException(
             status_code=409,
             detail="A pending link request already exists with this consultant.",
         )
+
+    # Delete any old non-pending records for this pair to allow re-linking
+    old_reqs = db.query(OrgLinkRequest).filter(
+        OrgLinkRequest.managing_org_id == consultant_org.id,
+        OrgLinkRequest.client_org_id == org_id,
+    ).all()
+    for r in old_reqs:
+        db.delete(r)
+    db.flush()
  
     req = OrgLinkRequest(
         managing_org_id=consultant_org.id,
@@ -688,11 +698,11 @@ def unlink_from_consultant(
     db.add(org)
 
     # Remove the accepted link request so the pair can be re-linked in future
-    old_req = db.query(OrgLinkRequest).filter(
+    # Remove all link requests for this pair so it can be re-linked in future
+    old_reqs = db.query(OrgLinkRequest).filter(
         OrgLinkRequest.client_org_id == org_id,
-        OrgLinkRequest.status == "accepted",
-    ).first()
-    if old_req:
+    ).all()
+    for old_req in old_reqs:
         db.delete(old_req)
 
     db.commit()

@@ -73,9 +73,9 @@ def _send_resend(
 
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            # Read response for observability; not strictly needed
-            _ = resp.read()
-        logger.info("Email sent via Resend to=%s subject=%s", to_email, subject)
+            resp_body = resp.read().decode("utf-8", errors="replace")
+            logger.info("Email sent via Resend to=%s subject=%s resp=%s", to_email, subject, resp_body)
+            print(f"RESEND OK: to={to_email} resp={resp_body}")
     except urllib.error.HTTPError as e:
         body = ""
         try:
@@ -83,8 +83,10 @@ def _send_resend(
         except Exception:
             pass
         logger.error("Resend HTTPError status=%s body=%s", getattr(e, "code", None), body)
-    except Exception:
+        print(f"RESEND ERROR: status={e.code} body={body}")
+    except Exception as ex:
         logger.exception("Resend send failed")
+        print(f"RESEND EXCEPTION: {ex}")
 
 
 def _send_smtp(
