@@ -53,9 +53,9 @@ def upgrade() -> None:
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organization.id"), nullable=True),
         sa.Column("email", sa.String(length=255), nullable=False, unique=True, index=True),
         sa.Column("hashed_password", sa.String(length=255), nullable=False),
-        sa.Column("is_active", sa.Boolean(), server_default=sa.text("1"), nullable=False),
+        sa.Column("is_active", sa.Boolean(), server_default=sa.text("true"), nullable=False),
         # Supabase historically stores this as INTEGER-ish; keep boolean semantics but default to 0.
-        sa.Column("is_superuser", sa.Integer(), server_default=sa.text("0"), nullable=False),
+        sa.Column("is_superuser", sa.Boolean(), server_default=sa.text("false"), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),

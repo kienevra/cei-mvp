@@ -3,8 +3,12 @@ import sys
 from pathlib import Path
 from logging.config import fileConfig
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+
 
 # Alembic Config object (from alembic.ini)
 config = context.config
@@ -14,8 +18,9 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Force sqlalchemy.url to come from DATABASE_URL, with a safe local default.
-db_url = os.environ.get("DATABASE_URL", "sqlite:///../dev.db")
-config.set_main_option("sqlalchemy.url", db_url)
+db_url = os.environ.get("DATABASE_URL")
+if not db_url:
+    raise RuntimeError("DATABASE_URL not set")
 
 # Ensure backend/ is on sys.path when running alembic from backend/
 proj_root = Path(__file__).resolve().parents[2]  # project_root/backend/alembic -> project_root
@@ -45,10 +50,11 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section),
-        prefix="sqlalchemy.",
+    import os
+    from sqlalchemy import create_engine
+
+    connectable = create_engine(
+        os.environ["DATABASE_URL"],
         poolclass=pool.NullPool,
     )
 
