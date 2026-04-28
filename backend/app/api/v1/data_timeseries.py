@@ -52,23 +52,84 @@ class TimeseriesBatchRecord(BaseModel):
     """
     Payload shape for a single record in /timeseries/batch.
 
-    Note:
-    - timestamp_utc is required and must be ISO8601, UTC.
-    - unit is locked to "kWh" for v1 (if provided).
-    - idempotency_key is optional but recommended for integrators.
+    Accepts flexible field names for timestamp and site/meter IDs:
+    - timestamp_utc, timestamp, ts, datetime, date_time, time, utc_timestamp
+    - site_id, site, plant, site_name
+    - meter_id, meter, meter_name, tag, point
+
+    Timezone handling:
+    - If timestamp includes timezone info (Z, +01:00 etc), it is converted to UTC.
+    - If timestamp is naive (no timezone), the request-level `timezone` field is used.
+    - Default timezone is UTC.
+
+    unit is locked to kWh for v1.
+    idempotency_key is optional but recommended for integrators.
     """
 
-    site_id: str
-    meter_id: str
-    timestamp_utc: datetime
+    # Accept any of these as the timestamp field
+    timestamp_utc: Optional[str] = None
+    timestamp: Optional[str] = None
+    ts: Optional[str] = None
+    datetime: Optional[str] = None
+    date_time: Optional[str] = None
+    time: Optional[str] = None
+    utc_timestamp: Optional[str] = None
+
+    # Accept any of these as site_id
+    site_id: Optional[str] = None
+    site: Optional[str] = None
+    plant: Optional[str] = None
+    site_name: Optional[str] = None
+
+    # Accept any of these as meter_id
+    meter_id: Optional[str] = None
+    meter: Optional[str] = None
+    meter_name: Optional[str] = None
+    tag: Optional[str] = None
+    point: Optional[str] = None
+
     value: float
     unit: Optional[str] = "kWh"
     idempotency_key: Optional[str] = None
+
+    def resolve_timestamp(self) -> str:
+        """Return the first non-None timestamp field."""
+        for field in ["timestamp_utc", "timestamp", "ts", "datetime",
+                      "date_time", "time", "utc_timestamp"]:
+            v = getattr(self, field, None)
+            if v is not None:
+                return str(v)
+        raise ValueError("No timestamp field found. Provide one of: timestamp_utc, timestamp, ts, datetime.")
+
+    def resolve_site_id(self) -> Optional[str]:
+        for field in ["site_id", "site", "plant", "site_name"]:
+            v = getattr(self, field, None)
+            if v is not None:
+                return str(v).strip()
+        return None
+
+    def resolve_meter_id(self) -> Optional[str]:
+        for field in ["meter_id", "meter", "meter_name", "tag", "point"]:
+            v = getattr(self, field, None)
+            if v is not None:
+                return str(v).strip()
+        return None
+
+    def to_ingest_dict(self, *, request_timezone: Optional[str] = None) -> dict:
+        return {
+            "timestamp_utc": self.resolve_timestamp(),
+            "site_id": self.resolve_site_id(),
+            "meter_id": self.resolve_meter_id(),
+            "value": self.value,
+            "unit": self.unit or "kWh",
+            "_timezone": request_timezone,
+        }
 
 
 class TimeseriesBatchRequest(BaseModel):
     records: List[TimeseriesBatchRecord]
     source: Optional[str] = None
+    timezone: Optional[str] = None  # e.g. "Europe/Rome", "America/New_York", "UTC"
 
 
 class TimeseriesBatchError(BaseModel):
@@ -481,7 +542,7 @@ def create_timeseries_batch(
         )
 
     # Convert Pydantic models to plain dicts before handing off to the service.
-    records = [r.dict() for r in payload.records]
+    records = [r.to_ingest_dict(request_timezone=payload.timezone) for r in payload.records]
 
     # Source fallback: make it explicit for observability.
     source = payload.source or "api"

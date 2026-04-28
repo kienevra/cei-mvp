@@ -249,7 +249,7 @@ def _validate_forced_site_belongs_to_org(
 
 
 def _build_csv_idempotency_key(*, org_id: int, site_id: str, meter_id: str, ts: datetime) -> str:
-    ts_norm = ts.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+    ts_norm = ts.astimezone(dt_timezone.utc).replace(microsecond=0).isoformat()
     key = f"csv:{org_id}:{site_id}:{meter_id}:{ts_norm}"
     return key[:128]
 
@@ -262,24 +262,24 @@ def _to_utc_z_iso(ts: datetime) -> str:
       - format ends with 'Z'
     """
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    ts = ts.astimezone(timezone.utc).replace(microsecond=0)
+        ts = ts.replace(tzinfo=dt_timezone.utc)
+    ts = ts.astimezone(dt_timezone.utc).replace(microsecond=0)
     return ts.isoformat().replace("+00:00", "Z")
 
 
-def _parse_timestamp_utc_csv(raw: str) -> datetime:
+def _parse_timestamp_utc_csv(raw: str, tz_name: Optional[str] = None) -> datetime:
     """
-    CSV is allowed to be more permissive than /timeseries/batch:
+    CSV is allowed to be more permissive than /timeseries/batch.
 
     Accept:
-      - 2025-12-29 11:00:00            (assume UTC)
-      - 2025-12-29T11:00:00            (assume UTC)
+      - 2025-12-29 11:00:00            (naive: uses tz_name or UTC)
+      - 2025-12-29T11:00:00            (naive: uses tz_name or UTC)
       - 2025-12-29T11:00:00Z           (strict UTC)
       - 2025-12-29T11:00:00+00:00      (strict offset)
       - 2025-12-29T12:00:00+01:00      (offset; normalized to UTC)
 
-    Return:
-      timezone-aware UTC datetime, microsecond=0
+    tz_name: IANA timezone e.g. "Europe/Rome". Applied only to naive timestamps.
+    Return: timezone-aware UTC datetime, microsecond=0
     """
     s = (raw or "").strip()
     if not s:
@@ -287,27 +287,40 @@ def _parse_timestamp_utc_csv(raw: str) -> datetime:
 
     # If it includes Z or an explicit offset, defer to ingest.py strict parser.
     has_z = s.endswith("Z")
-    has_offset = ("+" in s[10:] or "-" in s[10:]) and ("T" in s or " " in s)  # heuristic
+    has_offset = ("+" in s[10:] or "-" in s[10:]) and ("T" in s or " " in s)
     if has_z or has_offset:
-        return _parse_timestamp_utc(s)
+        return _parse_timestamp_utc(s, tz_name=None)  # already has tz info
 
-    # Try ISO without tz -> assume UTC
+    # Naive timestamp — apply tz_name or default to UTC
+    dt = None
     try:
         dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc).replace(microsecond=0)
     except Exception:
         pass
 
-    # Try legacy "YYYY-MM-DD HH:MM:SS" -> assume UTC
-    try:
-        dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
-        return dt.replace(tzinfo=timezone.utc).replace(microsecond=0)
-    except Exception:
-        pass
+    if dt is None:
+        try:
+            dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
 
-    raise ValueError(f"Invalid timestamp format: {raw}")
+    if dt is None:
+        raise ValueError(f"Invalid timestamp format: {raw}")
+
+    if dt.tzinfo is None:
+        if tz_name and tz_name.upper() not in ("UTC", "Z"):
+            try:
+                import zoneinfo
+                tz = zoneinfo.ZoneInfo(tz_name)
+                dt = dt.replace(tzinfo=tz)
+            except Exception:
+                raise ValueError(
+                    f"Unknown timezone: '{tz_name}'. "
+                    "Use IANA timezone names like 'Europe/Rome', 'America/New_York'."
+                )
+        else:
+            dt = dt.replace(tzinfo=dt_timezone.utc)
+    return dt.astimezone(dt_timezone.utc).replace(microsecond=0)
 
 
 def _call_ingest_timeseries_batch(
@@ -389,6 +402,7 @@ async def upload_csv(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
     site_id: Optional[str] = None,
+    timezone: Optional[str] = None,
 ):
     # ✅ Make this structured (non-breaking) so clients can distinguish file issues.
     if not (file.filename or "").lower().endswith(".csv"):
@@ -418,6 +432,7 @@ async def upload_csv(
         _validate_forced_site_belongs_to_org(
             db, forced_site_id=forced_site_id, org_id=user.organization_id
         )
+    tz_name: Optional[str] = timezone  # rename to avoid shadowing datetime.timezone
 
     raw_bytes = await file.read()
     try:
@@ -456,7 +471,7 @@ async def upload_csv(
     rid = get_request_id()
 
     # Stable UTC now for guards (match ingest.py expectation)
-    now_utc = datetime.now(timezone.utc).replace(microsecond=0)
+    now_utc = datetime.now(dt_timezone.utc).replace(microsecond=0)
 
     # Multi-site uploads must not be able to ingest other org's sites.
     allowed_site_ids: Optional[Set[str]] = None
@@ -486,7 +501,7 @@ async def upload_csv(
                 raise ValueError("timestamp_utc and value are required per row")
 
             # CSV is permissive on timestamp inputs, but we normalize to strict UTC for ingest.py
-            ts = _parse_timestamp_utc_csv(raw_ts)
+            ts = _parse_timestamp_utc_csv(raw_ts, tz_name=timezone)
             _validate_timestamp_guardrails(ts, now_utc=now_utc)
 
             # PARITY: reuse ingest.py value parsing + bounds

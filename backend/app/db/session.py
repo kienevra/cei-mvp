@@ -13,10 +13,17 @@ logger = logging.getLogger("cei")
 # If DATABASE_URL is None, engine creation will fail later; callers should handle.
 DATABASE_URL = settings.database_url or "sqlite:///./dev.db"
 
+_is_sqlite = DATABASE_URL.startswith("sqlite")
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
+    connect_args={"check_same_thread": False} if _is_sqlite else {"sslmode": "require"},
     future=True,
+    **({} if _is_sqlite else {
+        "pool_pre_ping": True,
+        "pool_size": 5,
+        "max_overflow": 2,
+        "pool_recycle": 300,
+    })
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)

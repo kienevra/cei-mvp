@@ -142,18 +142,67 @@ def process_job(job_id: str) -> int:
 # --- Direct API ingestion for /timeseries/batch (Phase #3) ---
 
 
-def _parse_timestamp_utc(ts_raw: Any) -> datetime:
+def _parse_timestamp_utc(ts_raw: Any, tz_name: Optional[str] = None) -> datetime:
+    """
+    Parse a timestamp string into a UTC-aware datetime.
+
+    Supports:
+    - ISO8601 with timezone: "2026-04-27T14:00:00Z", "2026-04-27T14:00:00+01:00"
+    - ISO8601 naive: "2026-04-27 14:00:00" (uses tz_name or UTC)
+    - Date only: "2026-04-27" (treated as midnight)
+    - Common separators: T or space
+
+    tz_name: IANA timezone string e.g. "Europe/Rome", "America/New_York".
+             If None or "UTC", naive timestamps are treated as UTC.
+    """
     s = str(ts_raw).strip()
     if not s:
-        raise ValueError("timestamp_utc missing")
+        raise ValueError("timestamp field is missing or empty")
 
+    # Normalize Z suffix
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
 
-    dt = datetime.fromisoformat(s)
+    # Try parsing as ISO8601
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        # Try common non-ISO formats
+        for fmt in [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y/%m/%d %H:%M:%S",
+            "%d/%m/%Y %H:%M:%S",
+            "%m/%d/%Y %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
+        ]:
+            try:
+                dt = datetime.strptime(s, fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            raise ValueError(
+                f"Unrecognized timestamp format: '{s}'. "
+                "Use ISO8601 (e.g. '2026-04-27T14:00:00Z') or "
+                "common formats like 'YYYY-MM-DD HH:MM:SS'."
+            )
 
+    # If naive, apply provided timezone or default to UTC
     if dt.tzinfo is None:
-        raise ValueError("timestamp_utc must be timezone-aware (UTC)")
+        if tz_name and tz_name.upper() not in ("UTC", "Z"):
+            try:
+                import zoneinfo
+                tz = zoneinfo.ZoneInfo(tz_name)
+                dt = dt.replace(tzinfo=tz)
+            except Exception:
+                raise ValueError(
+                    f"Unknown timezone: '{tz_name}'. "
+                    "Use IANA timezone names like 'Europe/Rome', 'America/New_York'."
+                )
+        else:
+            dt = dt.replace(tzinfo=timezone.utc)
 
     dt = dt.astimezone(timezone.utc).replace(microsecond=0)
     return dt
@@ -204,16 +253,17 @@ def validate_batch_record(r: Dict[str, Any]) -> Tuple[bool, List[str]]:
         except Exception:
             errs.append("value not numeric")
 
-    ts_raw = r.get("timestamp_utc") or r.get("timestamp")
+    ts_raw = (r.get("timestamp_utc") or r.get("timestamp") or
+              r.get("ts") or r.get("datetime") or r.get("date_time") or
+              r.get("time") or r.get("utc_timestamp"))
     if ts_raw is None:
-        errs.append("timestamp_utc missing")
+        errs.append("timestamp field missing")
     else:
         try:
-            ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
-            if ts.tzinfo is None:
-                errs.append("timestamp_utc must be timezone-aware (UTC)")
-        except Exception:
-            errs.append("timestamp_utc not ISO8601")
+            tz_name = r.get("_timezone")
+            _parse_timestamp_utc(str(ts_raw), tz_name=tz_name)
+        except Exception as exc:
+            errs.append(str(exc))
 
     unit = r.get("unit")
     if unit is not None and str(unit).strip():
@@ -343,9 +393,12 @@ def ingest_timeseries_batch(
             idem = _normalize_idempotency_key(r.get("idempotency_key"))
             site_id_str = str(r.get("site_id", "")).strip()
             meter_id_str = str(r.get("meter_id", "")).strip()
-            ts_raw = r.get("timestamp_utc") or r.get("timestamp")
+            ts_raw = (r.get("timestamp_utc") or r.get("timestamp") or
+                      r.get("ts") or r.get("datetime") or r.get("date_time") or
+                      r.get("time") or r.get("utc_timestamp"))
+            tz_name = r.get("_timezone")
             try:
-                ts = _parse_timestamp_utc(ts_raw)
+                ts = _parse_timestamp_utc(ts_raw, tz_name=tz_name)
             except Exception:
                 ts = now_utc  # fallback; will fail per-record later
 
@@ -410,8 +463,11 @@ def ingest_timeseries_batch(
 
             unit_canonical = CANONICAL_UNIT_KWH
             try:
-                ts_raw = r.get("timestamp_utc") or r.get("timestamp")
-                ts = _parse_timestamp_utc(ts_raw)
+                ts_raw = (r.get("timestamp_utc") or r.get("timestamp") or
+                          r.get("ts") or r.get("datetime") or r.get("date_time") or
+                          r.get("time") or r.get("utc_timestamp"))
+                tz_name = r.get("_timezone")
+                ts = _parse_timestamp_utc(ts_raw, tz_name=tz_name)
                 _validate_timestamp_guardrails(ts, now_utc=now_utc)
 
                 v = _parse_value_kwh(r.get("value"))
