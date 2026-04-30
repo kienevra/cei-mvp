@@ -86,6 +86,7 @@ function KpiChip({ label, value, sub }: { label: string; value: React.ReactNode;
 // ---------------------------------------------------------------------------
 function EnergyTab({ orgId }: { orgId: number }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [report, setReport] = useState<ClientReportOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -148,7 +149,14 @@ function EnergyTab({ orgId }: { orgId: number }) {
               const hasData = report.active_site_ids.includes(site.site_id ?? `site-${site.id}`);
               return (
                 <tr key={site.id} style={{ background: idx % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)" }}>
-                  <td style={{ padding: "0.5rem 0.6rem", fontWeight: 500 }}>{site.name}</td>
+                  <td style={{ padding: "0.5rem 0.6rem", fontWeight: 500 }}>
+                  <button
+                    style={{ background: "none", border: "none", color: "var(--cei-text-main)", cursor: "pointer", fontWeight: 500, padding: 0, textDecoration: "underline" }}
+                    onClick={() => navigate(`/manage/client-orgs/${orgId}/sites/${site.id}`)}
+                  >
+                    {site.name}
+                  </button>
+                </td>
                   <td style={{ padding: "0.5rem 0.6rem" }}><code style={{ fontSize: "0.78rem", background: "rgba(148,163,184,0.1)", padding: "0.1rem 0.4rem", borderRadius: "0.25rem" }}>{site.site_id ?? `site-${site.id}`}</code></td>
                   <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</td>
                   <td style={{ padding: "0.5rem 0.6rem" }}>
@@ -433,6 +441,7 @@ function OverviewTab({ org, onSaved }: { org: ClientOrg; onSaved: () => void }) 
 // ---------------------------------------------------------------------------
 function SitesTab({ orgId }: { orgId: number }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -491,14 +500,29 @@ function SitesTab({ orgId }: { orgId: number }) {
           <tbody>
             {sites.map((site, idx) => (
               <tr key={site.id} style={{ background: idx % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)" }}>
-                <td style={{ padding: "0.5rem 0.6rem", fontWeight: 500 }}>{site.name}</td>
+                <td style={{ padding: "0.5rem 0.6rem", fontWeight: 500 }}>
+                  <button
+                    style={{ background: "none", border: "none", color: "var(--cei-text-main)", cursor: "pointer", fontWeight: 500, padding: 0, textDecoration: "underline" }}
+                    onClick={() => navigate(`/manage/client-orgs/${orgId}/sites/${site.id}`)}
+                  >
+                    {site.name}
+                  </button>
+                </td>
                 <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</td>
                 <td style={{ padding: "0.5rem 0.6rem" }}><code style={{ fontSize: "0.78rem", background: "rgba(148,163,184,0.1)", padding: "0.1rem 0.4rem", borderRadius: "0.25rem" }}>{site.site_id ?? `site-${site.id}`}</code></td>
                 <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.8rem" }}>{fmtDt(site.created_at)}</td>
                 <td style={{ padding: "0.5rem 0.6rem" }}>
-                  <button style={btnDanger} onClick={() => setConfirmDelete(site)} disabled={deletingId === site.id}>
-                    {deletingId === site.id ? t("manage.client.sites.deletingBtn") : t("manage.client.sites.deleteBtn")}
-                  </button>
+                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                    <button
+                      style={btnSecondary}
+                     onClick={() => navigate(`/manage/client-orgs/${orgId}/sites/${site.id}`)}
+                    >
+                      View
+                    </button>
+                    <button style={btnDanger} onClick={() => setConfirmDelete(site)} disabled={deletingId === site.id}>
+                      {deletingId === site.id ? t("manage.client.sites.deletingBtn") : t("manage.client.sites.deleteBtn")}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

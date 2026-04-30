@@ -23,6 +23,7 @@ const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const ManageDashboard = lazy(() => import("./pages/ManageDashboard"));
 const ManageClientOrg = lazy(() => import("./pages/ManageClientOrg"));
+const ManageClientSiteView = lazy(() => import("./pages/ManageClientSiteView"));
 
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -103,6 +104,17 @@ const App: React.FC = () => (
               <Layout>
                 <ProtectedRoute allowedOrgTypes={["managing"]}>
                   <ManageClientOrg />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          <Route
+            path="/manage/client-orgs/:orgId/sites/:id"
+            element={
+              <Layout>
+                <ProtectedRoute allowedOrgTypes={["managing"]}>
+                  <ManageClientSiteView />
                 </ProtectedRoute>
               </Layout>
             }

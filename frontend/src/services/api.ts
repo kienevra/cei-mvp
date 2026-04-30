@@ -18,6 +18,17 @@ const api = axios.create({
   withCredentials: true,
 });
 
+// ---------------------------------------------------------------------------
+// Cross-org delegation helpers (for consultant viewing client site data)
+// ---------------------------------------------------------------------------
+export function setDelegatedOrg(clientOrgId: number): void {
+  api.defaults.headers.common["X-CEI-ORG-ID"] = clientOrgId;
+}
+
+export function clearDelegatedOrg(): void {
+  delete api.defaults.headers.common["X-CEI-ORG-ID"];
+}
+
 /* ===== Request-id (observability) helpers ===== */
 
 function getRequestIdFromAxiosError(err: unknown): string | null {
