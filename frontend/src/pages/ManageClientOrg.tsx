@@ -1,4 +1,4 @@
-// frontend/src/pages/ManageClientOrg.tsx
+﻿// frontend/src/pages/ManageClientOrg.tsx
 import React, { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -15,9 +15,9 @@ import {
 } from "../services/manageApi";
 
 function fmtDt(raw: string | null | undefined): string {
-  if (!raw) return "—";
+  if (!raw) return "â€”";
   const d = new Date(raw);
-  if (isNaN(d.getTime())) return "—";
+  if (isNaN(d.getTime())) return "â€”";
   return d.toLocaleString(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
@@ -36,7 +36,7 @@ function DarkModal({ open, title, onClose, children }: { open: boolean; title: s
       <div style={{ background: "rgba(15, 23, 42, 0.99)", border: "1px solid var(--cei-border-subtle)", borderRadius: "0.75rem", padding: "1.5rem", minWidth: "360px", maxWidth: "480px", width: "100%", boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
           <div style={{ fontWeight: 600, fontSize: "1rem" }}>{title}</div>
-          <button onClick={onClose} style={{ background: "transparent", border: "none", color: "var(--cei-text-muted)", cursor: "pointer", fontSize: "1.2rem", padding: "0 0.25rem" }}>×</button>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", color: "var(--cei-text-muted)", cursor: "pointer", fontSize: "1.2rem", padding: "0 0.25rem" }}>Ã—</button>
         </div>
         {children}
       </div>
@@ -118,9 +118,9 @@ function EnergyTab({ orgId }: { orgId: number }) {
         <KpiChip label="Total records" value={report.total_timeseries_records.toLocaleString()} sub="All time" />
         <KpiChip label="Records (24h)" value={report.records_last_24h.toLocaleString()} />
         <KpiChip label="Records (7d)" value={report.records_last_7d.toLocaleString()} />
-        <KpiChip label="Last ingestion" value={report.last_ingestion_at ? fmtDt(report.last_ingestion_at) : "—"} />
-        {cost24h && <KpiChip label="Est. cost (24h)" value={`€${cost24h}`} sub={`@ €${tariff}/kWh`} />}
-        {cost7d && <KpiChip label="Est. cost (7d)" value={`€${cost7d}`} />}
+        <KpiChip label="Last ingestion" value={report.last_ingestion_at ? fmtDt(report.last_ingestion_at) : "â€”"} />
+        {cost24h && <KpiChip label="Est. cost (24h)" value={`â‚¬${cost24h}`} sub={`@ â‚¬${tariff}/kWh`} />}
+        {cost7d && <KpiChip label="Est. cost (7d)" value={`â‚¬${cost7d}`} />}
       </div>
 
       {/* Ingestion status */}
@@ -158,10 +158,10 @@ function EnergyTab({ orgId }: { orgId: number }) {
                   </button>
                 </td>
                   <td style={{ padding: "0.5rem 0.6rem" }}><code style={{ fontSize: "0.78rem", background: "rgba(148,163,184,0.1)", padding: "0.1rem 0.4rem", borderRadius: "0.25rem" }}>{site.site_id ?? `site-${site.id}`}</code></td>
-                  <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</td>
+                  <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "â€”"}</td>
                   <td style={{ padding: "0.5rem 0.6rem" }}>
                     <span style={{ color: hasData ? "var(--cei-green, #22c55e)" : "var(--cei-text-muted)", fontSize: "0.8rem" }}>
-                      {hasData ? "● Active" : "○ No recent data"}
+                      {hasData ? "â— Active" : "â—‹ No recent data"}
                     </span>
                   </td>
                 </tr>
@@ -175,10 +175,10 @@ function EnergyTab({ orgId }: { orgId: number }) {
       <div style={{ borderTop: "1px solid var(--cei-border-subtle)", margin: "1.5rem 0" }} />
       <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Energy pricing</div>
       <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", lineHeight: 1.7 }}>
-        <div><strong>Sources:</strong> {report.primary_energy_sources ?? "—"}</div>
-        <div><strong>Electricity:</strong> {report.electricity_price_per_kwh != null ? `€${report.electricity_price_per_kwh}/kWh` : "Not configured"}</div>
-        <div><strong>Gas:</strong> {report.gas_price_per_kwh != null ? `€${report.gas_price_per_kwh}/kWh` : "Not configured"}</div>
-        <div><strong>Currency:</strong> {report.currency_code ?? "—"}</div>
+        <div><strong>Sources:</strong> {report.primary_energy_sources ?? "â€”"}</div>
+        <div><strong>Electricity:</strong> {report.electricity_price_per_kwh != null ? `â‚¬${report.electricity_price_per_kwh}/kWh` : "Not configured"}</div>
+        <div><strong>Gas:</strong> {report.gas_price_per_kwh != null ? `â‚¬${report.gas_price_per_kwh}/kWh` : "Not configured"}</div>
+        <div><strong>Currency:</strong> {report.currency_code ?? "â€”"}</div>
       </div>
     </div>
   );
@@ -230,9 +230,9 @@ function AlertsTab({ orgId }: { orgId: number }) {
       <div style={{ padding: "1rem", borderRadius: "0.6rem", border: `1px solid ${alertStatusColor}33`, background: `${alertStatusColor}0d`, marginBottom: "1.25rem" }}>
         <div style={{ fontWeight: 600, color: alertStatusColor, marginBottom: "0.3rem" }}>
           {report.open_alerts === 0
-            ? "✓ No open alerts"
+            ? "âœ“ No open alerts"
             : report.critical_alerts > 0
-            ? `⚠ ${report.critical_alerts} critical alert${report.critical_alerts > 1 ? "s" : ""} require attention`
+            ? `âš  ${report.critical_alerts} critical alert${report.critical_alerts > 1 ? "s" : ""} require attention`
             : `${report.open_alerts} open alert${report.open_alerts > 1 ? "s" : ""}`}
         </div>
         <div style={{ fontSize: "0.82rem", color: "var(--cei-text-muted)" }}>
@@ -300,12 +300,12 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: "0.75rem" }}>
         <div style={{ fontWeight: 600 }}>7-day portfolio report</div>
         <button style={btnPrimary} onClick={handleDownload} disabled={downloading}>
-          {downloading ? "Downloading…" : "↓ Download PDF report"}
+          {downloading ? "Downloadingâ€¦" : "â†“ Download PDF report"}
         </button>
       </div>
 
       <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", marginBottom: "1.25rem" }}>
-        Generated: {fmtDt(report.generated_at)} · Managing org: {report.managing_org_name}
+        Generated: {fmtDt(report.generated_at)} Â· Managing org: {report.managing_org_name}
       </div>
 
       {/* Summary KPIs */}
@@ -320,7 +320,7 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
         <KpiChip label="Critical alerts" value={report.critical_alerts} />
         <KpiChip label="Users" value={report.total_users} />
         <KpiChip label="Active tokens" value={report.active_tokens} />
-        {totalCostEst && <KpiChip label="Est. cost (7d)" value={`€${totalCostEst}`} sub={`@ €${tariff}/kWh`} />}
+        {totalCostEst && <KpiChip label="Est. cost (7d)" value={`â‚¬${totalCostEst}`} sub={`@ â‚¬${tariff}/kWh`} />}
       </div>
 
       {/* Sites breakdown */}
@@ -343,10 +343,10 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
                 <tr key={site.id} style={{ background: idx % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)" }}>
                   <td style={{ padding: "0.5rem 0.6rem", fontWeight: 500 }}>{site.name}</td>
                   <td style={{ padding: "0.5rem 0.6rem" }}><code style={{ fontSize: "0.78rem", background: "rgba(148,163,184,0.1)", padding: "0.1rem 0.4rem", borderRadius: "0.25rem" }}>{site.site_id ?? `site-${site.id}`}</code></td>
-                  <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</td>
+                  <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "â€”"}</td>
                   <td style={{ padding: "0.5rem 0.6rem" }}>
                     <span style={{ color: active ? "var(--cei-green, #22c55e)" : "var(--cei-text-muted)", fontSize: "0.8rem" }}>
-                      {active ? "● Active" : "○ Silent"}
+                      {active ? "â— Active" : "â—‹ Silent"}
                     </span>
                   </td>
                 </tr>
@@ -360,9 +360,9 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
       <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Energy configuration</div>
       <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", lineHeight: 1.8, marginBottom: "1.5rem" }}>
         <div><strong>Primary sources:</strong> {report.primary_energy_sources ?? "Not configured"}</div>
-        <div><strong>Electricity tariff:</strong> {report.electricity_price_per_kwh != null ? `€${report.electricity_price_per_kwh}/kWh` : "Not configured"}</div>
-        <div><strong>Gas tariff:</strong> {report.gas_price_per_kwh != null ? `€${report.gas_price_per_kwh}/kWh` : "Not configured"}</div>
-        <div><strong>Currency:</strong> {report.currency_code ?? "—"}</div>
+        <div><strong>Electricity tariff:</strong> {report.electricity_price_per_kwh != null ? `â‚¬${report.electricity_price_per_kwh}/kWh` : "Not configured"}</div>
+        <div><strong>Gas tariff:</strong> {report.gas_price_per_kwh != null ? `â‚¬${report.gas_price_per_kwh}/kWh` : "Not configured"}</div>
+        <div><strong>Currency:</strong> {report.currency_code ?? "â€”"}</div>
       </div>
 
       {/* Recent audit events */}
@@ -416,8 +416,8 @@ function OverviewTab({ org, onSaved }: { org: ClientOrg; onSaved: () => void }) 
     <div>
       <div style={{ fontWeight: 600, marginBottom: "1rem" }}>{t("manage.client.overview.title")}</div>
       {row(t("manage.client.overview.name"), <span style={{ fontSize: "0.9rem" }}>{org.name}</span>)}
-      {row(t("manage.client.overview.plan"), <span style={{ fontSize: "0.9rem" }}>{org.plan_key ?? "—"}</span>)}
-      {row(t("manage.client.overview.status"), <span style={{ fontSize: "0.9rem" }}>{org.subscription_status ?? "—"}</span>)}
+      {row(t("manage.client.overview.plan"), <span style={{ fontSize: "0.9rem" }}>{org.plan_key ?? "â€”"}</span>)}
+      {row(t("manage.client.overview.status"), <span style={{ fontSize: "0.9rem" }}>{org.subscription_status ?? "â€”"}</span>)}
       {row(t("manage.client.overview.created"), <span style={{ fontSize: "0.9rem" }}>{fmtDt(org.created_at)}</span>)}
       <div style={{ borderTop: "1px solid var(--cei-border-subtle)", margin: "1.25rem 0" }} />
       <div style={{ fontWeight: 600, marginBottom: "1rem" }}>{t("manage.client.overview.pricingTitle")}</div>
@@ -508,7 +508,7 @@ function SitesTab({ orgId }: { orgId: number }) {
                     {site.name}
                   </button>
                 </td>
-                <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</td>
+                <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "â€”"}</td>
                 <td style={{ padding: "0.5rem 0.6rem" }}><code style={{ fontSize: "0.78rem", background: "rgba(148,163,184,0.1)", padding: "0.1rem 0.4rem", borderRadius: "0.25rem" }}>{site.site_id ?? `site-${site.id}`}</code></td>
                 <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.8rem" }}>{fmtDt(site.created_at)}</td>
                 <td style={{ padding: "0.5rem 0.6rem" }}>
@@ -700,7 +700,8 @@ function UsersTab({ orgId }: { orgId: number }) {
   const [inviteExpiry, setInviteExpiry] = useState(7);
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
-  const [inviteResult, setInviteResult] = useState<{ token: string; email: string } | null>(null);
+  const [inviteResult, setInviteResult] = useState<{ token: string; email: string; accept_url: string } | null>(null);
+  const [copied, setCopied] = useState<"token" | "link" | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -716,7 +717,7 @@ function UsersTab({ orgId }: { orgId: number }) {
     setInviting(true); setInviteError(null);
     try {
       const result = await inviteClientOrgUser(orgId, { email: inviteEmail.trim(), role: inviteRole, expires_in_days: inviteExpiry });
-      setInviteResult({ token: result.token, email: result.email });
+      setInviteResult({ token: result.token, email: result.email, accept_url: result.accept_url_hint || `${window.location.origin}/login?invite=${result.token}` });
       setShowInvite(false); setInviteEmail(""); load();
     } catch (e: unknown) { setInviteError(toUiMsg(e, t("manage.client.users.errorInvite"))); }
     finally { setInviting(false); }
@@ -737,7 +738,16 @@ function UsersTab({ orgId }: { orgId: number }) {
           <div style={{ fontWeight: 600, color: "var(--cei-green, #22c55e)", marginBottom: "0.4rem" }}>{t("manage.client.users.inviteBanner", { email: inviteResult.email })}</div>
           <code style={{ fontSize: "0.82rem", wordBreak: "break-all", display: "block", marginBottom: "0.6rem" }}>{inviteResult.token}</code>
           <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", marginBottom: "0.6rem" }}>{t("manage.client.users.inviteHint")}</div>
-          <button style={btnSecondary} onClick={() => { navigator.clipboard.writeText(inviteResult.token); }}>{t("manage.client.users.copyToken")}</button>
+<div style={{ fontSize: "0.78rem", marginBottom: "0.6rem" }}>
+  <span style={{ color: "var(--cei-text-muted)" }}>Accept link: </span>
+  <code style={{ fontSize: "0.78rem", wordBreak: "break-all" }}>{inviteResult.accept_url}</code>
+</div>
+          <button style={btnSecondary} onClick={() => { navigator.clipboard.writeText(inviteResult.token); setCopied("token"); setTimeout(() => setCopied(null), 1500); }}>
+            {copied === "token" ? "Copied!" : t("manage.client.users.copyToken")}
+          </button>
+          <button style={{ ...btnSecondary, marginLeft: "0.5rem" }} onClick={() => { navigator.clipboard.writeText(inviteResult.accept_url); setCopied("link"); setTimeout(() => setCopied(null), 1500); }}>
+            {copied === "link" ? "Copied!" : "Copy link"}
+          </button>
           <button style={{ ...btnSecondary, marginLeft: "0.5rem" }} onClick={() => setInviteResult(null)}>{t("manage.client.users.dismissBtn")}</button>
         </div>
       )}
@@ -914,7 +924,7 @@ const ManageClientOrg: React.FC = () => {
           <div>
             <h1 style={{ fontSize: "1.4rem", fontWeight: 600, letterSpacing: "-0.02em" }}>{org?.name ?? t("manage.client.title")}</h1>
             <p style={{ marginTop: "0.3rem", fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
-              {t("manage.client.orgId", { id: orgId })} · {org?.subscription_status ?? "—"} · {org?.currency_code ?? "—"}
+              {t("manage.client.orgId", { id: orgId })} Â· {org?.subscription_status ?? "â€”"} Â· {org?.currency_code ?? "â€”"}
             </p>
           </div>
           <button style={btnSecondary} onClick={handleDownloadPdf} disabled={downloading}>
@@ -943,3 +953,6 @@ const ManageClientOrg: React.FC = () => {
 };
 
 export default ManageClientOrg;
+
+
+

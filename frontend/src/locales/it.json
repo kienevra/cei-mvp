@@ -264,7 +264,10 @@
         "sites": "Siti",
         "tokens": "Token",
         "users": "Utenti",
-        "thresholds": "Soglie"
+        "thresholds": "Soglie",
+        "energy": "Energia",
+        "alerts": "Avvisi",
+        "reports": "Report"
       },
       "overview": {
         "title": "Dettagli organizzazione",

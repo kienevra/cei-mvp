@@ -1,12 +1,12 @@
-# backend/app/api/v1/manage.py
+﻿# backend/app/api/v1/manage.py
 """
-Phase 3 + 4 + 5 — Managing Org CRUD API, Portfolio Dashboard, Role Hardening
+Phase 3 + 4 + 5 --- Managing Org CRUD API, Portfolio Dashboard, Role Hardening
 
 Phase 5 changes:
-  - DELETE client org   → require_role="owner"  (destructive)
-  - DELETE site         → require_role="owner"  (destructive)
-  - DELETE token        → require_role="owner"  (destructive)
-  - All other endpoints → require_role="manager_or_owner" (default)
+  - DELETE client org   --- require_role="owner"  (destructive)
+  - DELETE site         --- require_role="owner"  (destructive)
+  - DELETE token        --- require_role="owner"  (destructive)
+  - All other endpoints --- require_role="manager_or_owner" (default)
   - Subscription status enforced via require_managing_org_dep on every call
 """
 from __future__ import annotations
@@ -57,7 +57,7 @@ def _hash_token(raw: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Schemas — Phase 3
+# Schemas --- Phase 3
 # ---------------------------------------------------------------------------
 
 class ClientOrgCreateIn(BaseModel):
@@ -158,7 +158,7 @@ class ClientOrgUserOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Schemas — Phase 4
+# Schemas --- Phase 4
 # ---------------------------------------------------------------------------
 
 class ClientOrgIngestionStats(BaseModel):
@@ -406,7 +406,7 @@ def get_client_org(
 @router.delete(
     "/client-orgs/{client_org_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    # Phase 5: destructive — owner only
+    # Phase 5: destructive --- owner only
 )
 def delete_client_org(
     client_org_id: int,
@@ -416,7 +416,7 @@ def delete_client_org(
 ) -> Response:
     """
     Delete a client org and all its data.
-    Phase 5: OWNER ONLY — destructive action.
+    Phase 5: OWNER ONLY --- destructive action.
     """
     managing_org_id = _get_managing_org_id(org_context)
     client_org = _get_client_org_or_404(db, client_org_id, managing_org_id)
@@ -473,7 +473,7 @@ def create_client_org_site(
 @router.delete(
     "/client-orgs/{client_org_id}/sites/{site_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    # Phase 5: destructive — owner only
+    # Phase 5: destructive --- owner only
 )
 def delete_client_org_site(
     client_org_id: int,
@@ -484,7 +484,7 @@ def delete_client_org_site(
 ) -> Response:
     """
     Delete a site from a client org.
-    Phase 5: OWNER ONLY — destructive action.
+    Phase 5: OWNER ONLY --- destructive action.
     """
     managing_org_id = _get_managing_org_id(org_context)
     _get_client_org_or_404(db, client_org_id, managing_org_id)
@@ -585,7 +585,7 @@ def create_client_org_integration_token(
 ) -> IntegrationTokenWithSecretOut:
     """
     Create an integration token for a client org. Accessible by owner or manager.
-    Raw token returned ONCE — use with POST /api/v1/timeseries/batch.
+    Raw token returned ONCE --- use with POST /api/v1/timeseries/batch.
     """
     managing_org_id = _get_managing_org_id(org_context)
     _get_client_org_or_404(db, client_org_id, managing_org_id)
@@ -613,7 +613,7 @@ def create_client_org_integration_token(
 @router.delete(
     "/client-orgs/{client_org_id}/integration-tokens/{token_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    # Phase 5: destructive — owner only
+    # Phase 5: destructive --- owner only
 )
 def revoke_client_org_integration_token(
     client_org_id: int,
@@ -624,7 +624,7 @@ def revoke_client_org_integration_token(
 ) -> Response:
     """
     Revoke an integration token for a client org.
-    Phase 5: OWNER ONLY — destructive action.
+    Phase 5: OWNER ONLY --- destructive action.
     """
     managing_org_id = _get_managing_org_id(org_context)
     _get_client_org_or_404(db, client_org_id, managing_org_id)
@@ -677,7 +677,7 @@ def get_portfolio_summary(
     managing_org: Organization = Depends(require_managing_org_dep()),
 ) -> PortfolioSummaryOut:
     """
-    Portfolio overview — all clients, sites, ingestion health, open alerts.
+    Portfolio overview --- all clients, sites, ingestion health, open alerts.
     Accessible by owner or manager.
     """
     managing_org_id = _get_managing_org_id(org_context)
@@ -785,7 +785,7 @@ def get_client_org_report(
     managing_org: Organization = Depends(require_managing_org_dep()),
 ) -> ClientReportOut:
     """
-    Full per-client snapshot — data source for PDF/email reports.
+    Full per-client snapshot --- data source for PDF/email reports.
     Accessible by owner or manager.
     """
     managing_org_id = _get_managing_org_id(org_context)
@@ -1036,7 +1036,7 @@ def get_client_org_report_pdf(
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
-# ── Schemas ──
+# ------ Schemas ------
 
 class LinkRequestOut(BaseModel):
     id: int
@@ -1053,12 +1053,12 @@ class LinkRequestOut(BaseModel):
 
 
 class InitiateLinkIn(BaseModel):
-    """Consultant initiates — provide the standalone org's owner email."""
+    """Consultant initiates --- provide the standalone org's owner email."""
     target_org_email: EmailStr
     message: Optional[str] = None
 
 
-# ── Consultant-side endpoints ──
+# ------ Consultant-side endpoints ------
 
 @router.post(
     "/link-requests",
@@ -1166,9 +1166,9 @@ def list_consultant_link_requests(
         result.append(LinkRequestOut(
             id=req.id,
             managing_org_id=req.managing_org_id,
-            managing_org_name=managing_org.name if managing_org else "—",
+            managing_org_name=managing_org.name if managing_org else "---",
             client_org_id=req.client_org_id,
-            client_org_name=client_org.name if client_org else "—",
+            client_org_name=client_org.name if client_org else "---",
             initiated_by=req.initiated_by,
             status=req.status,
             message=req.message,
@@ -1255,10 +1255,10 @@ def consultant_cancel_link_request(
     db.commit()
 
 
-# ── Shared helpers (add near other helpers in manage.py) ──
+# ------ Shared helpers (add near other helpers in manage.py) ------
 
 def _apply_link(db: Session, req: OrgLinkRequest) -> None:
-    """Accept a link request — link the client org to the managing org."""
+    """Accept a link request --- link the client org to the managing org."""
     client_org = db.get(Organization, req.client_org_id)
     if not client_org:
         raise HTTPException(status_code=404, detail="Client org not found.")
@@ -1276,11 +1276,160 @@ def _req_to_out(db: Session, req: OrgLinkRequest) -> LinkRequestOut:
     return LinkRequestOut(
         id=req.id,
         managing_org_id=req.managing_org_id,
-        managing_org_name=managing_org.name if managing_org else "—",
+        managing_org_name=managing_org.name if managing_org else "---",
         client_org_id=req.client_org_id,
-        client_org_name=client_org.name if client_org else "—",
+        client_org_name=client_org.name if client_org else "---",
         initiated_by=req.initiated_by,
         status=req.status,
         message=req.message,
         created_at=req.created_at,
     )
+
+# ---------------------------------------------------------------------------
+# Phase 6: Consultant invites a user into a client org
+# ---------------------------------------------------------------------------
+
+from app.models import OrgInvite
+from app.services.invites import generate_invite_token, hash_invite_token, normalize_email
+from app.core.email import send_email
+from datetime import timezone as _timezone
+
+
+class ClientOrgInviteIn(BaseModel):
+    email: str
+    role: Optional[str] = "member"
+    expires_in_days: Optional[int] = 7
+    model_config = {"extra": "forbid"}
+
+
+class ClientOrgInviteOut(BaseModel):
+    invite_id: int
+    email: str
+    role: str
+    client_org_id: int
+    client_org_name: str
+    expires_at: datetime
+    token: str
+    accept_url_hint: str
+
+
+@router.post(
+    "/client-orgs/{client_org_id}/invite-user",
+    response_model=ClientOrgInviteOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def invite_user_to_client_org(
+    client_org_id: int,
+    payload: ClientOrgInviteIn,
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+) -> ClientOrgInviteOut:
+    """Consultant invites a user into a client org. Scoped to client_org_id, not the managing org."""
+    managing_org_id = _get_managing_org_id(org_context)
+    client_org = _get_client_org_or_404(db, client_org_id, managing_org_id)
+
+    email_raw = (payload.email or "").strip()
+    if not email_raw or "@" not in email_raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVITE_BAD_EMAIL", "message": "Invalid email address."},
+        )
+    email_norm = normalize_email(email_raw)
+
+    role = (payload.role or "member").strip().lower()
+    if role not in {"member", "owner"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVITE_BAD_ROLE", "message": "role must be 'member' or 'owner'."},
+        )
+
+    expires_days = int(payload.expires_in_days or 7)
+    if not (1 <= expires_days <= 30):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVITE_BAD_EXPIRY", "message": "expires_in_days must be between 1 and 30."},
+        )
+
+    now = datetime.now(_timezone.utc)
+    expires_at = now + timedelta(days=expires_days)
+
+    existing = db.query(OrgInvite).filter(
+        OrgInvite.organization_id == client_org_id,
+        OrgInvite.email == email_norm,
+    ).first()
+
+    raw_token = generate_invite_token()
+    token_hash = hash_invite_token(raw_token)
+
+    if existing:
+        existing.role = role
+        existing.expires_at = expires_at
+        existing.is_active = True
+        existing.revoked_at = None
+        existing.token_hash = token_hash
+        existing.created_by_user_id = _actor_user_id(org_context)
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+        inv = existing
+    else:
+        inv = OrgInvite(
+            organization_id=client_org_id,
+            email=email_norm,
+            token_hash=token_hash,
+            role=role,
+            expires_at=expires_at,
+            is_active=True,
+            created_by_user_id=_actor_user_id(org_context),
+        )
+        db.add(inv)
+        db.commit()
+        db.refresh(inv)
+
+    create_org_audit_event(
+        db,
+        org_id=managing_org_id,
+        user_id=_actor_user_id(org_context),
+        title="Consultant invited user to client org",
+        description=(
+            f"email={email_norm}; invite_id={inv.id}; role={role}; "
+            f"client_org_id={client_org_id}; managing_org_id={managing_org_id}"
+        ),
+    )
+
+    try:
+        from app.core.config import settings as _settings
+        origin = getattr(_settings, "frontend_url", None) or "https://app.carbonefficiencyintel.com"
+        invite_link = f"{origin}/login?invite={raw_token}"
+        invited_by = getattr(org_context.user, "email", managing_org.name) if org_context.user else managing_org.name
+        send_email(
+            to_email=email_norm,
+            subject=f"You've been invited to join {client_org.name} on CEI",
+            text_body=(
+                f"Hi,\n\n{invited_by} has invited you to join {client_org.name} on CEI "
+                f"as a {role}.\n\nAccept your invite:\n{invite_link}\n\n"
+                f"This invite expires in {expires_days} day(s).\n\n- The CEI Team"
+            ),
+            html_body=(
+                f"<p><strong>{invited_by}</strong> has invited you to join "
+                f"<strong>{client_org.name}</strong> on CEI as a <strong>{role}</strong>.</p>"
+                f'<p><a href="{invite_link}">Accept invite</a></p>'
+                f"<p>Expires in {expires_days} day(s).</p>"
+            ),
+        )
+        origin_hint = origin
+    except Exception:
+        origin_hint = "https://app.carbonefficiencyintel.com"
+
+    return ClientOrgInviteOut(
+        invite_id=inv.id,
+        email=email_raw,
+        role=role,
+        client_org_id=client_org_id,
+        client_org_name=client_org.name,
+        expires_at=expires_at,
+        token=raw_token,
+        accept_url_hint=f"{origin_hint}/login?invite={raw_token}",
+    )
+

@@ -238,6 +238,30 @@ def get_current_user(
     # Global enforcement: revoked users cannot hit any protected endpoint
     _ensure_user_active(user)
 
+    try:
+        set_auth_context(
+            auth_type="user",
+            org_id=getattr(user, "organization_id", None),
+            user_id=getattr(user, "id", None),
+        )
+    except Exception:
+        pass
+    try:
+        set_auth_context(
+            auth_type="user",
+            org_id=getattr(user, "organization_id", None),
+            user_id=getattr(user, "id", None),
+        )
+    except Exception:
+        pass
+    try:
+        set_auth_context(
+            auth_type="user",
+            org_id=getattr(user, "organization_id", None),
+            user_id=getattr(user, "id", None),
+        )
+    except Exception:
+        pass
     return user
 
 
@@ -363,6 +387,33 @@ def get_org_context(
             target_org_id=x_cei_org_id,
         )
 
+        try:
+            set_auth_context(
+                auth_type=resolved_auth_type,
+                org_id=x_cei_org_id,
+                user_id=getattr(resolved_user, "id", None),
+                integration_token_id=resolved_token_id,
+            )
+        except Exception:
+            pass
+        try:
+            set_auth_context(
+                auth_type=resolved_auth_type,
+                org_id=x_cei_org_id,
+                user_id=getattr(resolved_user, "id", None),
+                integration_token_id=resolved_token_id,
+            )
+        except Exception:
+            pass
+        try:
+            set_auth_context(
+                auth_type=resolved_auth_type,
+                org_id=x_cei_org_id,
+                user_id=getattr(resolved_user, "id", None),
+                integration_token_id=resolved_token_id,
+            )
+        except Exception:
+            pass
         return OrgContext(
             organization_id=x_cei_org_id,       # effective target: the client org
             user=resolved_user,
@@ -375,6 +426,33 @@ def get_org_context(
     # ------------------------------------------------------------------
     # No delegation: standard single-org context (fully backward-compatible)
     # ------------------------------------------------------------------
+    try:
+        set_auth_context(
+            auth_type=resolved_auth_type,
+            org_id=auth_org_id,
+            user_id=getattr(resolved_user, "id", None),
+            integration_token_id=resolved_token_id,
+        )
+    except Exception:
+        pass
+    try:
+        set_auth_context(
+            auth_type=resolved_auth_type,
+            org_id=auth_org_id,
+            user_id=getattr(resolved_user, "id", None),
+            integration_token_id=resolved_token_id,
+        )
+    except Exception:
+        pass
+    try:
+        set_auth_context(
+            auth_type=resolved_auth_type,
+            org_id=auth_org_id,
+            user_id=getattr(resolved_user, "id", None),
+            integration_token_id=resolved_token_id,
+        )
+    except Exception:
+        pass
     return OrgContext(
         organization_id=auth_org_id,
         user=resolved_user,

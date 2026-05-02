@@ -78,3 +78,21 @@ def get_db_metrics_snapshot() -> Dict[str, Any]:
         "db_slowest_ms": float(m.slowest_ms),
         "db_slowest_sql": (m.slowest_sql_head or ""),
     }
+
+
+# --- Auth context (request-scoped) ---
+auth_context_var: ContextVar[Optional[Dict[str, Any]]] = ContextVar('cei_auth_context', default=None)
+
+def set_auth_context(auth_type: str, org_id: Optional[int], user_id: Optional[int], integration_token_id: Optional[int] = None) -> None:
+    auth_context_var.set({
+        'auth_type': auth_type,
+        'org_id': org_id,
+        'user_id': user_id,
+        'integration_token_id': integration_token_id,
+    })
+
+def get_auth_context_snapshot() -> Dict[str, Any]:
+    return auth_context_var.get() or {}
+
+def clear_auth_context() -> None:
+    auth_context_var.set(None)

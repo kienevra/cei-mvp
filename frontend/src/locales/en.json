@@ -264,7 +264,10 @@
         "sites": "Sites",
         "tokens": "Tokens",
         "users": "Users",
-        "thresholds": "Thresholds"
+        "thresholds": "Thresholds",
+        "energy": "Energy",
+        "alerts": "Alerts",
+        "reports": "Reports"
       },
       "overview": {
         "title": "Organization details",

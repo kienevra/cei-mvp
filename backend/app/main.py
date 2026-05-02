@@ -238,17 +238,44 @@ async def request_observability(request: Request, call_next):
 
         slow_db_total_ms = float(getattr(settings, "slow_db_total_ms", 800.0))
 
-        # Pull auth context late (dependencies run during request handling)
-        auth_snap = {}
+        # Pull auth context directly from Authorization header
+        auth_type = "unknown"
+        org_id = None
+        user_id = None
+        itok_id = None
         try:
-            auth_snap = get_auth_context_snapshot() or {}
+            from app.db.session import SessionLocal as _SL
+            from app.models import User as _User, IntegrationToken as _ITok
+            from app.core.security import decode_jwt as _decode_jwt, _hash_token as _ht
+            _auth_header = request.headers.get("authorization", "")
+            _token = _auth_header.replace("Bearer ", "").replace("bearer ", "").strip()
+            if _token:
+                if _token.startswith("cei_int_"):
+                    _db = _SL()
+                    try:
+                        _itok = _db.query(_ITok).filter(_ITok.token_hash == _ht(_token), _ITok.is_active.is_(True)).first()
+                        if _itok:
+                            auth_type = "integration"
+                            org_id = getattr(_itok, "organization_id", None)
+                            itok_id = getattr(_itok, "id", None)
+                    finally:
+                        _db.close()
+                else:
+                    _payload = _decode_jwt(_token)
+                    if _payload.get("type", "access") == "access":
+                        _email = _payload.get("sub")
+                        if _email:
+                            _db = _SL()
+                            try:
+                                _u = _db.query(_User).filter(_User.email == str(_email).strip().lower()).first()
+                                if _u:
+                                    auth_type = "user"
+                                    org_id = getattr(_u, "organization_id", None)
+                                    user_id = getattr(_u, "id", None)
+                            finally:
+                                _db.close()
         except Exception:
-            auth_snap = {}
-
-        auth_type = auth_snap.get("auth_type", "unknown")
-        org_id = auth_snap.get("org_id", None)
-        itok_id = auth_snap.get("integration_token_id", None)
-        user_id = auth_snap.get("user_id", None)
+            pass
 
         log_fn = logger.warning if duration_ms >= float(SLOW_HTTP_MS) else logger.info
         log_fn(
