@@ -183,6 +183,17 @@ export async function downloadClientReport(clientOrgId: number): Promise<void> {
 // Client org CRUD
 // ---------------------------------------------------------------------------
 
+export async function createClientOrg(payload: {
+  name: string;
+  primary_energy_sources?: string;
+  electricity_price_per_kwh?: number | null;
+  gas_price_per_kwh?: number | null;
+  currency_code?: string;
+}): Promise<ClientOrg> {
+  const resp = await api.post("/manage/client-orgs", payload);
+  return resp.data as ClientOrg;
+}
+
 export async function getClientOrg(clientOrgId: number): Promise<ClientOrg> {
   const resp = await api.get(`/manage/client-orgs/${clientOrgId}`);
   return resp.data as ClientOrg;

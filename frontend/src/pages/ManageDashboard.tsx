@@ -10,6 +10,7 @@ import {
   getPortfolioAnalytics,
   getOnboardingStatus,
   downloadClientReport,
+  createClientOrg,
   type PortfolioSummary,
   type PortfolioAnalytics,
   type OnboardingStatus,
@@ -47,9 +48,9 @@ function StatCard({ label, value, sub, accent }: { label: string; value: string 
   );
 }
 
-function SectionHeading({ children }: { children: React.ReactNode }) {
+function SectionHeading({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <h2 style={{ fontSize: "0.85rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--cei-text-muted)", margin: "1.5rem 0 0.75rem" }}>
+    <h2 style={{ fontSize: "0.85rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--cei-text-muted)", margin: "1.5rem 0 0.75rem", ...style }}>
       {children}
     </h2>
   );
@@ -184,6 +185,38 @@ const ManageDashboard: React.FC = () => {
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
   const [downloading, setDownloading] = useState<number | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [showCreateOrg, setShowCreateOrg] = useState(false);
+  const [newOrgName, setNewOrgName] = useState("");
+  const [newOrgSources, setNewOrgSources] = useState("");
+  const [newOrgCurrency, setNewOrgCurrency] = useState("EUR");
+  const [creatingOrg, setCreatingOrg] = useState(false);
+  const [createOrgError, setCreateOrgError] = useState<string | null>(null);
+
+  const handleCreateOrg = async () => {
+    if (!newOrgName.trim()) return;
+    setCreatingOrg(true);
+    setCreateOrgError(null);
+    try {
+      const org = await createClientOrg({
+        name: newOrgName.trim(),
+        primary_energy_sources: newOrgSources.trim() || undefined,
+        currency_code: newOrgCurrency.trim().toUpperCase() || undefined,
+      });
+      setShowCreateOrg(false);
+      setNewOrgName("");
+      setNewOrgSources("");
+      setNewOrgCurrency("EUR");
+      const [s, o] = await Promise.all([getPortfolioSummary(), getOnboardingStatus()]);
+      setSummary(s);
+      setOnboarding(o);
+      navigate(`/manage/client-orgs/${org.id}`);
+    } catch (e: unknown) {
+      const err = e as any;
+      setCreateOrgError(err?.response?.data?.message ?? err?.message ?? "Failed to create organization.");
+    } finally {
+      setCreatingOrg(false);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -277,7 +310,15 @@ const ManageDashboard: React.FC = () => {
         </section>
       )}
 
-      <SectionHeading>{t("manage.clients.title")}</SectionHeading>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "1.5rem", marginBottom: "0.75rem" }}>
+        <SectionHeading style={{ margin: 0 }}>{t("manage.clients.title")}</SectionHeading>
+        <button
+          onClick={() => setShowCreateOrg(true)}
+          style={{ padding: "0.45rem 1.1rem", borderRadius: "999px", border: "none", background: "var(--cei-green, #22c55e)", color: "#0f172a", fontWeight: 600, fontSize: "0.82rem", cursor: "pointer" }}
+        >
+          + Add client org
+        </button>
+      </div>
 
       {summary ? (
         <div className="cei-card" style={{ padding: 0, overflow: "hidden" }}>
@@ -307,6 +348,42 @@ const ManageDashboard: React.FC = () => {
           </div>
         </>
       )}
+    {showCreateOrg && (
+      <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
+        onClick={(e) => { if (e.target === e.currentTarget) setShowCreateOrg(false); }}>
+        <div style={{ background: "rgba(15, 23, 42, 0.99)", border: "1px solid var(--cei-border-subtle)", borderRadius: "0.75rem", padding: "1.5rem", minWidth: "360px", maxWidth: "480px", width: "100%", boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+            <div style={{ fontWeight: 600, fontSize: "1rem" }}>Add client organization</div>
+            <button onClick={() => setShowCreateOrg(false)} style={{ background: "transparent", border: "none", color: "var(--cei-text-muted)", cursor: "pointer", fontSize: "1.2rem" }}>×</button>
+          </div>
+          {createOrgError && <div style={{ color: "var(--cei-red, #ef4444)", fontSize: "0.82rem", marginBottom: "0.75rem" }}>{createOrgError}</div>}
+          <div style={{ marginBottom: "0.75rem" }}>
+            <label style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", display: "block", marginBottom: "0.3rem" }}>Organization name *</label>
+            <input style={{ width: "100%", padding: "0.5rem 0.75rem", borderRadius: "0.4rem", border: "1px solid var(--cei-border-subtle)", background: "rgba(148,163,184,0.07)", color: "var(--cei-text-main)", fontSize: "0.875rem", boxSizing: "border-box", outline: "none" }}
+              value={newOrgName} onChange={(e) => setNewOrgName(e.target.value)} placeholder="e.g. Ceramica Rossi Srl" autoFocus />
+          </div>
+          <div style={{ marginBottom: "0.75rem" }}>
+            <label style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", display: "block", marginBottom: "0.3rem" }}>Primary energy sources</label>
+            <input style={{ width: "100%", padding: "0.5rem 0.75rem", borderRadius: "0.4rem", border: "1px solid var(--cei-border-subtle)", background: "rgba(148,163,184,0.07)", color: "var(--cei-text-main)", fontSize: "0.875rem", boxSizing: "border-box", outline: "none" }}
+              value={newOrgSources} onChange={(e) => setNewOrgSources(e.target.value)} placeholder="e.g. electricity, gas" />
+          </div>
+          <div style={{ marginBottom: "1rem" }}>
+            <label style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", display: "block", marginBottom: "0.3rem" }}>Currency</label>
+            <input style={{ width: "100px", padding: "0.5rem 0.75rem", borderRadius: "0.4rem", border: "1px solid var(--cei-border-subtle)", background: "rgba(148,163,184,0.07)", color: "var(--cei-text-main)", fontSize: "0.875rem", boxSizing: "border-box", outline: "none" }}
+              value={newOrgCurrency} onChange={(e) => setNewOrgCurrency(e.target.value)} maxLength={3} placeholder="EUR" />
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+            <button onClick={() => setShowCreateOrg(false)} style={{ padding: "0.45rem 1.1rem", borderRadius: "999px", border: "1px solid var(--cei-border-subtle)", background: "transparent", color: "var(--cei-text-muted)", fontSize: "0.82rem", cursor: "pointer" }}>
+              Cancel
+            </button>
+            <button onClick={handleCreateOrg} disabled={creatingOrg || !newOrgName.trim()}
+              style={{ padding: "0.45rem 1.1rem", borderRadius: "999px", border: "none", background: "var(--cei-green, #22c55e)", color: "#0f172a", fontWeight: 600, fontSize: "0.82rem", cursor: creatingOrg || !newOrgName.trim() ? "not-allowed" : "pointer", opacity: creatingOrg || !newOrgName.trim() ? 0.6 : 1 }}>
+              {creatingOrg ? "Creating…" : "Create organization"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </div>
   );
 };
