@@ -4,8 +4,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/useAuth";
 import ErrorBanner from "../components/ErrorBanner";
-import api, { acceptInvite, upgradeToManaging } from "../services/api";
+import api, { acceptInvite, upgradeToManaging, startCheckout } from "../services/api";
 import LanguageToggle from "../components/LanguageToggle";
+import PricingCards from "../components/PricingCards";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -98,6 +99,47 @@ const REG_OPTIONS: { type: Exclude<RegType, null>; icon: string; titleKey: strin
 // Component
 // ---------------------------------------------------------------------------
 
+
+// ---------------------------------------------------------------------------
+// Pricing tab switcher (shown on signup step 1)
+// ---------------------------------------------------------------------------
+
+const PricingTabSwitcher: React.FC<{ onPlanSelect?: (plan: string) => void; selectedPlan?: string | null }> = ({ onPlanSelect, selectedPlan }) => {
+  const [tab, setTab] = React.useState<"factory" | "esco">("factory");
+  return (
+    <div style={{ marginTop: "1.5rem", borderTop: "1px solid var(--cei-border-subtle, rgba(148,163,184,0.2))", paddingTop: "1.25rem" }}>
+      <p style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--cei-text-muted)", marginBottom: "0.6rem", textAlign: "center" }}>
+        Piani disponibili
+      </p>
+      <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.85rem", justifyContent: "center" }}>
+        {(["factory", "esco"] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setTab(v)}
+            style={{
+              padding: "0.3rem 0.85rem",
+              borderRadius: "999px",
+              border: "1px solid var(--cei-border-subtle, rgba(148,163,184,0.2))",
+              background: tab === v ? "rgba(34,197,94,0.15)" : "transparent",
+              color: tab === v ? "var(--cei-green, #22c55e)" : "var(--cei-text-muted, #94a3b8)",
+              fontSize: "0.78rem",
+              fontWeight: tab === v ? 600 : 400,
+              cursor: "pointer",
+            }}
+          >
+            {v === "factory" ? "Per organizzazioni" : "Per ESCO / consulenti"}
+          </button>
+        ))}
+      </div>
+      <PricingCards variant={tab} compact selectedPlan={selectedPlan} onSelectPlan={onPlanSelect} />
+      <p style={{ fontSize: "0.68rem", color: "var(--cei-text-muted, #94a3b8)", marginTop: "0.6rem", textAlign: "center" }}>
+        {selectedPlan ? "✓ Piano selezionato — continua con la registrazione sopra" : "Seleziona un piano · 30 giorni gratuiti · Nessuna carta richiesta"}
+      </p>
+    </div>
+  );
+};
+
 const Login: React.FC = () => {
   const { t } = useTranslation();
   const { login, isAuthenticated } = useAuth();
@@ -126,6 +168,7 @@ const Login: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -229,10 +272,22 @@ const Login: React.FC = () => {
         // Upgrade to managing if ESCO
         if (regType === "manager") {
           try { await upgradeToManaging(null); } catch { /* non-fatal, user can upgrade later */ }
+          if (selectedPlan) {
+            try {
+              const { url } = await startCheckout(selectedPlan);
+              if (url) { window.location.href = url; return; }
+            } catch { /* Stripe not configured yet, fall through */ }
+          }
           window.location.href = "/manage";
           return;
         }
-        // Standard org lands on dashboard — login() will redirect
+        // Standard org: redirect to Stripe if plan selected, else dashboard
+        if (selectedPlan) {
+          try {
+            const { url } = await startCheckout(selectedPlan);
+            if (url) { window.location.href = url; return; }
+          } catch { /* Stripe not configured yet, fall through */ }
+        }
         return;
       }
 
@@ -401,6 +456,7 @@ const Login: React.FC = () => {
                   </div>
                 </button>
               ))}
+
             </div>
           )}
 
@@ -418,6 +474,22 @@ const Login: React.FC = () => {
                   ? t("signup.selfSignup.managerSubtitle", { defaultValue: "Your account will be set up as an energy management firm. You can add client organizations from the Manage dashboard." })
                   : t("signup.selfSignup.orgSubtitle", { defaultValue: "Your account will be set up as a standalone organization with full access to sites, alerts, and reports." })}
               </p>
+
+              {/* ── Plan selection ── */}
+              <div style={{ marginBottom: "1rem" }}>
+                <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--cei-text-muted)", marginBottom: "0.6rem" }}>
+                  Seleziona un piano
+                </div>
+                <PricingCards
+                  variant={regType === "manager" ? "esco" : "factory"}
+                  compact
+                  selectedPlan={selectedPlan}
+                  onSelectPlan={setSelectedPlan}
+                />
+                <p style={{ fontSize: "0.68rem", color: "var(--cei-text-muted, #94a3b8)", marginTop: "0.5rem" }}>
+                  {selectedPlan ? "✓ Piano selezionato" : "Nessun piano selezionato — potrai scegliere dopo la registrazione"}
+                </p>
+              </div>
 
               <div>
                 <label htmlFor="organizationName">

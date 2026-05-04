@@ -21,6 +21,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import type { AccountMe, OrganizationSummary } from "../types/auth";
 import ConnectConsultant from "../components/ConnectConsultant";
 import { useAuth } from "../hooks/useAuth";
+import PricingCards from "../components/PricingCards";
 // Read environment once from Vite
 const rawEnv = (import.meta as any).env || {};
 const appEnvironment: string =
@@ -927,11 +928,10 @@ const Account: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ marginTop: "0.8rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-            <ul style={{ margin: 0, paddingLeft: "1.1rem", lineHeight: 1.6 }}>
-              <li>{t("account.subscription.bullets.starter")}</li>
-              <li>{t("account.subscription.bullets.growth")}</li>
-            </ul>
+          <div style={{ marginTop: "0.85rem" }}>
+            <PricingCards
+              variant={orgLike?.org_type === "managing" ? "esco" : "factory"}
+            />
           </div>
 
           {/* Owner-only subscription management */}

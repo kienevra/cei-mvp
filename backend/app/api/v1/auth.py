@@ -241,7 +241,154 @@ def _normalize_user_role(*, user: User) -> str:
 def _require_owner(user: User) -> None:
     require_owner(user, message="Only the organization owner can manage organization invites.")
 
+# ---------------------------------------------------------------------------
+# Signup
+# ---------------------------------------------------------------------------
 
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    full_name: Optional[str] = None
+    organization_name: Optional[str] = None
+    primary_energy_sources: Optional[str] = None
+    electricity_price_per_kwh: Optional[float] = None
+    gas_price_per_kwh: Optional[float] = None
+    currency_code: Optional[str] = None
+
+
+@router.post(
+    "/signup",
+    response_model=Token,
+    dependencies=[Depends(login_rate_limit)],
+)
+def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) -> Token:
+    """Self-serve signup — creates org + owner account."""
+    email_norm = (user.email or "").strip().lower()
+    if not email_norm:
+        raise HTTPException(status_code=400, detail="Email is required")
+    if db.query(User).filter(User.email == email_norm).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    org_name = (user.organization_name or "").strip()
+    if not org_name:
+        org_name = email_norm.split("@")[0] + " Org"
+
+    if db.query(Organization).filter(Organization.name == org_name).first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "ORG_NAME_TAKEN", "message": "Organization name already exists."},
+        )
+
+    org = Organization(
+        name=org_name,
+        plan_key="cei-starter",
+        subscription_plan_key="cei-starter",
+        subscription_status="active",
+        enable_alerts=True,
+        enable_reports=True,
+    )
+    # Tariff config set later via Account settings
+
+    db.add(org)
+    db.flush()
+
+    hashed_password = pwd_context.hash(str(user.password))
+    db_user = User(
+        email=email_norm,
+        hashed_password=hashed_password,
+        organization_id=org.id,
+        role="owner",
+    )
+    if user.full_name:
+        db_user.full_name = user.full_name
+
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+
+    create_org_audit_event(
+        db,
+        org_id=org.id,
+        user_id=getattr(db_user, "id", None),
+        title="Organization created",
+        description=f"name={org.name}; owner_email={db_user.email}",
+    )
+
+    access = create_access_token({"sub": db_user.email})
+    refresh = create_refresh_token({"sub": db_user.email})
+    _set_refresh_cookie(response, refresh)
+    return Token(access_token=access, token_type="bearer")
+
+
+
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    full_name: Optional[str] = None
+    organization_name: Optional[str] = None
+    org_type: Optional[str] = None  # "managing" or "standalone"
+
+
+@router.post("/signup", response_model=Token, dependencies=[Depends(login_rate_limit)])
+def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) -> Token:
+    """Self-serve signup. Creates org + owner user."""
+    email_norm = (user.email or "").strip().lower()
+    if not email_norm:
+        raise HTTPException(status_code=400, detail="Email is required")
+    if db.query(User).filter(User.email == email_norm).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    org_name = (user.organization_name or "").strip()
+    if not org_name:
+        org_name = email_norm.split("@")[0] + " Org"
+
+    if db.query(Organization).filter(Organization.name == org_name).first():
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ORG_NAME_TAKEN", "message": "Organization name already exists."},
+        )
+
+    org = Organization(name=org_name)
+    # Set org_type if provided
+    try:
+        if user.org_type == "managing":
+            org.org_type = "managing"
+        else:
+            org.org_type = "standalone"
+    except Exception:
+        pass
+    for k, v in [("plan_key", "cei-starter"), ("subscription_plan_key", "cei-starter"),
+                 ("enable_alerts", True), ("enable_reports", True), ("subscription_status", "active")]:
+        try:
+            setattr(org, k, v)
+        except Exception:
+            pass
+    db.add(org)
+    db.flush()
+
+    hashed_password = pwd_context.hash(str(user.password))
+    db_user = User(email=email_norm, hashed_password=hashed_password,
+                   organization_id=org.id)
+    try:
+        db_user.role = "owner"
+    except Exception:
+        pass
+    if user.full_name:
+        try:
+            db_user.full_name = user.full_name
+        except Exception:
+            pass
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+
+    create_org_audit_event(db, org_id=org.id, user_id=getattr(db_user, "id", None),
+                           title="Organization created", description=f"name={org.name}; owner={email_norm}")
+
+    access = create_access_token({"sub": db_user.email})
+    refresh = create_refresh_token({"sub": db_user.email})
+    _set_refresh_cookie(response, refresh)
+    return Token(access_token=access, token_type="bearer")
 
 
 @router.post(
