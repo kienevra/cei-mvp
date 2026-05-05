@@ -23,6 +23,7 @@ from app.services.analytics import (
 )
 
 from app.services.forecast import compute_site_forecast_prophet
+from app.services.baseline_drift import compute_baseline_drift, BaselineDriftReport
 
 logger = logging.getLogger("cei")
 
@@ -135,6 +136,40 @@ class SiteForecastOut(BaseModel):
     baseline_confidence_level: Optional[str] = None
 
     points: List[ForecastPointOut]
+
+
+class BucketDriftOut(BaseModel):
+    hour_of_day: int
+    is_weekend: bool
+    reference_mean_kwh: float
+    recent_mean_kwh: float
+    drift_pct: float
+    drift_kwh: float
+    consistent_days: int
+    severity: str
+
+
+class BaselineDriftOut(BaseModel):
+    site_id: str
+    generated_at: str
+    reference_window_days: int
+    recent_window_days: int
+    reference_n_points: int
+    recent_n_points: int
+    overall_drift_pct: float
+    overall_drift_kwh_per_hour: float
+    has_warning: bool
+    has_critical: bool
+    drift_direction: str
+    drifted_buckets: List[BucketDriftOut]
+    est_annual_excess_kwh: float
+    est_annual_cost_impact: float
+    est_co2_impact_tons: float
+    currency_code: str
+    electricity_price_per_kwh: Optional[float]
+    summary: str
+    confidence_level: str
+    is_warming_up: bool
 
 
 class SiteKpiOut(BaseModel):
@@ -909,6 +944,97 @@ def get_site_kpi(
         currency_code=currency_code,
     )
 
+
+
+@router.get(
+    "/sites/{site_id}/baseline-drift",
+    response_model=BaselineDriftOut,
+    status_code=200,
+)
+def get_baseline_drift(
+    site_id: str,
+    db: Session = Depends(get_db),
+    org_ctx: OrgContext = Depends(get_org_context),
+) -> BaselineDriftOut:
+    """
+    Detect persistent baseline drift for a site.
+
+    Compares the last 7 days against the prior 8–30 day reference period.
+    Flags hours where recent consumption is consistently above or below
+    the reference baseline, with cost and CO2 impact estimates.
+
+    Used to answer: "Has the energy pattern changed, and should we update
+    the baseline or fix the underlying problem?"
+    """
+    org_id, _ = _resolve_org_context_from_ctx(org_ctx)
+    site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
+    allowed_site_ids = _get_allowed_site_ids(db, org_id)
+
+    # Fetch org tariff for cost impact
+    electricity_price: Optional[float] = None
+    currency_code: str = "EUR"
+    if org_id is not None:
+        try:
+            org = db.query(core_models.Organization).filter(
+                core_models.Organization.id == org_id
+            ).first()
+            if org:
+                v = getattr(org, "electricity_price_per_kwh", None)
+                electricity_price = float(v) if v is not None else None
+                cc = getattr(org, "currency_code", None)
+                currency_code = str(cc) if cc else "EUR"
+        except Exception:
+            pass
+
+    report = compute_baseline_drift(
+        db=db,
+        site_id=site_id_canon,
+        organization_id=org_id,
+        allowed_site_ids=sorted(list(allowed_site_ids)) if allowed_site_ids else None,
+        electricity_price_per_kwh=electricity_price,
+        currency_code=currency_code,
+    )
+
+    if report is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Insufficient data for drift detection. Need at least 8 days of history.",
+        )
+
+    return BaselineDriftOut(
+        site_id=report.site_id,
+        generated_at=report.generated_at,
+        reference_window_days=report.reference_window_days,
+        recent_window_days=report.recent_window_days,
+        reference_n_points=report.reference_n_points,
+        recent_n_points=report.recent_n_points,
+        overall_drift_pct=report.overall_drift_pct,
+        overall_drift_kwh_per_hour=report.overall_drift_kwh_per_hour,
+        has_warning=report.has_warning,
+        has_critical=report.has_critical,
+        drift_direction=report.drift_direction,
+        drifted_buckets=[
+            BucketDriftOut(
+                hour_of_day=b.hour_of_day,
+                is_weekend=b.is_weekend,
+                reference_mean_kwh=b.reference_mean_kwh,
+                recent_mean_kwh=b.recent_mean_kwh,
+                drift_pct=b.drift_pct,
+                drift_kwh=b.drift_kwh,
+                consistent_days=b.consistent_days,
+                severity=b.severity,
+            )
+            for b in report.drifted_buckets
+        ],
+        est_annual_excess_kwh=report.est_annual_excess_kwh,
+        est_annual_cost_impact=report.est_annual_cost_impact,
+        est_co2_impact_tons=report.est_co2_impact_tons,
+        currency_code=report.currency_code,
+        electricity_price_per_kwh=report.electricity_price_per_kwh,
+        summary=report.summary,
+        confidence_level=report.confidence_level,
+        is_warming_up=report.is_warming_up,
+    )
 
 @router.get(
     "/sites/{site_id}/forecast",
