@@ -22,6 +22,8 @@ from app.services.analytics import (
     compute_site_forecast_stub,
 )
 
+from app.services.forecast import compute_site_forecast_prophet
+
 logger = logging.getLogger("cei")
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -941,7 +943,7 @@ def get_site_forecast(
     site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
     allowed_site_ids = _get_allowed_site_ids(db, org_id)
 
-    forecast = compute_site_forecast_stub(
+    forecast = compute_site_forecast_prophet(
         db=db,
         site_id=site_id_canon,
         history_window_hours=history_window_hours,
