@@ -1000,7 +1000,7 @@ def _generate_alerts_for_window(
         last_ts = row.last_ts or now
         site_name = site_name_map.get(sid)
 
-        thresholds = get_thresholds_for_org_site(db, org_id, sid)
+        thresholds = get_thresholds_for_org_site(db, organization_id, sid)
 
         if points < thresholds.min_points or total_value <= thresholds.min_total_kwh:
             continue

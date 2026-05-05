@@ -2,20 +2,19 @@
 import React, { useMemo, useState } from "react";
 
 interface ErrorBannerProps {
-  message: string;
+  message: string | any;
   onClose?: () => void;
 }
 
-function splitSupportCode(message: string): { main: string; supportCode: string | null } {
-  if (!message) return { main: "", supportCode: null };
-
-  // Expected suffix format appended by api.ts:
-  // "... (Support code: <request_id>)"
-  const match = message.match(/\(Support code:\s*([^)]+)\)\s*$/i);
-  if (!match) return { main: message, supportCode: null };
-
+function splitSupportCode(message: string | any): { main: string; supportCode: string | null } {
+  const msg = typeof message === "string"
+    ? message
+    : (message?.message ?? JSON.stringify(message) ?? "");
+  if (!msg) return { main: "", supportCode: null };
+  const match = msg.match(/\(Support code:\s*([^)]+)\)\s*$/i);
+  if (!match) return { main: msg, supportCode: null };
   const supportCode = match[1]?.trim() || null;
-  const main = message.replace(/\s*\(Support code:\s*([^)]+)\)\s*$/i, "").trim();
+  const main = msg.replace(/\s*\(Support code:\s*([^)]+)\)\s*$/i, "").trim();
   return { main, supportCode };
 }
 
@@ -35,7 +34,7 @@ const ErrorBanner: React.FC<ErrorBannerProps> = ({ message, onClose }) => {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
     } catch {
-      // If clipboard is blocked, do nothing (no noisy errors for pilots)
+      // ignore
     }
   };
 
@@ -43,49 +42,21 @@ const ErrorBanner: React.FC<ErrorBannerProps> = ({ message, onClose }) => {
     <div className="bg-red-100 text-red-700 p-2 rounded mb-2 flex justify-between items-center">
       <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
         <span>{main}</span>
-
         {supportCode && (
-          <div
-            style={{
-              display: "flex",
-              gap: "0.5rem",
-              alignItems: "center",
-              fontSize: "0.8rem",
-              opacity: 0.9,
-              flexWrap: "wrap",
-            }}
-          >
-            <span>
-              Support code: <code>{supportCode}</code>
-            </span>
-
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", fontSize: "0.8rem", opacity: 0.9, flexWrap: "wrap" }}>
+            <span>Support code: <code>{supportCode}</code></span>
             {canCopy && (
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="ml-2 text-red-600"
-                style={{
-                  fontSize: "0.78rem",
-                  textDecoration: "underline",
-                  background: "transparent",
-                  border: "none",
-                  padding: 0,
-                  cursor: "pointer",
-                }}
-                aria-label="Copy support code"
-                title="Copy support code"
-              >
+              <button type="button" onClick={handleCopy} className="ml-2 text-red-600"
+                style={{ fontSize: "0.78rem", textDecoration: "underline", background: "transparent", border: "none", padding: 0, cursor: "pointer" }}
+                aria-label="Copy support code" title="Copy support code">
                 {copied ? "Copied" : "Copy"}
               </button>
             )}
           </div>
         )}
       </div>
-
       {onClose && (
-        <button className="ml-2 text-red-500" onClick={onClose} type="button">
-          ×
-        </button>
+        <button className="ml-2 text-red-500" onClick={onClose} type="button">×</button>
       )}
     </div>
   );
