@@ -119,9 +119,16 @@ def get_opportunities(
         except Exception:
             total_expected = 0.0
 
-        excess = total_actual - total_expected
-        if excess < 0:
-            excess = 0.0  # savings potential = clamp to positive "waste" only
+        # Sum only the hours where actual > expected (targeted waste)
+        # This catches patterns even when total deviation is near zero
+        hours_data = insights.get("hours") or []
+        excess = sum(
+            float(h.get("delta_kwh", 0) or 0)
+            for h in hours_data
+            if float(h.get("delta_kwh", 0) or 0) > 0
+        )
+        if excess <= 0:
+            excess = max(total_actual - total_expected, 0.0)
 
         kpis.update(
             {
@@ -137,7 +144,7 @@ def get_opportunities(
         )
 
     engine = OpportunityEngine()
-    auto_opps = engine.suggest_measures(kpis)
+    auto_opps = engine.suggest_measures(kpis, insights=insights)
 
     # Normalize auto measures so they always include "source"
     normalized_auto: List[Dict[str, Any]] = []
