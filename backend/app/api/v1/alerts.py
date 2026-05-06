@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Literal, Any, Set, Tuple
 
-from fastapi import APIRouter, Depends, Query, status, HTTPException, Path
+from fastapi import APIRouter, Depends, Query, Request, status, HTTPException, Path
 from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -16,6 +16,68 @@ from app.models import TimeseriesRecord, AlertEvent, SiteEvent, Site, OrgAlertTh
 from app.services.analytics import compute_site_insights  # statistical engine
 
 logger = logging.getLogger("cei")
+
+# ---------------------------------------------------------------------------
+# Alert message i18n
+# Alerts are generated server-side, so we translate titles/messages here
+# using the locale passed in from the request context (defaults to English).
+# ---------------------------------------------------------------------------
+
+_ALERT_STRINGS: dict = {
+    "en": {
+        # Rule 1: Night baseline
+        "night_critical_title": "High night-time baseline",
+        "night_critical_msg": "{site} has a night-time baseline at {ratio} of the day-time average over the last {window}h. This usually indicates significant idle losses (compressors, HVAC, lines left on).",
+        "night_warning_title": "Elevated night-time baseline",
+        "night_warning_msg": "{site} shows a night-time baseline at {ratio} of day-time average over the last {window}h. There is likely low-hanging fruit in shutdown procedures.",
+        # Rule 2: Spike
+        "spike_warning_title": "Short-term peak significantly above typical load",
+        "spike_warning_msg": "{site} has a peak hour at {peak} kWh, which is {ratio}x the average for the last {window}h. Check for overlapping batches, start-up procedures, or one-off events.",
+        # Rule 3: Weekend
+        "weekend_warning_title": "Elevated weekend baseline",
+        "weekend_warning_msg": "{site} has weekend consumption at {ratio} of weekday average over the last {window}h. Review weekend shutdown procedures and auxiliary loads.",
+        # Rule 4: Portfolio dominance
+        "portfolio_info_title": "Site dominates portfolio energy",
+        "portfolio_info_msg": "{site} is consuming {share}% of portfolio energy over the last {window}h. This is a natural candidate for deeper opportunity hunting and focused projects.",
+        # Rule 5: Forecast night
+        "forecast_night_critical_title": "Forecast: high night-time baseline next 24h",
+        "forecast_night_critical_msg": "{site} is projected to run with a night-time baseline at {ratio} of the day-time forecast over the next 24h. Without changes, off-shift hours are likely to carry significant idle losses.",
+        "forecast_night_warning_title": "Forecast: elevated night-time baseline next 24h",
+        "forecast_night_warning_msg": "{site} is forecast to have night-time consumption at {ratio} of day-time levels over the next 24h. Tighten shutdown procedures now to avoid avoidable off-shift waste.",
+    },
+    "it": {
+        # Rule 1: Night baseline
+        "night_critical_title": "Baseline notturna elevata (critica)",
+        "night_critical_msg": "{site} ha una baseline notturna al {ratio} della media diurna nelle ultime {window}h. Questo indica tipicamente perdite a riposo significative (compressori, HVAC, linee lasciate accese).",
+        "night_warning_title": "Baseline notturna elevata",
+        "night_warning_msg": "{site} mostra una baseline notturna al {ratio} della media diurna nelle ultime {window}h. Probabilmente ci sono interventi facili sulle procedure di spegnimento.",
+        # Rule 2: Spike
+        "spike_warning_title": "Picco a breve termine significativamente sopra il carico tipico",
+        "spike_warning_msg": "{site} ha un'ora di picco a {peak} kWh, pari a {ratio}x la media delle ultime {window}h. Verifica batch sovrapposti, procedure di avviamento o eventi straordinari.",
+        # Rule 3: Weekend
+        "weekend_warning_title": "Baseline weekend elevata",
+        "weekend_warning_msg": "{site} ha consumi nel weekend al {ratio} della media feriale nelle ultime {window}h. Rivedi le procedure di spegnimento nel weekend e i carichi ausiliari.",
+        # Rule 4: Portfolio dominance
+        "portfolio_info_title": "Il sito domina il consumo del portfolio",
+        "portfolio_info_msg": "{site} sta consumando il {share}% dell'energia del portfolio nelle ultime {window}h. È il candidato principale per attività di analisi e interventi mirati.",
+        # Rule 5: Forecast night
+        "forecast_night_critical_title": "Previsione: baseline notturna alta nelle prossime 24h",
+        "forecast_night_critical_msg": "{site} è previsto con una baseline notturna al {ratio} della previsione diurna nelle prossime 24h. Senza interventi, le ore fuori turno accumuleranno perdite a riposo significative.",
+        "forecast_night_warning_title": "Previsione: baseline notturna elevata nelle prossime 24h",
+        "forecast_night_warning_msg": "{site} è previsto con consumi notturni al {ratio} dei livelli diurni nelle prossime 24h. Ottimizza le procedure di spegnimento ora per evitare sprechi fuori turno.",
+    },
+}
+
+
+def _t(key: str, locale: str = "en", **kwargs) -> str:
+    """Look up an alert string by key and locale, with English fallback."""
+    strings = _ALERT_STRINGS.get(locale) or _ALERT_STRINGS["en"]
+    template = strings.get(key) or _ALERT_STRINGS["en"].get(key, key)
+    try:
+        return template.format(**kwargs)
+    except Exception:
+        return template
+
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -366,6 +428,7 @@ def _user_has_alerts_enabled(db: Session, user: Any) -> bool:
 @router.get("", response_model=List[AlertOut], status_code=status.HTTP_200_OK)
 @router.get("/", response_model=List[AlertOut], status_code=status.HTTP_200_OK)
 def list_alerts(
+    request: Request,
     window_hours: int = Query(24, ge=1, le=24 * 30, description="Look-back window in hours."),
     site_id: Optional[str] = Query(None, description="Optional timeseries site_id filter (e.g. 'site-1' or '1')."),
     db: Session = Depends(get_db),
@@ -405,6 +468,7 @@ def list_alerts(
                 detail="You do not have access to this site_id.",
             )
 
+    locale = "it" if "it" in (request.headers.get("Accept-Language") or "") else "en"
     alerts = _generate_alerts_for_window(
         db=db,
         window_hours=window_hours,
@@ -413,6 +477,7 @@ def list_alerts(
         persist_events=True,
         organization_id=organization_id,
         user_id=user_id,
+        locale=locale,
     )
 
     # Defensive: guarantee only requested site is returned
@@ -857,6 +922,7 @@ def _generate_alerts_for_window(
     persist_events: bool = False,
     organization_id: Optional[int] = None,
     user_id: Optional[int] = None,
+    locale: str = "en",
 ) -> List[AlertOut]:
     # Explicit empty allow-list => org has no sites => no alerts
     if allowed_site_ids is not None and len(allowed_site_ids) == 0:
@@ -1034,11 +1100,11 @@ def _generate_alerts_for_window(
                     site_id=sid,
                     site_name=site_name,
                     severity="critical",
-                    title="High night-time baseline",
-                    message=(
-                        f"{site_name or sid} has a night-time baseline at "
-                        f"{night_ratio:.0%} of the day-time average over the last {window_hours}h. "
-                        "This usually indicates significant idle losses (compressors, HVAC, lines left on)."
+                    title=_t("night_critical_title", locale),
+                    message=_t("night_critical_msg", locale,
+                        site=site_name or sid,
+                        ratio=f"{night_ratio:.0%}",
+                        window=window_hours,
                     ),
                     metric="night_baseline_ratio",
                     window_hours=window_hours,
@@ -1054,11 +1120,11 @@ def _generate_alerts_for_window(
                     site_id=sid,
                     site_name=site_name,
                     severity="warning",
-                    title="Elevated night-time baseline",
-                    message=(
-                        f"{site_name or sid} shows a night-time baseline at "
-                        f"{night_ratio:.0%} of day-time average over the last {window_hours}h. "
-                        "There is likely low-hanging fruit in shutdown procedures."
+                    title=_t("night_warning_title", locale),
+                    message=_t("night_warning_msg", locale,
+                        site=site_name or sid,
+                        ratio=f"{night_ratio:.0%}",
+                        window=window_hours,
                     ),
                     metric="night_baseline_ratio",
                     window_hours=window_hours,
@@ -1078,11 +1144,12 @@ def _generate_alerts_for_window(
                         site_id=sid,
                         site_name=site_name,
                         severity="warning",
-                        title="Short-term peak significantly above typical load",
-                        message=(
-                            f"{site_name or sid} has a peak hour at {max_value:.1f} kWh, "
-                            f"which is {spike_ratio:.1f}x the average for the last {window_hours}h. "
-                            "Check for overlapping batches, start-up procedures, or one-off events."
+                        title=_t("spike_warning_title", locale),
+                        message=_t("spike_warning_msg", locale,
+                            site=site_name or sid,
+                            peak=f"{max_value:.1f}",
+                            ratio=f"{spike_ratio:.1f}",
+                            window=window_hours,
                         ),
                         metric="peak_spike_ratio",
                         window_hours=window_hours,
@@ -1122,11 +1189,11 @@ def _generate_alerts_for_window(
                         site_id=sid,
                         site_name=site_name,
                         severity="warning",
-                        title="Elevated weekend baseline",
-                        message=(
-                            f"{site_name or sid} has weekend consumption at "
-                            f"{weekend_ratio:.0%} of weekday average over the last {window_hours}h. "
-                            "Review weekend shutdown procedures and auxiliary loads."
+                        title=_t("weekend_warning_title", locale),
+                        message=_t("weekend_warning_msg", locale,
+                            site=site_name or sid,
+                            ratio=f"{weekend_ratio:.0%}",
+                            window=window_hours,
                         ),
                         metric="weekend_weekday_ratio",
                         window_hours=window_hours,
@@ -1146,11 +1213,11 @@ def _generate_alerts_for_window(
                         site_id=sid,
                         site_name=site_name,
                         severity="info",
-                        title="Site dominates portfolio energy",
-                        message=(
-                            f"{site_name or sid} is consuming {share:.1f}% of portfolio "
-                            f"energy over the last {window_hours}h. This is a natural candidate "
-                            "for deeper opportunity hunting and focused projects."
+                        title=_t("portfolio_info_title", locale),
+                        message=_t("portfolio_info_msg", locale,
+                            site=site_name or sid,
+                            share=f"{share:.1f}",
+                            window=window_hours,
                         ),
                         metric="relative_share",
                         window_hours=window_hours,
@@ -1212,12 +1279,10 @@ def _generate_alerts_for_window(
                                     site_id=sid,
                                     site_name=site_name,
                                     severity="critical",
-                                    title="Forecast: high night-time baseline next 24h",
-                                    message=(
-                                        f"{site_name or sid} is projected to run with a night-time "
-                                        f"baseline at {forecast_night_ratio:.0%} of the day-time forecast "
-                                        "over the next 24h. Without changes, off-shift hours are likely to "
-                                        "carry significant idle losses."
+                                    title=_t("forecast_night_critical_title", locale),
+                                    message=_t("forecast_night_critical_msg", locale,
+                                        site=site_name or sid,
+                                        ratio=f"{forecast_night_ratio:.0%}",
                                     ),
                                     metric="forecast_night_baseline_ratio",
                                     window_hours=window_hours,
@@ -1233,11 +1298,10 @@ def _generate_alerts_for_window(
                                     site_id=sid,
                                     site_name=site_name,
                                     severity="warning",
-                                    title="Forecast: elevated night-time baseline next 24h",
-                                    message=(
-                                        f"{site_name or sid} is forecast to have night-time consumption at "
-                                        f"{forecast_night_ratio:.0%} of day-time levels over the next 24h. "
-                                        "Tighten shutdown procedures now to avoid avoidable off-shift waste."
+                                    title=_t("forecast_night_warning_title", locale),
+                                    message=_t("forecast_night_warning_msg", locale,
+                                        site=site_name or sid,
+                                        ratio=f"{forecast_night_ratio:.0%}",
                                     ),
                                     metric="forecast_night_baseline_ratio",
                                     window_hours=window_hours,

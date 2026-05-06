@@ -61,6 +61,9 @@ i18n.use(initReactI18next).init({
   // if a key doesn't exist, i18next will return the key by default.
 });
 
+// Set initial Accept-Language header on the axios instance
+
+
 i18n.on("languageChanged", (lng) => {
   const normalized = normalizeLang(lng);
 

@@ -584,7 +584,15 @@ export async function getSiteForecast(
 }
 
 export async function getAlerts(params: { window_hours?: number } = {}) {
-  const resp = await api.get("/alerts", { params });
+  let lang = "en";
+  try {
+    const stored = localStorage.getItem("cei_lang");
+    if (stored && stored.startsWith("it")) lang = "it";
+  } catch { /* ignore */ }
+  const resp = await api.get("/alerts", {
+    params,
+    headers: { "Accept-Language": lang },
+  });
   return resp.data;
 }
 

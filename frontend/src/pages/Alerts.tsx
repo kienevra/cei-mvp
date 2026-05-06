@@ -72,7 +72,7 @@ function asNumber(v: any): number | null {
 }
 
 const Alerts: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -242,7 +242,7 @@ const Alerts: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [windowHours, enableAlerts, planLoaded, t]);
+  }, [windowHours, enableAlerts, planLoaded, t, i18n.language]);
 
   // --- Load history whenever plan or status filter changes ---
   useEffect(() => {
