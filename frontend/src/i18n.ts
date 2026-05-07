@@ -84,4 +84,13 @@ i18n.on("languageChanged", (lng) => {
   }
 });
 
+// Sync language from URL param (set by landing page)
+if (typeof window !== "undefined") {
+  const urlLang = new URLSearchParams(window.location.search).get("lang");
+  if (urlLang === "it" || urlLang === "en") {
+    i18n.changeLanguage(urlLang);
+    try { localStorage.setItem(STORAGE_KEY, urlLang); } catch { /* ignore */ }
+  }
+}
+
 export default i18n;
