@@ -24,6 +24,8 @@ import { buildHybridNarrative } from "../utils/hybridNarrative";
 import SiteAlertsStrip from "../components/SiteAlertsStrip";
 import { downloadCsv } from "../utils/csv";
 import SiteTimelineCard from "../components/SiteTimelineCard";
+import SiteEnergyChart from "../components/SiteEnergyChart";
+import SiteForecastChart from "../components/SiteForecastChart";
 import ProductionCorrelation from "../components/ProductionCorrelation";
 
 type SiteRecord = {
@@ -830,36 +832,9 @@ const SiteView: React.FC = () => {
       "24h savings/overspend = (Actual 24h kWh − Baseline 24h kWh) × your org electricity tariff. Negative is savings; positive is overspend.",
   });
 
-  const renderForecastCard = () => {
-    if (forecastLoading) {
-      return (
-        <section className="cei-card">
-          <div className="cei-card-header">
-            <h2 style={{ fontSize: "0.95rem", fontWeight: 600 }}>
-              {t("siteView.forecast.title", { defaultValue: "Next 24h forecast" })}
-            </h2>
-            <span className="cei-pill cei-pill-neutral cei-pill--sm">
-              {t("common.loading", { defaultValue: "Loading" })}
-            </span>
-          </div>
-          <p
-            style={{
-              marginTop: "0.3rem",
-              fontSize: "0.8rem",
-              color: "var(--cei-text-muted)",
-            }}
-          >
-            {t("siteView.forecast.building", {
-              defaultValue: "Building a baseline-driven forecast for this site…",
-            })}
-          </p>
-        </section>
-      );
-    }
-
-    if (!hasForecast || forecastError) {
-      return null;
-    }
+ const renderForecastCard = () => {
+    if (forecastLoading) return null;
+    if (!hasForecast || forecastError) return null;
 
     const localForecast = forecast as SiteForecast;
     const points = Array.isArray(localForecast.points) ? localForecast.points : [];
@@ -869,26 +844,6 @@ const SiteView: React.FC = () => {
     const peak = points.reduce((max, p) =>
       (p.expected_kwh ?? 0) > (max.expected_kwh ?? 0) ? p : max
     );
-
-    const forecastTrendPoints = points.map((p) => {
-      const dt = new Date(p.ts);
-      const label = dt.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      });
-      return { label, value: p.expected_kwh ?? 0 };
-    });
-
-    const forecastValues = forecastTrendPoints.map((p) => p.value);
-    const hasForecastTrend = forecastValues.length > 0;
-    const forecastMax = hasForecastTrend ? Math.max(...forecastValues) : 0;
-    const forecastMin = hasForecastTrend ? Math.min(...forecastValues) : 0;
-
-    const forecastChartContentWidth = hasForecastTrend
-      ? Math.max(forecastTrendPoints.length * barPixelWidth, minContentWidth)
-      : minContentWidth;
-
     const peakTimeLabel = new Date(peak.ts).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
@@ -901,13 +856,7 @@ const SiteView: React.FC = () => {
             <h2 style={{ fontSize: "0.95rem", fontWeight: 600 }}>
               {t("siteView.forecast.title", { defaultValue: "Next 24h forecast" })}
             </h2>
-            <p
-              style={{
-                marginTop: "0.1rem",
-                fontSize: "0.78rem",
-                color: "var(--cei-text-muted)",
-              }}
-            >
+            <p style={{ marginTop: "0.1rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
               {t("siteView.forecast.subtitle", {
                 defaultValue: "Baseline-driven preview of expected energy over the next 24 hours.",
               })}
@@ -915,33 +864,15 @@ const SiteView: React.FC = () => {
           </div>
           <span
             className="cei-pill cei-pill-neutral"
-            style={{
-              fontSize: "0.65rem",
-              padding: "0.15rem 0.5rem",
-              lineHeight: 1,
-              whiteSpace: "nowrap",
-              maxWidth: "14rem",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-            title={`Stub: ${localForecast.method}`}
+            style={{ fontSize: "0.65rem", padding: "0.15rem 0.5rem", whiteSpace: "nowrap" }}
+            title={`Method: ${localForecast.method}`}
           >
-            {t("siteView.forecast.stub", {
-              defaultValue: "Stub: {{method}}",
-              method: localForecast.method,
-            })}
+            {localForecast.method}
           </span>
         </div>
 
-        <div
-          className="cei-card-kpis"
-          style={{
-            marginTop: "0.7rem",
-            display: "flex",
-            gap: "1rem",
-            flexWrap: "wrap",
-          }}
-        >
+        {/* KPI summary */}
+        <div style={{ marginTop: "0.7rem", display: "flex", gap: "1rem", flexWrap: "wrap" }}>
           <div className="cei-kpi">
             <div className="cei-kpi-label">
               {t("siteView.forecast.expected24h", { defaultValue: "Expected next 24h" })}
@@ -957,103 +888,19 @@ const SiteView: React.FC = () => {
           </div>
         </div>
 
-        <div
-          className="cei-trend-scroll"
-          style={{
-            marginTop: "0.8rem",
-            borderRadius: "0.75rem",
-            border: "1px solid rgba(148, 163, 184, 0.5)",
-            background:
-              "radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.95))",
-            padding: "0.75rem",
-            boxSizing: "border-box",
-            maxWidth: "100%",
-            overflowX: "auto",
-            overflowY: "hidden",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-end",
-              justifyContent: "flex-start",
-              gap: "0.5rem",
-              height: "200px",
-              width: `${forecastChartContentWidth}px`,
-              boxSizing: "border-box",
-            }}
-          >
-            {forecastTrendPoints.map((p, idx) => {
-              const val = p.value;
-
-              let heightPx = 0;
-              if (hasForecastTrend && forecastMax > 0) {
-                if (forecastMax > forecastMin) {
-                  const ratio = (val - forecastMin) / (forecastMax - forecastMin || 1);
-                  heightPx = baseBarHeightPx + ratio * maxBarHeightPx;
-                } else {
-                  heightPx = baseBarHeightPx + maxBarHeightPx;
-                }
-              }
-
-              return (
-                <div
-                  key={`${idx}-${p.label}`}
-                  style={{
-                    flex: "0 0 auto",
-                    width: "32px",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "flex-end",
-                    gap: "0.25rem",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "0.6rem",
-                      color: "var(--cei-text-muted)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {val.toFixed(0)}
-                  </span>
-                  <div
-                    style={{
-                      width: "100%",
-                      borderRadius: "4px",
-                      background:
-                        "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
-                      height: `${heightPx}px`,
-                      boxShadow: "0 6px 18px rgba(56, 189, 248, 0.45)",
-                      border: "1px solid rgba(226, 232, 240, 0.8)",
-                    }}
-                  />
-                  <span
-                    style={{
-                      fontSize: "0.65rem",
-                      color: "var(--cei-text-muted)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {p.label}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+        {/* Chart */}
+        <div style={{ marginTop: "0.8rem" }}>
+          <SiteForecastChart
+            points={points}
+            method={localForecast.method}
+            loading={false}
+          />
         </div>
 
-        <p
-          style={{
-            marginTop: "0.8rem",
-            fontSize: "0.75rem",
-            color: "var(--cei-text-muted)",
-          }}
-        >
+        <p style={{ marginTop: "0.8rem", fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
           {t("siteView.forecast.footer", {
             defaultValue:
-              "Based on a {{lookback}}-day baseline and a {{history}}-hour recent performance window. Use this strip as a forward-looking mirror of the last 24h trend chart above.",
+              "Based on a {{lookback}}-day baseline and a {{history}}-hour recent performance window.",
             lookback: localForecast.baseline_lookback_days,
             history: localForecast.history_window_hours,
           })}
@@ -1704,105 +1551,17 @@ const SiteView: React.FC = () => {
             </div>
           </div>
 
-          {seriesLoading && (
-            <div style={{ padding: "1.2rem 0.5rem", display: "flex", justifyContent: "center" }}>
-              <LoadingSpinner />
+          <SiteEnergyChart
+            hours={insights?.hours ?? []}
+            windowHours={insights?.window_hours ?? 24}
+            siteName={site?.name ?? null}
+            loading={insightsLoading}
+          />
+
+          {trendSummary && !insightsLoading && (
+            <div style={{ marginTop: "0.75rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              {trendSummary}
             </div>
-          )}
-
-          {!seriesLoading && !hasTrend ? (
-            <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              {t("siteView.trend.noData", {
-                defaultValue:
-                  "No recent per-site series data. Once your timeseries has matching site_id, or you upload via “Upload CSV for this site” with no site_id column, this chart will light up.",
-              })}{" "}
-              <code>site_id = {siteKey}</code>.
-            </div>
-          ) : (
-            hasTrend && (
-              <>
-                <div
-                  className="cei-trend-scroll"
-                  style={{
-                    marginTop: "0.75rem",
-                    borderRadius: "0.75rem",
-                    border: "1px solid rgba(148, 163, 184, 0.5)",
-                    background:
-                      "radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.95))",
-                    padding: "0.75rem",
-                    boxSizing: "border-box",
-                    maxWidth: "100%",
-                    overflowX: "auto",
-                    overflowY: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-end",
-                      justifyContent: "flex-start",
-                      gap: "0.5rem",
-                      height: "200px",
-                      width: `${chartContentWidth}px`,
-                      boxSizing: "border-box",
-                    }}
-                  >
-                    {trendPoints.map((p, idx) => {
-                      const val = p.value;
-
-                      let heightPx = 0;
-                      if (hasTrend && maxVal > 0) {
-                        if (maxVal > minVal) {
-                          const ratio = (val - minVal) / (maxVal - minVal || 1);
-                          heightPx = baseBarHeightPx + ratio * maxBarHeightPx;
-                        } else {
-                          heightPx = baseBarHeightPx + maxBarHeightPx;
-                        }
-                      }
-
-                      return (
-                        <div
-                          key={`${idx}-${p.label}`}
-                          style={{
-                            flex: "0 0 auto",
-                            width: "32px",
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            justifyContent: "flex-end",
-                            gap: "0.25rem",
-                          }}
-                        >
-                          <span style={{ fontSize: "0.6rem", color: "var(--cei-text-muted)", whiteSpace: "nowrap" }}>
-                            {val.toFixed(0)}
-                          </span>
-                          <div
-                            style={{
-                              width: "100%",
-                              borderRadius: "4px",
-                              background:
-                                "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
-                              height: `${heightPx}px`,
-                              boxShadow: "0 6px 18px rgba(56, 189, 248, 0.45)",
-                              border: "1px solid rgba(226, 232, 240, 0.8)",
-                            }}
-                          />
-                          <span style={{ fontSize: "0.65rem", color: "var(--cei-text-muted)", whiteSpace: "nowrap" }}>
-                            {p.label}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {trendSummary && (
-                  <div style={{ marginTop: "0.75rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-                    {trendSummary}
-                  </div>
-                )}
-              </>
-            )
           )}
         </div>
 

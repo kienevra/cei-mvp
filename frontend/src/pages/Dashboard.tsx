@@ -12,6 +12,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import PortfolioTrendChart from "../components/PortfolioTrendChart";
 
 type SummaryResponse = {
   site_id: string | null;
@@ -587,114 +588,15 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
 
-          {seriesLoading && (
-            <div style={{ padding: "1.2rem 0.5rem", display: "flex", justifyContent: "center" }}>
-              <LoadingSpinner />
+          <PortfolioTrendChart
+            points={series?.points ?? []}
+            loading={seriesLoading}
+          />
+
+          {trendSummary && !seriesLoading && (
+            <div style={{ marginTop: "0.75rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              {trendSummary}
             </div>
-          )}
-
-          {!seriesLoading && !hasTrend ? (
-            <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              {t("dashboard.trend.noData", {
-                defaultValue:
-                  "No recent series data. After you ingest CSV data or connect a live feed, CEI will chart the last 24 hours here.",
-              })}
-            </div>
-          ) : (
-            <>
-              <div
-                className="cei-trend-scroll"
-                style={{
-                  marginTop: "0.75rem",
-                  borderRadius: "0.75rem",
-                  border: "1px solid rgba(148, 163, 184, 0.5)",
-                  background:
-                    "radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), rgba(15, 23, 42, 0.95))",
-                  padding: "0.75rem",
-                  boxSizing: "border-box",
-                  maxWidth: "100%",
-                  overflowX: "auto",
-                  overflowY: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-end",
-                    justifyContent: "flex-start",
-                    gap: "0.5rem",
-                    height: "200px",
-                    width: `${chartContentWidth}px`,
-                    boxSizing: "border-box",
-                  }}
-                >
-                  {trendPoints.map((p, idx) => {
-                    const val = p.value;
-
-                    let heightPx = 0;
-                    if (hasTrend && maxVal > 0) {
-                      if (maxVal > minVal) {
-                        const ratio = (val - minVal) / (maxVal - minVal || 1);
-                        heightPx = baseBarHeightPx + ratio * maxBarHeightPx;
-                      } else {
-                        heightPx = baseBarHeightPx + maxBarHeightPx;
-                      }
-                    }
-
-                    return (
-                      <div
-                        key={`${idx}-${p.label}`}
-                        style={{
-                          flex: "0 0 auto",
-                          width: "32px",
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          justifyContent: "flex-end",
-                          gap: "0.25rem",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: "0.6rem",
-                            color: "var(--cei-text-muted)",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {val.toFixed(0)}
-                        </span>
-                        <div
-                          style={{
-                            width: "100%",
-                            borderRadius: "4px",
-                            background:
-                              "linear-gradient(to top, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.25))",
-                            height: `${heightPx}px`,
-                            boxShadow: "0 6px 18px rgba(56, 189, 248, 0.45)",
-                            border: "1px solid rgba(226, 232, 240, 0.8)",
-                          }}
-                        />
-                        <span
-                          style={{
-                            fontSize: "0.65rem",
-                            color: "var(--cei-text-muted)",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {p.label}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {trendSummary && (
-                <div style={{ marginTop: "0.75rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-                  {trendSummary}
-                </div>
-              )}
-            </>
           )}
         </div>
 
