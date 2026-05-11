@@ -24,6 +24,7 @@ import { buildHybridNarrative } from "../utils/hybridNarrative";
 import SiteAlertsStrip from "../components/SiteAlertsStrip";
 import { downloadCsv } from "../utils/csv";
 import SiteTimelineCard from "../components/SiteTimelineCard";
+import ProductionCorrelation from "../components/ProductionCorrelation";
 
 type SiteRecord = {
   id: number | string;
@@ -630,7 +631,7 @@ const SiteView: React.FC = () => {
 
     // Be tolerant to backend naming differences (older vs newer fields)
     const cost24hActual = pickNumber(kpiAny, ["cost_24h_actual", "last_24h_cost", "actual_cost_24h"]);
-    const cost24hBaseline = pickNumber(kpiAny, ["cost_24h_baseline", "baseline_24h_cost", "expected_cost_24h"]);
+    const cost24hBaseline = pickNumber(kpiAny, ["expected_24h_cost", "cost_24h_baseline", "baseline_24h_cost", "expected_cost_24h"]);
     const cost24hDelta =
       pickNumber(kpiAny, ["cost_24h_delta", "delta_24h_cost", "cost_delta_24h"]) ??
       (cost24hActual != null && cost24hBaseline != null ? cost24hActual - cost24hBaseline : null);
@@ -794,7 +795,7 @@ const SiteView: React.FC = () => {
     [kpiAny]
   );
   const cost24hBaseline = useMemo(
-    () => pickNumber(kpiAny, ["cost_24h_baseline", "baseline_24h_cost", "expected_cost_24h"]),
+    () => pickNumber(kpiAny, ["expected_24h_cost", "cost_24h_baseline", "baseline_24h_cost", "expected_cost_24h"]),
     [kpiAny]
   );
   const cost24hDelta = useMemo(() => {
@@ -1954,6 +1955,15 @@ const SiteView: React.FC = () => {
 
       {/* Forecast card */}
       <section style={{ marginTop: "0.75rem" }}>{renderForecastCard()}</section>
+
+      {/* Production correlation — kWh per unit produced (ISO 50001) */}
+      {id && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <div className="cei-card">
+            <ProductionCorrelation siteId={id} />
+          </div>
+        </section>
+      )}
 
       {/* CEI hybrid view */}
       {hybrid && (

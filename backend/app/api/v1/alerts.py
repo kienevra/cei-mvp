@@ -797,7 +797,8 @@ def _persist_alert_events(
                 ae_q = (
                     db.query(AlertEvent)
                     .filter(AlertEvent.organization_id == organization_id)
-                    .filter(AlertEvent.title == a.title)
+                    # ✅ FIX: title is locale-dependent — dedup on (org, site, metric/rule_key,
+                    # window_hours) only, which is language-agnostic
                     .filter((AlertEvent.window_hours == wh) | (AlertEvent.window_hours.is_(None)))
                     .order_by(AlertEvent.created_at.desc())
                 )
@@ -839,21 +840,22 @@ def _persist_alert_events(
                 # (B) SiteEvent dedupe/insert (timeline) — independent from AlertEvent
                 # -------------------------
                 should_insert_se = True
+                # ✅ FIX: encode rule_key in the SiteEvent type so dedup is
+                # per-rule and language-agnostic (no title/body matching)
+                se_type = f"alert_{rule_key}"
+
                 if sid_variants:
                     se_q = (
                         db.query(SiteEvent)
                         .filter(SiteEvent.organization_id == organization_id)
-                        .filter(SiteEvent.type == "alert_triggered")
+                        .filter(SiteEvent.type == se_type)
                         .filter(SiteEvent.site_id.in_(sid_variants))
-                        .filter(SiteEvent.title == a.title)
-                        .filter(SiteEvent.body == a.message)
                         .order_by(SiteEvent.created_at.desc())
                     )
                     latest_se = se_q.first()
                     if latest_se is not None and _is_recent_dt(getattr(latest_se, "created_at", None)):
                         should_insert_se = False
                 else:
-                    # no site_id => no timeline event (keeps timeline sane)
                     should_insert_se = False
 
                 if should_insert_se:
@@ -861,7 +863,7 @@ def _persist_alert_events(
                         SiteEvent(
                             organization_id=organization_id,
                             site_id=sid,
-                            type="alert_triggered",
+                            type=se_type,
                             title=a.title,
                             body=a.message,
                             created_by_user_id=None,

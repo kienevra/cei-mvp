@@ -839,6 +839,55 @@ const Account: React.FC = () => {
         </section>
       )}
 
+       {/* ── Cost analytics inactive banner ── */}
+      {!loading && account && !hasTariffConfig && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              gap: "1rem",
+              padding: "14px 18px",
+              borderRadius: 12,
+              background: "rgba(251,146,60,0.07)",
+              border: "1px solid rgba(251,146,60,0.3)",
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+              <span style={{ fontSize: 20, lineHeight: 1, flexShrink: 0 }}>⚡</span>
+              <div>
+                <p style={{ margin: "0 0 4px", fontWeight: 700, color: "#fb923c", fontSize: 14 }}>
+                  Cost analytics are inactive
+                </p>
+                <p style={{ margin: 0, fontSize: 12, color: "#9ca3af", lineHeight: 1.5 }}>
+                  Your dashboard is showing kWh only. Configure your electricity tariff in Settings
+                  to unlock cost KPIs, savings vs baseline calculations, and opportunity ROI estimates.
+                </p>
+              </div>
+            </div>
+            <a
+              href="/settings"
+              style={{
+                display: "inline-block",
+                padding: "7px 18px",
+                borderRadius: 999,
+                background: "linear-gradient(135deg, #fb923c, #ea580c)",
+                color: "#fff",
+                fontWeight: 700,
+                fontSize: 12,
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+              }}
+            >
+              Configure tariff →
+            </a>
+          </div>
+        </section>
+      )}
+
       {/* Top row: Profile + Subscription */}
       <section className="dashboard-row">
         {/* Profile card */}
@@ -1426,9 +1475,49 @@ const Account: React.FC = () => {
                 </div>
               </div>
 
-              {!hasTariffConfig && (
-                <div style={{ marginTop: "0.7rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-                  {t("account.tariffs.notConfiguredNote")}
+             {!hasTariffConfig ? (
+                <div
+                  style={{
+                    marginTop: "0.75rem",
+                    padding: "12px 14px",
+                    borderRadius: 8,
+                    background: "rgba(251,146,60,0.06)",
+                    border: "1px solid rgba(251,146,60,0.2)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "1rem",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <p style={{ margin: 0, fontSize: "0.78rem", color: "#9ca3af" }}>
+                    No tariff configured — cost KPIs and savings calculations are inactive.
+                  </p>
+                  <a
+                    href="/settings"
+                    style={{
+                      fontSize: "0.75rem",
+                      color: "#38bdf8",
+                      textDecoration: "none",
+                      fontWeight: 600,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Go to Settings →
+                  </a>
+                </div>
+              ) : (
+                <div style={{ marginTop: "0.5rem" }}>
+                  <a
+                    href="/settings"
+                    style={{
+                      fontSize: "0.75rem",
+                      color: "#38bdf8",
+                      textDecoration: "none",
+                    }}
+                  >
+                    Update tariff in Settings →
+                  </a>
                 </div>
               )}
             </>

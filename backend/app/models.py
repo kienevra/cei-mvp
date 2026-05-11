@@ -10,9 +10,10 @@ from sqlalchemy import (
     Text,
     Index,
     DateTime,
+    Date,
     Numeric,
     Boolean,
-     UniqueConstraint,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import text
@@ -98,6 +99,13 @@ class Organization(Base):
         "Organization",
         foreign_keys=[managed_by_org_id],
         back_populates="managed_by",
+    )
+
+    # -------- Production records --------
+    production_records = relationship(
+        "ProductionRecord",
+        back_populates="organization",
+        cascade="all, delete-orphan",
     )
 
 
@@ -186,6 +194,13 @@ class Site(Base):
     sensors = relationship("Sensor", back_populates="site", cascade="all, delete-orphan")
     opportunities = relationship("Opportunity", back_populates="site", cascade="all, delete-orphan")
     reports = relationship("Report", back_populates="site", cascade="all, delete-orphan")
+
+    # -------- Production records --------
+    production_records = relationship(
+        "ProductionRecord",
+        back_populates="site",
+        cascade="all, delete-orphan",
+    )
 
 
 class Sensor(Base):
@@ -313,10 +328,6 @@ class AlertEvent(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW, onupdate=DB_NOW)
 
-# -----------------------------------------------------------------------
-# ADD THIS CLASS TO backend/app/models.py
-# Place it after the AlertEvent class.
-# -----------------------------------------------------------------------
 
 class OrgAlertThreshold(Base):
     """
@@ -377,47 +388,103 @@ class OrgAlertThreshold(Base):
         ),
     )
 
+
+class ProductionRecord(Base):
+    """
+    Daily production output per site.
+    Used to compute kWh/unit — the ISO 50001 energy intensity metric.
+    Uploaded via CSV (one record per site per day).
+
+    unit_label is free-form to accommodate different manufacturing verticals:
+      ceramics → "pezzi", cement → "tonnes", metals → "m²", etc.
+    """
+    __tablename__ = "production_record"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    organization_id = Column(
+        Integer,
+        ForeignKey("organization.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    site_id = Column(
+        Integer,
+        ForeignKey("site.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    date = Column(Date, nullable=False)
+    units_produced = Column(Float, nullable=False)
+
+    # Free-form label: "tonnes", "pezzi", "m²" — varies by manufacturing vertical
+    unit_label = Column(
+        String(64),
+        nullable=False,
+        default="units",
+        server_default=text("'units'"),
+    )
+
+    notes = Column(String(255), nullable=True)
+
+    # ✅ Cross-DB default
+    created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
+
+    organization = relationship("Organization", back_populates="production_records")
+    site = relationship("Site", back_populates="production_records")
+
+    __table_args__ = (
+        # One record per site per day — makes CSV upserts clean
+        UniqueConstraint("site_id", "date", name="uq_production_site_date"),
+        # Fast org-scoped date range selects (primary correlation query pattern)
+        Index("ix_production_record_org_date", "organization_id", "date"),
+    )
+
+
 class OrgLinkRequest(Base):
     """
     Tracks requests to link a standalone org to a managing (ESCO/consultant) org.
- 
+
     Either side can initiate:
       initiated_by="consultant" → managing org sent the request, client org must accept
       initiated_by="org_owner"  → client org sent the request, managing org must accept
- 
+
     On acceptance:
       - client_org.managed_by_org_id = managing_org.id
       - client_org.org_type = "client"
       - org owner access becomes read-only (enforced on frontend via org_type)
     """
     __tablename__ = "org_link_requests"
- 
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     managing_org_id = Column(Integer, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True)
     client_org_id   = Column(Integer, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True)
- 
+
     # "consultant" or "org_owner"
     initiated_by = Column(String(16), nullable=False)
     # "pending", "accepted", "rejected", "cancelled"
     status       = Column(String(16), nullable=False, default="pending")
- 
+
     token   = Column(String(64), nullable=True, unique=True, index=True)
     message = Column(String(512), nullable=True)
- 
+
     created_at = Column(DateTime, nullable=False, server_default=DB_NOW)
     updated_at = Column(DateTime, nullable=True)
- 
+
     __table_args__ = (
         UniqueConstraint("managing_org_id", "client_org_id", name="uq_link_request_pair"),
     )
- 
+
     # relationships
     managing_org = relationship("Organization", foreign_keys=[managing_org_id])
     client_org   = relationship("Organization", foreign_keys=[client_org_id])
- 
+
     @staticmethod
     def generate_token() -> str:
-        return "cei_lnk_" + _secrets.token_urlsafe(32)   
+        return "cei_lnk_" + _secrets.token_urlsafe(32)
+
 
 class SiteEvent(Base):
     __tablename__ = "site_events"

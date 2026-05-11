@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional, Set, Tuple
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,11 @@ from app.services.analytics import (
 
 from app.services.forecast import compute_site_forecast_prophet
 from app.services.baseline_drift import compute_baseline_drift, BaselineDriftReport
+from app.services.production_correlation import (
+    ingest_production_csv,
+    get_production_correlation,
+    CorrelationDay,
+)
 
 logger = logging.getLogger("cei")
 
@@ -207,6 +212,44 @@ class SiteKpiOut(BaseModel):
     cost_savings_7d: Optional[float] = None
 
     currency_code: Optional[str] = None
+
+
+# ---- Production Correlation Schemas ----
+
+class ProductionUploadResponse(BaseModel):
+    inserted: int
+    updated: int
+    skipped: int
+    errors: List[str]
+
+
+class CorrelationDaySchema(BaseModel):
+    date: date
+    kwh: float
+    units_produced: float
+    kwh_per_unit: float
+    unit_label: str
+    is_anomaly: bool
+    anomaly_reason: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProductionCorrelationResponse(BaseModel):
+    site_id: int
+    start: date
+    end: date
+    unit_label: str
+    days: List[CorrelationDaySchema]
+    trend_slope: Optional[float] = None
+    trend_direction: str  # "improving" | "worsening" | "stable" | "insufficient_data"
+    mean_kwh_per_unit: Optional[float] = None
+    best_day: Optional[CorrelationDaySchema] = None
+    worst_day: Optional[CorrelationDaySchema] = None
+    anomaly_count: int
+    coverage_days: int
+    total_days_requested: int
 
 
 # ========= Helpers =========
@@ -589,6 +632,18 @@ def _passes_coverage(points: int, expected_points: int, min_pct: float) -> bool:
     return _coverage_pct(points, expected_points) >= float(min_pct)
 
 
+def _day_to_schema(d: CorrelationDay) -> CorrelationDaySchema:
+    return CorrelationDaySchema(
+        date=d.date,
+        kwh=d.kwh,
+        units_produced=d.units_produced,
+        kwh_per_unit=d.kwh_per_unit,
+        unit_label=d.unit_label,
+        is_anomaly=d.is_anomaly,
+        anomaly_reason=d.anomaly_reason,
+    )
+
+
 # ========= Routes =========
 
 
@@ -945,7 +1000,6 @@ def get_site_kpi(
     )
 
 
-
 @router.get(
     "/sites/{site_id}/baseline-drift",
     response_model=BaselineDriftOut,
@@ -1036,6 +1090,7 @@ def get_baseline_drift(
         is_warming_up=report.is_warming_up,
     )
 
+
 @router.get(
     "/sites/{site_id}/forecast",
     response_model=SiteForecastOut,
@@ -1117,4 +1172,125 @@ def get_site_forecast(
         baseline_is_warming_up=forecast.get("baseline_is_warming_up"),
         baseline_confidence_level=forecast.get("baseline_confidence_level"),
         points=points_out,
+    )
+
+
+@router.post(
+    "/sites/{site_id}/production-upload",
+    response_model=ProductionUploadResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Upload daily production CSV for a site",
+)
+async def upload_production_csv(
+    site_id: str,
+    file: UploadFile = File(..., description="CSV with columns: date, units_produced, [unit_label], [notes]"),
+    db: Session = Depends(get_db),
+    org_ctx: OrgContext = Depends(get_org_context),
+) -> ProductionUploadResponse:
+    """
+    Upload a CSV of daily production output (units produced per day) for a site.
+
+    **Required CSV columns:**
+    - `date` — ISO 8601 format (YYYY-MM-DD)
+    - `units_produced` — non-negative number
+
+    **Optional columns:**
+    - `unit_label` — e.g. `tonnes`, `pezzi`, `m²` (defaults to `units`)
+    - `notes` — free text
+
+    Existing records for the same (site, date) are updated (upsert behaviour).
+    Returns counts of inserted, updated, and skipped rows plus any row-level errors.
+    """
+    org_id, _ = _resolve_org_context_from_ctx(org_ctx)
+
+    # _enforce_site_access validates org ownership and returns canonical "site-{n}"
+    site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
+    site_numeric_id = _try_parse_site_numeric_id(site_id_canon)
+
+    if file.filename and not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="File must be a .csv")
+
+    file_bytes = await file.read()
+
+    if len(file_bytes) > 5 * 1024 * 1024:  # 5 MB guard
+        raise HTTPException(status_code=400, detail="CSV file exceeds 5 MB limit")
+
+    result = ingest_production_csv(
+        db=db,
+        organization_id=org_id,
+        site_id=site_numeric_id,
+        file_bytes=file_bytes,
+    )
+
+    return ProductionUploadResponse(
+        inserted=result.inserted,
+        updated=result.updated,
+        skipped=result.skipped,
+        errors=result.errors,
+    )
+
+
+@router.get(
+    "/sites/{site_id}/production-correlation",
+    response_model=ProductionCorrelationResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get kWh per unit produced (ISO 50001 energy intensity)",
+)
+def get_production_correlation_endpoint(
+    site_id: str,
+    start: date = Query(..., description="Start date (YYYY-MM-DD, inclusive)"),
+    end: date = Query(..., description="End date (YYYY-MM-DD, inclusive)"),
+    db: Session = Depends(get_db),
+    org_ctx: OrgContext = Depends(get_org_context),
+) -> ProductionCorrelationResponse:
+    """
+    Returns daily kWh per unit produced for the requested site and date range.
+
+    **Requires production data** to have been uploaded via `production-upload` first.
+    Days missing either energy readings or production data are excluded from `days`
+    but counted in `total_days_requested`.
+
+    **Anomaly signals:**
+    - Statistical: kWh/unit exceeds mean + 1.5σ
+    - Directional: energy increased while production fell vs prior day
+
+    **Trend direction:**
+    - `improving` — kWh/unit falling (becoming more efficient)
+    - `worsening` — kWh/unit rising (becoming less efficient)
+    - `stable`    — slope < 0.5% of mean
+    - `insufficient_data` — fewer than 3 days of coverage
+    """
+    if end < start:
+        raise HTTPException(status_code=400, detail="end must be >= start")
+
+    if (end - start).days > 366:
+        raise HTTPException(status_code=400, detail="Date range cannot exceed 366 days")
+
+    org_id, _ = _resolve_org_context_from_ctx(org_ctx)
+
+    site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
+    site_numeric_id = _try_parse_site_numeric_id(site_id_canon)
+
+    result = get_production_correlation(
+        db=db,
+        organization_id=org_id,
+        site_id=site_numeric_id,
+        start=start,
+        end=end,
+    )
+
+    return ProductionCorrelationResponse(
+        site_id=result.site_id,
+        start=result.start,
+        end=result.end,
+        unit_label=result.unit_label,
+        days=[_day_to_schema(d) for d in result.days],
+        trend_slope=result.trend_slope,
+        trend_direction=result.trend_direction,
+        mean_kwh_per_unit=result.mean_kwh_per_unit,
+        best_day=_day_to_schema(result.best_day) if result.best_day else None,
+        worst_day=_day_to_schema(result.worst_day) if result.worst_day else None,
+        anomaly_count=result.anomaly_count,
+        coverage_days=result.coverage_days,
+        total_days_requested=result.total_days_requested,
     )
