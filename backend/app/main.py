@@ -24,6 +24,10 @@ from app.core.request_context import (
     clear_db_metrics,
     get_request_id,
 )
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+_scheduler = BackgroundScheduler(timezone="UTC")
 
 # Optional auth-context helpers (may not exist in some snapshots)
 try:
@@ -92,6 +96,22 @@ app = FastAPI(
     docs_url="/api/v1/docs" if enable_docs else None,
     redoc_url="/api/v1/redoc" if enable_docs else None,
 )
+
+@app.on_event("startup")
+async def _start_scheduler():
+    from app.services.digest_email import send_daily_digest_job
+    _scheduler.add_job(
+        send_daily_digest_job,
+        CronTrigger(hour=7, minute=0, timezone="UTC"),
+        id="daily_digest",
+        replace_existing=True,
+    )
+    _scheduler.start()
+    logger.info("APScheduler started — daily digest fires at 07:00 UTC")
+
+@app.on_event("shutdown")
+async def _stop_scheduler():
+    _scheduler.shutdown(wait=False)
 
 
 def _get_request_id(request: Request) -> str:
@@ -352,6 +372,7 @@ from app.api.v1 import (  # noqa: E402
     org_leave,
     password_recovery,
     manage,                 # Phase 3: managing org CRUD API
+    push,                   # Web push notification subscriptions
 )
 
 app.include_router(auth.router, prefix="/api/v1")
@@ -373,6 +394,7 @@ app.include_router(org_members.router, prefix="/api/v1")
 app.include_router(org_leave.router, prefix="/api/v1")
 app.include_router(org_offboard.router, prefix="/api/v1")
 app.include_router(manage.router, prefix="/api/v1")  # Phase 3
+app.include_router(push.router, prefix="/api/v1")
 app.include_router(onboarding_router, prefix="/api/v1")
 
 

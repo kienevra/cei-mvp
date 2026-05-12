@@ -73,4 +73,5 @@ export interface OrgSettingsUpdateRequest {
   electricity_price_per_kwh?: number | null;
   gas_price_per_kwh?: number | null;
   currency_code?: string | null;
+  enable_notification_emails?: boolean | null;
 }

@@ -21,15 +21,11 @@ router = APIRouter(prefix="/account", tags=["account"])
 # ----------------------------
 
 class OrgSettingsUpdate(BaseModel):
-    """
-    Minimal org-level energy & tariff settings.
-
-    All fields are optional and PATCH-style (only provided fields are updated).
-    """
     primary_energy_sources: Optional[str] = None
     electricity_price_per_kwh: Optional[float] = None
     gas_price_per_kwh: Optional[float] = None
     currency_code: Optional[str] = None
+    enable_notification_emails: Optional[bool] = None
 
     model_config = {"extra": "forbid"}
 
@@ -104,6 +100,7 @@ def _build_account_me_payload(db: Session, current_user: User) -> Dict[str, Any]
     electricity_price_per_kwh = getattr(org, "electricity_price_per_kwh", None) if org is not None else None
     gas_price_per_kwh = getattr(org, "gas_price_per_kwh", None) if org is not None else None
     currency_code = getattr(org, "currency_code", None) if org is not None else None
+    enable_notification_emails = getattr(org, "enable_notification_emails", True) if org is not None else True
 
     org_summary: Optional[Dict[str, Any]] = None
     if org is not None:
@@ -121,6 +118,7 @@ def _build_account_me_payload(db: Session, current_user: User) -> Dict[str, Any]
             "electricity_price_per_kwh": electricity_price_per_kwh,
             "gas_price_per_kwh": gas_price_per_kwh,
             "currency_code": currency_code,
+            "enable_notification_emails": enable_notification_emails,
         }
 
     is_super = bool(getattr(current_user, "is_superuser", 0))
@@ -144,6 +142,7 @@ def _build_account_me_payload(db: Session, current_user: User) -> Dict[str, Any]
         "electricity_price_per_kwh": electricity_price_per_kwh,
         "gas_price_per_kwh": gas_price_per_kwh,
         "currency_code": currency_code,
+        "enable_notification_emails": enable_notification_emails,
     }
 
 
@@ -202,6 +201,9 @@ def update_org_settings(
 
     _validate_non_negative("electricity_price_per_kwh", data.get("electricity_price_per_kwh"))
     _validate_non_negative("gas_price_per_kwh", data.get("gas_price_per_kwh"))
+
+    if "enable_notification_emails" in data and data["enable_notification_emails"] is not None:
+        data["enable_notification_emails"] = bool(data["enable_notification_emails"])
 
     if "primary_energy_sources" in data and data["primary_energy_sources"] is not None:
         data["primary_energy_sources"] = str(data["primary_energy_sources"]).strip() or None

@@ -147,6 +147,22 @@ class Settings(BaseSettings):
         env="RESEND_API_KEY",
         description="Resend API key (required if EMAIL_PROVIDER=resend).",
     )
+    # ===== Web Push / VAPID =====
+    vapid_private_key: Optional[str] = Field(
+        default=None,
+        env="VAPID_PRIVATE_KEY",
+        description="Base64url VAPID private key for web push.",
+    )
+    vapid_public_key: Optional[str] = Field(
+        default=None,
+        env="VAPID_PUBLIC_KEY",
+        description="Base64url VAPID public key returned to browser.",
+    )
+    vapid_claims_email: str = Field(
+        default="support@carbonefficiencyintel.com",
+        env="VAPID_CLAIMS_EMAIL",
+        description="Email address for VAPID claims sub field.",
+    )
     email_from: str = Field(
         default="CEI <no-reply@carbonefficiencyintel.com>",
         env="EMAIL_FROM",

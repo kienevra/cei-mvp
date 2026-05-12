@@ -473,17 +473,70 @@ const Dashboard: React.FC = () => {
               color: "var(--cei-text-muted)",
             }}
           >
-            {t("dashboard.kpis.coverage.title", { defaultValue: "Data coverage (points)" })}
+            {t("dashboard.kpis.coverage.title", { defaultValue: "Data coverage" })}
           </div>
-          <div style={{ marginTop: "0.35rem", fontSize: "1.4rem", fontWeight: 600 }}>
-            {hasSummaryData ? summary!.points.toLocaleString() : "—"}
-          </div>
-          <div style={{ marginTop: "0.25rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-            {t("dashboard.kpis.coverage.body", {
-              defaultValue:
-                "Total number of readings in the selected window. Use this as a quick sense-check of how “complete” your dataset is.",
-            })}
-          </div>
+
+          {(() => {
+            const actual = hasSummaryData ? summary!.points : 0;
+            const expected = siteCount != null && siteCount > 0
+              ? siteCount * (summary?.window_hours ?? 24)
+              : null;
+            const pct = expected != null && expected > 0
+              ? Math.round((actual / expected) * 100)
+              : null;
+            const color = pct == null
+              ? "#9ca3af"
+              : pct >= 95 ? "#22c55e"
+              : pct >= 80 ? "#fb923c"
+              : "#f87171";
+
+            return (
+              <>
+                <div style={{ marginTop: "0.35rem", display: "flex", alignItems: "baseline", gap: "0.4rem" }}>
+                  <span style={{ fontSize: "1.4rem", fontWeight: 600, color }}>
+                    {pct != null ? `${pct}%` : hasSummaryData ? actual.toLocaleString() : "—"}
+                  </span>
+                  {pct != null && (
+                    <span style={{ fontSize: "0.8rem", color: "#9ca3af" }}>
+                      {actual.toLocaleString()} / {expected!.toLocaleString()} pts
+                    </span>
+                  )}
+                </div>
+
+                {/* Progress bar */}
+                {pct != null && (
+                  <div style={{
+                    marginTop: "0.5rem",
+                    height: 4,
+                    borderRadius: 999,
+                    background: "rgba(148,163,184,0.12)",
+                    overflow: "hidden",
+                  }}>
+                    <div style={{
+                      height: "100%",
+                      width: `${Math.min(pct, 100)}%`,
+                      borderRadius: 999,
+                      background: color,
+                      transition: "width 0.6s ease",
+                    }} />
+                  </div>
+                )}
+
+                <div style={{ marginTop: "0.35rem", fontSize: "0.78rem", color: "#9ca3af" }}>
+                  {pct == null
+                    ? t("dashboard.kpis.coverage.body", {
+                        defaultValue: "Total readings in the last 24h across all sites.",
+                      })
+                    : pct >= 95
+                    ? "Full coverage — all sites reporting on schedule."
+                    : pct >= 80
+                    ? `${100 - pct}% of expected readings missing — check ingest health.`
+                    : `Coverage is low — ${expected! - actual} readings missing. Check your data pipeline.`
+                  }
+                </div>
+              </>
+            );
+          })()}
         </div>
 
         <div className="cei-card">
@@ -512,56 +565,135 @@ const Dashboard: React.FC = () => {
 
         {/* Ingest health card */}
         <div className="cei-card">
-          <div
-            style={{
+          {/* Title + status badge */}
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "0.5rem",
+          }}>
+            <div style={{
               fontSize: "0.75rem",
               textTransform: "uppercase",
               letterSpacing: "0.08em",
               color: "var(--cei-text-muted)",
-            }}
-          >
-            {t("dashboard.ingest.title", { defaultValue: "Ingest health (last 24h)" })}
+            }}>
+              {t("dashboard.ingest.title", { defaultValue: "Ingest health (last 24h)" })}
+            </div>
+
+            {!ingestLoading && meterCount > 0 && (() => {
+              const pct = avgCompleteness ?? 0;
+              const bg = pct >= 98 && missingMeters === 0
+                ? "rgba(34,197,94,0.12)"
+                : pct >= 90
+                ? "rgba(251,146,60,0.12)"
+                : "rgba(248,113,113,0.12)";
+              const border = pct >= 98 && missingMeters === 0
+                ? "rgba(34,197,94,0.3)"
+                : pct >= 90
+                ? "rgba(251,146,60,0.3)"
+                : "rgba(248,113,113,0.3)";
+              const color = pct >= 98 && missingMeters === 0
+                ? "#22c55e"
+                : pct >= 90
+                ? "#fb923c"
+                : "#f87171";
+              const label = pct >= 98 && missingMeters === 0
+                ? "● Green"
+                : pct >= 90
+                ? "● Amber"
+                : "● Red";
+              return (
+                <span style={{
+                  fontSize: "0.7rem",
+                  fontWeight: 700,
+                  padding: "0.2rem 0.6rem",
+                  borderRadius: 999,
+                  background: bg,
+                  border: `1px solid ${border}`,
+                  color,
+                  letterSpacing: "0.03em",
+                }}>
+                  {label}
+                </span>
+              );
+            })()}
           </div>
 
-          <div style={{ marginTop: "0.35rem", fontSize: "1.2rem", fontWeight: 600 }}>
-            {ingestStatusLabel}
-          </div>
+          {ingestLoading ? (
+            <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              {t("dashboard.ingest.loading", { defaultValue: "Checking meter completeness…" })}
+            </div>
+          ) : meterCount === 0 ? (
+            <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+              {t("dashboard.ingest.noMetersBody", {
+                defaultValue: "No meters detected. Once data is ingested, this card will show coverage by meter.",
+              })}
+            </div>
+          ) : (
+            <>
+              {/* Completeness percentage + progress bar */}
+              <div style={{ marginTop: "0.5rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.3rem" }}>
+                  <span style={{
+                    fontSize: "1.4rem",
+                    fontWeight: 600,
+                    color: (avgCompleteness ?? 0) >= 95 ? "#22c55e"
+                      : (avgCompleteness ?? 0) >= 80 ? "#fb923c"
+                      : "#f87171",
+                  }}>
+                    {(avgCompleteness ?? 0).toFixed(1)}%
+                  </span>
+                  <span style={{ fontSize: "0.75rem", color: "#9ca3af" }}>avg completeness</span>
+                </div>
+                <div style={{
+                  height: 4,
+                  borderRadius: 999,
+                  background: "rgba(148,163,184,0.12)",
+                  overflow: "hidden",
+                }}>
+                  <div style={{
+                    height: "100%",
+                    width: `${Math.min(avgCompleteness ?? 0, 100)}%`,
+                    borderRadius: 999,
+                    background: (avgCompleteness ?? 0) >= 95 ? "#22c55e"
+                      : (avgCompleteness ?? 0) >= 80 ? "#fb923c"
+                      : "#f87171",
+                    transition: "width 0.6s ease",
+                  }} />
+                </div>
+              </div>
 
-          <div
-            style={{
-              marginTop: "0.25rem",
-              fontSize: "0.8rem",
-              color: "var(--cei-text-muted)",
-              lineHeight: 1.5,
-            }}
-          >
-            {ingestLoading ? (
-              t("dashboard.ingest.loading", { defaultValue: "Checking meter completeness…" })
-            ) : meterCount === 0 ? (
-              t("dashboard.ingest.noMetersBody", {
-                defaultValue:
-                  "No meters returned. Once data is ingested, this will show coverage by meter.",
-              })
-            ) : (
-              <>
-                {t("dashboard.ingest.avgCompleteness", { defaultValue: "Avg completeness" })}:{" "}
-                <strong>{(avgCompleteness ?? 0).toFixed(1)}%</strong>{" "}
-                · {t("dashboard.ingest.metersUnder90", { defaultValue: "Meters under 90%" })}:{" "}
-                <strong>{missingMeters}</strong> ·{" "}
-                {t("dashboard.ingest.meters", { defaultValue: "Meters" })}:{" "}
-                <strong>{meterCount}</strong>
+              {/* Stats grid */}
+              <div style={{
+                marginTop: "0.65rem",
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "0.4rem 0.75rem",
+                fontSize: "0.78rem",
+              }}>
+                <div>
+                  <div style={{ color: "#9ca3af", marginBottom: "0.1rem" }}>Meters tracked</div>
+                  <div style={{ fontWeight: 600, color: "#e5e7eb" }}>{meterCount}</div>
+                </div>
+                <div>
+                  <div style={{ color: "#9ca3af", marginBottom: "0.1rem" }}>Under 90%</div>
+                  <div style={{
+                    fontWeight: 600,
+                    color: missingMeters === 0 ? "#22c55e" : "#f87171",
+                  }}>
+                    {missingMeters === 0 ? "None ✓" : `${missingMeters} meter${missingMeters > 1 ? "s" : ""}`}
+                  </div>
+                </div>
                 {oldestLastSeenLabel && (
-                  <>
-                    {" "}
-                    · {t("dashboard.ingest.oldestLastSeen", { defaultValue: "Oldest last seen" })}:{" "}
-                    <span style={{ color: "var(--cei-text-accent)" }}>
-                      {oldestLastSeenLabel}
-                    </span>
-                  </>
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <div style={{ color: "#9ca3af", marginBottom: "0.1rem" }}>Oldest last seen</div>
+                    <div style={{ fontWeight: 500, color: "#38bdf8" }}>{oldestLastSeenLabel}</div>
+                  </div>
                 )}
-              </>
-            )}
-          </div>
+              </div>
+            </>
+          )}
         </div>
       </section>
 

@@ -14,6 +14,7 @@ import type {
   OrganizationSummary,
   OrgSettingsUpdateRequest,
 } from "../types/auth";
+import { usePushNotifications } from "../hooks/usePushNotifications";
 
 // ─── Static country tariff hints ─────────────────────────────────────────────
 // Source: Eurostat / IEA / local utility data (2025 industrial averages).
@@ -135,7 +136,77 @@ function parseStringToInput(val: unknown): string {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
+function PushNotificationCard() {
+  const { permission, isSubscribed, isLoading, error, isSupported, enable, disable } =
+    usePushNotifications();
 
+  const statusColor = isSubscribed ? "#22c55e" : permission === "denied" ? "#f87171" : "#9ca3af";
+  const statusText  = !isSupported
+    ? "Not supported in this browser"
+    : permission === "denied"
+    ? "Blocked — enable in browser settings"
+    : isSubscribed
+    ? "Active on this device"
+    : "Not enabled on this device";
+
+  return (
+    <>
+      <div style={{ fontSize: "0.9rem", fontWeight: 600, marginBottom: "0.5rem",
+        display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span>Alert push notifications</span>
+          <span style={{
+            fontSize: "0.72rem", padding: "0.2rem 0.6rem", borderRadius: 999, fontWeight: 700,
+            background: isSubscribed ? "rgba(34,197,94,0.12)" : "rgba(148,163,184,0.08)",
+            border: `1px solid ${isSubscribed ? "rgba(34,197,94,0.3)" : "rgba(148,163,184,0.15)"}`,
+            color: statusColor,
+          }}>
+            {isSubscribed ? "● Enabled" : "○ Disabled"}
+          </span>
+        </span>
+      </div>
+
+      <p style={{ fontSize: "0.8rem", color: "#9ca3af", marginBottom: "0.75rem" }}>
+        Receive banner notifications on this device when CEI fires a
+        <strong style={{ color: "#fb923c" }}> warning</strong> or
+        <strong style={{ color: "#f87171" }}> critical</strong> alert —
+        even when the browser tab is closed.
+      </p>
+
+      <div style={{ fontSize: "0.78rem", color: "#9ca3af", marginBottom: "0.75rem" }}>
+        Status: <span style={{ color: statusColor, fontWeight: 600 }}>{statusText}</span>
+      </div>
+
+      {error && (
+        <div style={{ marginBottom: "0.6rem", fontSize: "0.78rem", color: "#f87171" }}>⚠ {error}</div>
+      )}
+
+      {isSupported && permission !== "denied" && (
+        <button
+          type="button"
+          className="cei-btn"
+          onClick={isSubscribed ? disable : enable}
+          disabled={isLoading}
+          style={{ opacity: isLoading ? 0.7 : 1 }}
+        >
+          {isLoading
+            ? "Please wait…"
+            : isSubscribed
+            ? "Disable notifications on this device"
+            : "Enable notifications on this device"}
+        </button>
+      )}
+
+      {permission === "denied" && (
+        <p style={{ fontSize: "0.75rem", color: "#9ca3af", marginTop: "0.5rem" }}>
+          Notifications are blocked at the browser level. Go to your browser's site
+          settings for <strong>{window.location.hostname}</strong> and allow
+          notifications, then reload the page.
+        </p>
+      )}
+    </>
+  );
+}
 const Settings: React.FC = () => {
   const { t } = useTranslation();
 
@@ -456,6 +527,15 @@ const Settings: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {/* ── Push notifications ── */}
+      {account && org && (
+        <section className="dashboard-row">
+          <div className="cei-card" style={{ width: "100%" }}>
+            <PushNotificationCard />
+          </div>
+        </section>
+      )}
 
       {/* ── Energy & tariffs ── */}
       <section className="dashboard-row">

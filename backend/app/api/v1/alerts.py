@@ -836,6 +836,23 @@ def _persist_alert_events(
                         )
                     )
 
+                    # Fire push notification for warning/critical
+                    if a.severity in ("warning", "critical") and organization_id:
+                        try:
+                            from app.services.push_notifications import send_alert_push
+                            send_alert_push(
+                                db=db,
+                                org_id=organization_id,
+                                severity=a.severity,
+                                title=a.title,
+                                message=a.message,
+                                site_name=a.site_name,
+                                metric=a.metric,
+                                site_id=a.site_id,
+                            )
+                        except Exception:
+                            pass  # push is best-effort, never blocks alert persistence
+
                 # -------------------------
                 # (B) SiteEvent dedupe/insert (timeline) — independent from AlertEvent
                 # -------------------------

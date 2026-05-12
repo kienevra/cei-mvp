@@ -324,7 +324,7 @@ def get_production_correlation(
             day.is_anomaly = True
             day.anomaly_reason = (
                 f"kWh/{day.unit_label} ({day.kwh_per_unit:.3f}) exceeds "
-                f"mean + 1.5σ threshold ({anomaly_threshold:.3f})."
+                f"mean + 1.5\u03c3 threshold ({anomaly_threshold:.3f})."
             )
 
     # --- Directional anomaly: energy up, production down vs prior day ---

@@ -46,6 +46,9 @@ class Organization(Base):
     # ✅ Cross-DB boolean defaults (SQLite-safe + Postgres-safe)
     enable_alerts = Column(Boolean, nullable=False, default=True, server_default=sa.true())
     enable_reports = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    enable_notification_emails = Column(
+    Boolean, nullable=False, default=True, server_default=sa.true()
+)
 
     stripe_customer_id = Column(String(255), nullable=True)
     stripe_subscription_id = Column(String(255), nullable=True)
@@ -621,4 +624,22 @@ class PasswordResetToken(Base):
     __table_args__ = (
         Index("ix_pwdreset_user_expires", "user_id", "expires_at"),
         Index("ix_pwdreset_email_expires", "email", "expires_at"),
+    )
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id         = Column(Integer, ForeignKey("user.id", ondelete="SET NULL"), nullable=True)
+    endpoint        = Column(String(2048), nullable=False)
+    p256dh          = Column(String(512),  nullable=False)
+    auth            = Column(String(128),  nullable=False)
+    device_label    = Column(String(128),  nullable=True)
+    is_active       = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    created_at      = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
+    last_used_at    = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("endpoint", name="uq_push_subscription_endpoint"),
     )
