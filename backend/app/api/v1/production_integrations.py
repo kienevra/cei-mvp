@@ -34,6 +34,7 @@ from app.api.v1.auth import get_current_user
 from app.api.deps import require_owner
 from app.db.session import get_db
 from app.models import ProductionIntegration, ProductionRecord, Site
+from app.core.security import get_org_context, OrgContext
 
 logger = logging.getLogger("cei.prod_integrations")
 
@@ -437,3 +438,281 @@ async def receive_webhook(
         "date":    str(record_date),
         "units_produced": payload.units_produced,
     }
+
+
+class ProductionRecordIn(BaseModel):
+    """Single production record for API ingest."""
+    site_id:        str
+    date:           str            # YYYY-MM-DD
+    units_produced: float
+    unit_label:     Optional[str] = "units"
+    notes:          Optional[str] = None
+
+
+class ProductionBatchRequest(BaseModel):
+    records: List[ProductionRecordIn]
+
+
+class ProductionIngestResponse(BaseModel):
+    inserted: int
+    updated:  int
+    skipped:  int
+    errors:   List[str]
+
+
+def _parse_site_numeric_id(site_id: str) -> Optional[int]:
+    """Convert 'site-1' or '1' to integer 1."""
+    s = (site_id or "").strip()
+    if s.startswith("site-"):
+        try:
+            return int(s.split("site-")[-1])
+        except ValueError:
+            return None
+    try:
+        return int(s)
+    except ValueError:
+        return None
+
+
+def _validate_site_access(
+    db: Session,
+    org_id: int,
+    site_id_raw: str,
+) -> int:
+    """
+    Validates the site belongs to the org.
+    Returns the numeric site ID.
+    Raises 404 if not found (avoids leaking existence).
+    """
+    from app.models import Site as SiteModel
+
+    numeric_id = _parse_site_numeric_id(site_id_raw)
+    if numeric_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid site_id format: {site_id_raw!r}. Use 'site-1' or '1'.",
+        )
+
+    site = (
+        db.query(SiteModel)
+        .filter(SiteModel.id == numeric_id, SiteModel.org_id == org_id)
+        .first()
+    )
+    if not site:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Site not found.",
+        )
+
+    return numeric_id
+
+
+@router.post(
+    "/production/ingest",
+    response_model=ProductionIngestResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Ingest a single production record via CEI integration token",
+)
+def ingest_production_record(
+    payload: ProductionRecordIn,
+    db:      Session = Depends(get_db),
+    org_ctx          = Depends(get_org_context),
+) -> ProductionIngestResponse:
+    """
+    Push a single daily production record using a CEI integration token.
+
+    Accepts the same `cei_int_...` token used for energy timeseries push —
+    one token covers both data streams.
+
+    **Example:**
+    ```
+    POST /api/v1/production/ingest
+    Authorization: Bearer cei_int_...
+
+    {
+      "site_id":        "site-1",
+      "date":           "2026-05-11",
+      "units_produced": 4800,
+      "unit_label":     "pezzi"
+    }
+    ```
+
+    Idempotent: existing records for the same (site, date) are updated.
+    """
+    from app.models import ProductionRecord as PR
+
+    org_id = int(getattr(org_ctx, "organization_id"))
+
+    numeric_site_id = _validate_site_access(db, org_id, payload.site_id)
+
+    try:
+        record_date = date.fromisoformat(payload.date)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {payload.date!r}. Use YYYY-MM-DD.",
+        )
+
+    if payload.units_produced < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="units_produced must be >= 0.",
+        )
+
+    existing = (
+        db.query(PR)
+        .filter(PR.site_id == numeric_site_id, PR.date == record_date)
+        .first()
+    )
+
+    if existing:
+        existing.units_produced = payload.units_produced
+        if payload.unit_label:
+            existing.unit_label = payload.unit_label
+        if payload.notes:
+            existing.notes = payload.notes
+        db.commit()
+        return ProductionIngestResponse(inserted=0, updated=1, skipped=0, errors=[])
+    else:
+        db.add(PR(
+            organization_id=org_id,
+            site_id=numeric_site_id,
+            date=record_date,
+            units_produced=payload.units_produced,
+            unit_label=payload.unit_label or "units",
+            notes=payload.notes or "API ingest",
+        ))
+        db.commit()
+        return ProductionIngestResponse(inserted=1, updated=0, skipped=0, errors=[])
+
+
+@router.post(
+    "/production/ingest/batch",
+    response_model=ProductionIngestResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Batch ingest production records via CEI integration token",
+)
+def ingest_production_batch(
+    payload: ProductionBatchRequest,
+    db:      Session = Depends(get_db),
+    org_ctx          = Depends(get_org_context),
+) -> ProductionIngestResponse:
+    """
+    Push multiple daily production records in a single call.
+
+    Accepts the same `cei_int_...` token used for energy timeseries push.
+    Records for different sites can be mixed in the same batch.
+
+    **Example:**
+    ```
+    POST /api/v1/production/ingest/batch
+    Authorization: Bearer cei_int_...
+
+    {
+      "records": [
+        {"site_id": "site-1", "date": "2026-05-11", "units_produced": 4800, "unit_label": "pezzi"},
+        {"site_id": "site-1", "date": "2026-05-12", "units_produced": 5100, "unit_label": "pezzi"},
+        {"site_id": "site-2", "date": "2026-05-11", "units_produced": 3900, "unit_label": "pezzi"}
+      ]
+    }
+    ```
+
+    Returns counts of inserted, updated, and skipped records.
+    Row-level errors are collected and returned without aborting the batch.
+    """
+    from app.models import ProductionRecord as PR
+
+    org_id = int(getattr(org_ctx, "organization_id"))
+
+    if not payload.records:
+        return ProductionIngestResponse(inserted=0, updated=0, skipped=0, errors=[])
+
+    if len(payload.records) > 1000:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Batch limit is 1,000 records per request.",
+        )
+
+    # Cache validated site IDs to avoid repeated DB lookups
+    site_cache: dict = {}
+    inserted = updated = skipped = 0
+    errors: List[str] = []
+
+    for i, rec in enumerate(payload.records):
+        row_label = f"Row {i + 1} (site={rec.site_id} date={rec.date})"
+        try:
+            # Validate and cache site
+            if rec.site_id not in site_cache:
+                try:
+                    site_cache[rec.site_id] = _validate_site_access(db, org_id, rec.site_id)
+                except HTTPException as exc:
+                    errors.append(f"{row_label}: {exc.detail}")
+                    skipped += 1
+                    continue
+
+            numeric_site_id = site_cache[rec.site_id]
+
+            # Parse date
+            try:
+                record_date = date.fromisoformat(rec.date)
+            except ValueError:
+                errors.append(f"{row_label}: invalid date format, expected YYYY-MM-DD")
+                skipped += 1
+                continue
+
+            if rec.units_produced < 0:
+                errors.append(f"{row_label}: units_produced must be >= 0")
+                skipped += 1
+                continue
+
+            # Upsert
+            existing = (
+                db.query(PR)
+                .filter(PR.site_id == numeric_site_id, PR.date == record_date)
+                .first()
+            )
+
+            if existing:
+                existing.units_produced = rec.units_produced
+                if rec.unit_label:
+                    existing.unit_label = rec.unit_label
+                if rec.notes:
+                    existing.notes = rec.notes
+                updated += 1
+            else:
+                db.add(PR(
+                    organization_id=org_id,
+                    site_id=numeric_site_id,
+                    date=record_date,
+                    units_produced=rec.units_produced,
+                    unit_label=rec.unit_label or "units",
+                    notes=rec.notes or "API batch ingest",
+                ))
+                inserted += 1
+
+        except Exception as exc:
+            logger.exception("Unexpected error at %s", row_label)
+            errors.append(f"{row_label}: unexpected error — {exc}")
+            skipped += 1
+
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Batch commit failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database commit failed: {exc}",
+        )
+
+    logger.info(
+        "Production batch ingest org_id=%s inserted=%s updated=%s skipped=%s errors=%s",
+        org_id, inserted, updated, skipped, len(errors),
+    )
+
+    return ProductionIngestResponse(
+        inserted=inserted,
+        updated=updated,
+        skipped=skipped,
+        errors=errors,
+    )
