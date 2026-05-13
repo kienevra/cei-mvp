@@ -265,6 +265,35 @@ export default function ProductionCorrelation({ siteId }: Props) {
     }
   }, [siteId, start, end]);
 
+  const handleDownloadISO50001 = () => {
+    if (!data || !data.days || data.days.length === 0) return;
+    const headers = [
+      "date", "site_id", "kwh", "units_produced", "unit_label",
+      "kwh_per_unit", "deviation_from_mean_pct", "is_anomaly",
+      "anomaly_reason", "baseline_mean_kwh_per_unit"
+    ].join(",");
+    const rows = data.days.map((d: CorrelationDay) => {
+      const dev = data.mean_kwh_per_unit
+        ? (((d.kwh_per_unit - data.mean_kwh_per_unit) / data.mean_kwh_per_unit) * 100).toFixed(2)
+        : "";
+      return [
+        d.date, siteId, d.kwh, d.units_produced, d.unit_label,
+        d.kwh_per_unit, dev,
+        d.is_anomaly ? "TRUE" : "FALSE",
+        `"${(d.anomaly_reason || "").replace(/"/g, '""')}"`,
+        data.mean_kwh_per_unit ?? "",
+      ].join(",");
+    });
+    const csv  = [headers, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `cei_iso50001_site${siteId}_${start}_${end}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const trend = data ? TREND_META[data.trend_direction] : null;
   const anomalies = data?.days.filter(d => d.is_anomaly) ?? [];
 
@@ -343,6 +372,24 @@ export default function ProductionCorrelation({ siteId }: Props) {
           >
             {showUpload ? "Hide upload" : "Upload CSV"}
           </button>
+
+          {/* ISO 50001 download */}
+          {data && data.days?.length > 0 && (
+            <button
+              onClick={handleDownloadISO50001}
+              style={{
+                background: "transparent",
+                border: "1px solid rgba(34,197,94,0.3)",
+                borderRadius: 999,
+                color: "#22c55e",
+                fontSize: 12,
+                padding: "6px 14px",
+                cursor: "pointer",
+              }}
+            >
+              ↓ ISO 50001 CSV
+            </button>
+          )}
         </div>
       </div>
 

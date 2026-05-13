@@ -27,6 +27,7 @@ import SiteTimelineCard from "../components/SiteTimelineCard";
 import SiteEnergyChart from "../components/SiteEnergyChart";
 import SiteForecastChart from "../components/SiteForecastChart";
 import ProductionCorrelation from "../components/ProductionCorrelation";
+import ProductionIntegrations from "../components/ProductionIntegrations";
 
 type SiteRecord = {
   id: number | string;
@@ -178,6 +179,7 @@ const SiteView: React.FC = () => {
   const { t } = useTranslation();
 
   const { id } = useParams<{ id: string }>();
+  const numericSiteId = id ? parseInt(id, 10) : 0;
   const navigate = useNavigate();
 
   const [site, setSite] = useState<SiteRecord | null>(null);
@@ -1720,6 +1722,7 @@ const SiteView: React.FC = () => {
         <section style={{ marginTop: "0.75rem" }}>
           <div className="cei-card">
             <ProductionCorrelation siteId={id} />
+            <ProductionIntegrations siteId={numericSiteId} />
           </div>
         </section>
       )}

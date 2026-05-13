@@ -445,6 +445,25 @@ class ProductionRecord(Base):
         Index("ix_production_record_org_date", "organization_id", "date"),
     )
 
+class ProductionIntegration(Base):
+    __tablename__ = "production_integrations"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    organization_id   = Column(Integer, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id           = Column(Integer, ForeignKey("site.id",          ondelete="CASCADE"), nullable=False, index=True)
+    integration_type  = Column(String(32),  nullable=False)
+    label             = Column(String(128), nullable=True)
+    webhook_token     = Column(String(128), nullable=True, unique=True, index=True)
+    config_encrypted  = Column(Text,        nullable=True)
+    is_active         = Column(Boolean,     nullable=False, default=True, server_default=sa.true())
+    last_sync_at      = Column(DateTime(timezone=True), nullable=True)
+    last_sync_status  = Column(String(32),  nullable=True)
+    last_sync_message = Column(String(512), nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("site_id", "integration_type", name="uq_prod_integration_site_type"),
+    )
 
 class OrgLinkRequest(Base):
     """

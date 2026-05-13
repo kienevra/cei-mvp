@@ -373,6 +373,7 @@ from app.api.v1 import (  # noqa: E402
     password_recovery,
     manage,                 # Phase 3: managing org CRUD API
     push,                   # Web push notification subscriptions
+    production_integrations,
 )
 
 app.include_router(auth.router, prefix="/api/v1")
@@ -396,6 +397,7 @@ app.include_router(org_offboard.router, prefix="/api/v1")
 app.include_router(manage.router, prefix="/api/v1")  # Phase 3
 app.include_router(push.router, prefix="/api/v1")
 app.include_router(onboarding_router, prefix="/api/v1")
+app.include_router(production_integrations.router, prefix="/api/v1")
 
 
 @app.post("/auth/signup", include_in_schema=False)
