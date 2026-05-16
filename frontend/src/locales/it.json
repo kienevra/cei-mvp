@@ -694,7 +694,7 @@
     },
     "forecast": {
       "title": "Forecast prossime 24h",
-      "subtitle": "Energia oraria attesa per le prossime 24 ore basata sul modello baseline corrente. Interpretalo come indicativo finché non arriva il forecasting ML.",
+      "subtitle": "Energia oraria prevista per le prossime 24 ore, basata su Prophet ML forecasting.",
       "unit": "kWh · orario",
       "noData": "Nessun forecast disponibile.",
       "kpiChips": {

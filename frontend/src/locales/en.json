@@ -694,7 +694,7 @@
     },
     "forecast": {
       "title": "Next 24h forecast",
-      "subtitle": "Expected hourly energy for the next 24 hours based on the current baseline model. Treat this as directional until ML forecasting ships.",
+      "subtitle": "Expected hourly energy for the next 24 hours, powered by Prophet ML forecasting.",
       "unit": "kWh · hourly",
       "noData": "No forecast available yet.",
       "kpiChips": {

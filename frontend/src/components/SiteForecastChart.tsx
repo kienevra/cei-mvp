@@ -59,7 +59,7 @@ function fmtFull(ts: string): string {
 }
 
 const isStub = (method?: string) =>
-  !method || method.includes("stub") || method.includes("baseline");
+  !method || method.toLowerCase().includes("stub");
 
 // ─── Custom tooltip ───────────────────────────────────────────────────────────
 
@@ -174,7 +174,7 @@ function ForecastLegend({ hasCI, isStubMethod }: { hasCI: boolean; isStubMethod:
         </span>
       )}
 
-      {isStubMethod && (
+      {isStubMethod ? (
         <span style={{
           padding: "2px 8px",
           borderRadius: 999,
@@ -185,7 +185,20 @@ function ForecastLegend({ hasCI, isStubMethod }: { hasCI: boolean; isStubMethod:
           fontWeight: 600,
           letterSpacing: "0.04em",
         }}>
-          BASELINE STUB — upgrade to Prophet for live forecasting
+          Statistical baseline — more data needed for full ML forecast
+        </span>
+      ) : (
+        <span style={{
+          padding: "2px 8px",
+          borderRadius: 999,
+          background: "rgba(34,197,94,0.1)",
+          border: "1px solid rgba(34,197,94,0.25)",
+          color: "#22c55e",
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: "0.04em",
+        }}>
+          Prophet ML
         </span>
       )}
     </div>
