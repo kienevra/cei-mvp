@@ -218,16 +218,21 @@ const ManageDashboard: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    let isMounted = true;
+  const loadSummary = async () => {
     setSummaryLoading(true);
     setSummaryError(null);
-    Promise.all([getPortfolioSummary(), getOnboardingStatus()])
-      .then(([s, o]: [PortfolioSummary, OnboardingStatus]) => { if (!isMounted) return; setSummary(s); setOnboarding(o); })
-      .catch((e: Error) => { if (!isMounted) return; setSummaryError(e?.message ?? t("errors.generic")); })
-      .finally(() => { if (!isMounted) return; setSummaryLoading(false); });
-    return () => { isMounted = false; };
-  }, [t]);
+    try {
+      const [s, o] = await Promise.all([getPortfolioSummary(), getOnboardingStatus()]);
+      setSummary(s);
+      setOnboarding(o);
+    } catch (e: any) {
+      setSummaryError(e?.message ?? t("errors.generic"));
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
+  useEffect(() => { loadSummary(); }, [t]);
 
   useEffect(() => {
     let isMounted = true;
@@ -278,7 +283,7 @@ const ManageDashboard: React.FC = () => {
         )}
         <section style={{ marginTop: "1rem" }}>
           <div className="cei-card">
-            <LinkRequestsPanel />
+            <LinkRequestsPanel onAccepted={loadSummary} />
           </div>
         </section>
         {summary && (

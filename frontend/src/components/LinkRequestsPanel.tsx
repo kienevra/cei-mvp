@@ -19,7 +19,12 @@ function fmtDt(raw: string): string {
 
 function toMsg(err: unknown, fallback: string): string {
   const e = err as any;
-  return e?.response?.data?.detail ?? e?.response?.data?.message ?? e?.message ?? fallback;
+  const raw = e?.response?.data?.detail ?? e?.response?.data?.message ?? e?.message ?? fallback;
+  if (typeof raw === "string") return raw;
+  if (raw !== null && typeof raw === "object") {
+    return (raw as any).message ?? (raw as any).msg ?? JSON.stringify(raw);
+  }
+  return fallback;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -78,7 +83,11 @@ function statusBadge(status: string) {
   );
 }
 
-const LinkRequestsPanel: React.FC = () => {
+interface LinkRequestsPanelProps {
+  onAccepted?: () => void;
+}
+
+const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => {
   const [requests, setRequests] = useState<LinkRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +136,11 @@ const LinkRequestsPanel: React.FC = () => {
 
   const handleAccept = async (id: number) => {
     setActingId(id);
-    try { await consultantAcceptLinkRequest(id); load(); }
+    try {
+      await consultantAcceptLinkRequest(id);
+      load();
+      onAccepted?.();
+    }
     catch (e: unknown) { setError(toMsg(e, "Failed to accept.")); }
     finally { setActingId(null); }
   };

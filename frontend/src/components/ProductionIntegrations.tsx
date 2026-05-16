@@ -99,7 +99,12 @@ const ProductionIntegrations: React.FC<Props> = ({ siteId }) => {
       );
       setIntegrations(res.data);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || "Failed to load integrations.");
+      if (e?.response?.status === 403) {
+        // Consultant viewing client site — hide silently
+        return;
+      }
+      const detail = e?.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : "Failed to load integrations.");
     } finally {
       setLoading(false);
     }
@@ -145,7 +150,8 @@ const ProductionIntegrations: React.FC<Props> = ({ siteId }) => {
       setCreating(null);
       await load();
     } catch (e: any) {
-      setError(e?.response?.data?.detail || "Failed to create integration.");
+      const detail = e?.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : "Failed to create integration.");
     } finally {
       setSaving(false);
     }
@@ -159,7 +165,8 @@ const ProductionIntegrations: React.FC<Props> = ({ siteId }) => {
       await api.delete(`/production-integrations/${id}`);
       await load();
     } catch (e: any) {
-      setError(e?.response?.data?.detail || "Failed to delete integration.");
+      const detail = e?.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : "Failed to delete integration.");
     }
   };
 
@@ -172,7 +179,8 @@ const ProductionIntegrations: React.FC<Props> = ({ siteId }) => {
       await api.post(`/production-integrations/${id}/sync?days_back=30`);
       await load();
     } catch (e: any) {
-      setError(e?.response?.data?.detail || "Sync failed.");
+      const detail = e?.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : "Sync failed.");
     } finally {
       setSyncing(null);
     }

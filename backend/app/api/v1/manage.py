@@ -1083,7 +1083,7 @@ def consultant_initiate_link_request(
     from app.models import User as UserModel
     target_user = db.query(UserModel).filter(
         func.lower(UserModel.email) == payload.target_org_email.lower(),
-        UserModel.is_active == True,
+        UserModel.is_active == 1,
     ).first()
 
     if not target_user or not target_user.organization_id:
@@ -1105,18 +1105,26 @@ def consultant_initiate_link_request(
     if target_org.id == managing_org_id:
         raise HTTPException(status_code=400, detail="Cannot link your own organization.")
 
-    # Check for existing pending request
+    # Check for any existing request for this pair
     existing = db.query(OrgLinkRequest).filter(
         OrgLinkRequest.managing_org_id == managing_org_id,
         OrgLinkRequest.client_org_id == target_org.id,
-        OrgLinkRequest.status == "pending",
     ).first()
 
     if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A pending link request already exists for this organization.",
-        )
+        if existing.status == "pending":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A pending link request already exists for this organization.",
+            )
+        if existing.status == "accepted":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This organization is already linked to your portfolio.",
+            )
+        # status is cancelled or rejected — delete and allow re-request
+        db.delete(existing)
+        db.commit()
 
     req = OrgLinkRequest(
         managing_org_id=managing_org_id,
