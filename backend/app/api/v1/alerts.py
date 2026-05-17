@@ -853,6 +853,49 @@ def _persist_alert_events(
                         except Exception:
                             pass  # push is best-effort, never blocks alert persistence
 
+                        # Fire in-app notification
+                        try:
+                            from app.services.notification_service import notify, NotifType
+                            notif_type = (
+                                NotifType.ALERT_CRITICAL
+                                if a.severity == "critical"
+                                else NotifType.ALERT_WARNING
+                            )
+                            notify(
+                                db,
+                                org_id=organization_id,
+                                type=notif_type,
+                                title=a.title,
+                                body=a.message,
+                                extra={
+                                    "site_id":  a.site_id,
+                                    "severity": a.severity,
+                                    "metric":   a.metric,
+                                },
+                            )
+                            # Also notify managing org if this is a client org
+                            from app.models import Organization as OrgModel
+                            client_org = db.query(OrgModel).filter(
+                                OrgModel.id == organization_id
+                            ).first()
+                            if client_org and client_org.managed_by_org_id:
+                                notify(
+                                    db,
+                                    org_id=client_org.managed_by_org_id,
+                                    type=notif_type,
+                                    title=f"[{client_org.name}] {a.title}",
+                                    body=a.message,
+                                    extra={
+                                        "site_id":        a.site_id,
+                                        "severity":       a.severity,
+                                        "metric":         a.metric,
+                                        "client_org_id":  organization_id,
+                                        "client_org_name": client_org.name,
+                                    },
+                                )
+                        except Exception:
+                            pass  # notifications are best-effort
+
                 # -------------------------
                 # (B) SiteEvent dedupe/insert (timeline) — independent from AlertEvent
                 # -------------------------

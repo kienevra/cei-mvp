@@ -78,7 +78,11 @@ const NotificationBell: React.FC = () => {
   const { t } = useTranslation();
 
   const getNavTarget = (n: Notification): string | null => {
-    const siteId = n.extra?.site_id || n.extra?.client_org_id;
+    const rawSiteId = n.extra?.site_id;
+    const numericSiteId = rawSiteId
+      ? rawSiteId.toString().replace("site-", "")
+      : null;
+    const siteId = numericSiteId || n.extra?.client_org_id;
     switch (n.type) {
       case "link_request_received":
       case "link_request_cancelled":
@@ -93,9 +97,9 @@ const NotificationBell: React.FC = () => {
         return "/";
       case "alert_critical":
       case "alert_warning":
-        return siteId ? `/sites/${siteId}` : "/alerts";
+        return numericSiteId ? `/sites/${numericSiteId}` : "/alerts";
       case "ingest_health_degraded":
-        return siteId ? `/sites/${siteId}` : "/sites";
+        return numericSiteId ? `/sites/${numericSiteId}` : "/sites";
       case "token_first_use":
         return "/settings";
       default:

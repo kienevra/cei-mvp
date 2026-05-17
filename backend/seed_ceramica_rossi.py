@@ -27,6 +27,7 @@ SITES = [
 ]
 
 DAYS_BACK  = 30
+DATE_OFFSET_DAYS = 0  # increase this if you need to re-seed with fresh timestamps
 BATCH_SIZE = 200   # records per POST
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -118,7 +119,7 @@ def main():
     print(f"Token: {token[:20]}…")
 
     now   = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    start = now - timedelta(days=DAYS_BACK)
+    start = now - timedelta(days=DAYS_BACK + DATE_OFFSET_DAYS)
 
     for site in SITES:
         site_id   = site["id"]
@@ -144,7 +145,7 @@ def main():
                     {"records": batch},
                     token=token,
                 )
-                inserted = result.get("inserted", 0)
+                inserted = result.get("ingested", 0)
                 total   += inserted
                 print(f"  …{total} records inserted")
                 batch = []
@@ -156,7 +157,7 @@ def main():
                 {"records": batch},
                 token=token,
             )
-            total += result.get("inserted", 0)
+            total += result.get("ingested", 0)
 
         print(f"  ✓ {site['name']}: {total} total records inserted")
 
