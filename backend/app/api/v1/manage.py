@@ -28,6 +28,7 @@ from app.api.deps import (
 )
 from app.api.v1.alerts import DEFAULT_THRESHOLDS
 from app.core.security import OrgContext, get_org_context
+from app.services.notification_service import notify, NotifType
 from app.db.session import get_db
 from app.models import (
     AlertEvent,
@@ -1135,6 +1136,14 @@ def consultant_initiate_link_request(
         message=payload.message,
     )
     db.add(req)
+    notify(
+        db,
+        org_id=target_org.id,
+        type=NotifType.LINK_REQUEST_RECEIVED,
+        title=f"{managing_org.name} vuole gestire il tuo account",
+        body="Hai ricevuto una richiesta di collegamento. Vai su Account per accettare o rifiutare.",
+        extra={"managing_org_id": managing_org_id, "managing_org_name": managing_org.name},
+    )
     db.commit()
     db.refresh(req)
 
@@ -1233,6 +1242,16 @@ def consultant_reject_link_request(
         raise HTTPException(status_code=404, detail="Link request not found.")
     req.status = "rejected"
     req.updated_at = datetime.utcnow()
+    client_org = db.get(Organization, req.client_org_id)
+    managing_org = db.get(Organization, req.managing_org_id)
+    notify(
+        db,
+        org_id=req.client_org_id,
+        type=NotifType.LINK_REQUEST_REJECTED,
+        title=f"{managing_org.name if managing_org else 'Il consulente'} ha rifiutato la richiesta",
+        body="La richiesta di collegamento è stata rifiutata.",
+        extra={"managing_org_name": managing_org.name if managing_org else ""},
+    )
     db.commit()
     db.refresh(req)
     return _req_to_out(db, req)
@@ -1260,6 +1279,15 @@ def consultant_cancel_link_request(
         raise HTTPException(status_code=404, detail="Link request not found.")
     req.status = "cancelled"
     req.updated_at = datetime.utcnow()
+    managing_org = db.get(Organization, req.managing_org_id)
+    notify(
+        db,
+        org_id=req.client_org_id,
+        type=NotifType.LINK_REQUEST_CANCELLED,
+        title=f"{managing_org.name if managing_org else 'Il consulente'} ha annullato la richiesta",
+        body="La richiesta di collegamento è stata annullata dal consulente.",
+        extra={"managing_org_name": managing_org.name if managing_org else ""},
+    )
     db.commit()
 
 
@@ -1274,6 +1302,15 @@ def _apply_link(db: Session, req: OrgLinkRequest) -> None:
     client_org.org_type = "client"
     req.status = "accepted"
     req.updated_at = datetime.utcnow()
+    managing_org = db.get(Organization, req.managing_org_id)
+    notify(
+        db,
+        org_id=req.client_org_id,
+        type=NotifType.ORG_LINKED,
+        title=f"Collegato a {managing_org.name if managing_org else 'un consulente'}",
+        body="Il tuo account è ora gestito da un consulente CEI.",
+        extra={"managing_org_id": req.managing_org_id, "managing_org_name": managing_org.name if managing_org else ""},
+    )
     db.commit()
     db.refresh(req)
 

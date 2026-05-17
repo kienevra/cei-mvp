@@ -14,6 +14,8 @@ from sqlalchemy import (
     Numeric,
     Boolean,
     UniqueConstraint,
+    JSON,
+    func,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import text
@@ -22,6 +24,26 @@ from app.db.base import Base
 # Cross-DB timestamp default (SQLite + Postgres)
 DB_NOW = text("CURRENT_TIMESTAMP")
 
+# ── ADD THIS to backend/app/models.py ────────────────────────────────────────
+# Add after the existing imports (JSON is likely already imported via sqlalchemy)
+# Add this class alongside the other model classes
+
+class Notification(Base):
+    """
+    In-app notification for org members.
+    Scoped to an org; optionally targeted to a specific user.
+    """
+    __tablename__ = "notifications"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    org_id     = Column(Integer, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id    = Column(Integer, ForeignKey("user.id", ondelete="SET NULL"), nullable=True, index=True)
+    type       = Column(String(64),  nullable=False, index=True)
+    title      = Column(String(255), nullable=False)
+    body       = Column(Text,        nullable=True)
+    is_read    = Column(Boolean,     nullable=False, default=False, server_default="false")
+    extra      = Column(JSON,        nullable=True)   # e.g. {"site_id": 1, "org_name": "Ceramica"}
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 class Organization(Base):
     __tablename__ = "organization"

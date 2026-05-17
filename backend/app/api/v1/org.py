@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import create_org_audit_event, require_owner, get_current_active_user
+from app.services.notification_service import notify, NotifType
 from sqlalchemy import func
 from app.core.security import get_current_user
 from app.db.session import get_db
@@ -586,10 +587,26 @@ def org_accept_link_request(
     client_org.org_type = "client"
     req.status = "accepted"
     req.updated_at = datetime.utcnow()
+    managing_org = db.get(Organization, req.managing_org_id)
+    notify(
+        db,
+        org_id=req.managing_org_id,
+        type=NotifType.LINK_REQUEST_ACCEPTED,
+        title=f"{client_org.name} ha accettato la richiesta",
+        body="L'organizzazione è ora nel tuo portfolio.",
+        extra={"client_org_id": client_org.id, "client_org_name": client_org.name},
+    )
+    notify(
+        db,
+        org_id=org_id,
+        type=NotifType.ORG_LINKED,
+        title=f"Collegato a {managing_org.name if managing_org else 'un consulente'}",
+        body="Il tuo account è ora gestito da un consulente CEI.",
+        extra={"managing_org_name": managing_org.name if managing_org else ""},
+    )
     db.commit()
     db.refresh(req)
- 
-    managing_org = db.get(Organization, req.managing_org_id)
+
     return OrgLinkRequestOut(
         id=req.id,
         managing_org_id=req.managing_org_id,
@@ -623,10 +640,18 @@ def org_reject_link_request(
         raise HTTPException(status_code=404, detail="Link request not found.")
     req.status = "rejected"
     req.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(req)
     managing_org = db.get(Organization, req.managing_org_id)
     client_org   = db.get(Organization, req.client_org_id)
+    notify(
+        db,
+        org_id=req.managing_org_id,
+        type=NotifType.LINK_REQUEST_REJECTED,
+        title=f"{client_org.name if client_org else 'L\'organizzazione'} ha rifiutato la richiesta",
+        body="L'organizzazione ha scelto di non collegarsi al tuo portfolio.",
+        extra={"client_org_name": client_org.name if client_org else ""},
+    )
+    db.commit()
+    db.refresh(req)
     return OrgLinkRequestOut(
         id=req.id,
         managing_org_id=req.managing_org_id,
@@ -696,6 +721,15 @@ def unlink_from_consultant(
     org.org_type = "standalone"
     org.managed_by_org_id = None
     db.add(org)
+    if managing_org_id:
+        notify(
+            db,
+            org_id=managing_org_id,
+            type=NotifType.ORG_UNLINKED,
+            title=f"{org.name} ha lasciato il portfolio",
+            body="L'organizzazione si è scollegata dal tuo account di gestione.",
+            extra={"client_org_id": org.id, "client_org_name": org.name},
+        )
 
     # Remove the accepted link request so the pair can be re-linked in future
     # Remove all link requests for this pair so it can be re-linked in future

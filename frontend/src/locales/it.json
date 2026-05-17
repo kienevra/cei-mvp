@@ -1389,5 +1389,55 @@
       "noneDetected": "Nessuno rilevato",
       "sampleIssues": "Esempi problemi a livello riga (prime {{count}}):"
     }
+  },
+  "notifications": {
+    "link_request_received": {
+      "title": "{{name}} vuole gestire il tuo account",
+      "body": "Hai ricevuto una richiesta di collegamento. Vai su Account per accettare o rifiutare."
+    },
+    "link_request_accepted": {
+      "title": "{{name}} ha accettato la richiesta",
+      "body": "L'organizzazione è ora nel tuo portfolio."
+    },
+    "link_request_rejected": {
+      "title": "{{name}} ha rifiutato la richiesta",
+      "body": "L'organizzazione ha scelto di non collegarsi al tuo portfolio."
+    },
+    "link_request_cancelled": {
+      "title": "{{name}} ha annullato la richiesta",
+      "body": "La richiesta di collegamento è stata annullata dal consulente."
+    },
+    "org_linked": {
+      "title": "Collegato a {{name}}",
+      "body": "Il tuo account è ora gestito da un consulente CEI."
+    },
+    "org_unlinked": {
+      "title": "{{name}} ha lasciato il portfolio",
+      "body": "L'organizzazione si è scollegata dal tuo account di gestione."
+    },
+    "alert_critical": {
+      "title": "Alert critico — {{name}}",
+      "body": "È stata rilevata un'anomalia energetica critica."
+    },
+    "alert_warning": {
+      "title": "Avviso — {{name}}",
+      "body": "È stato rilevato un pattern energetico da controllare."
+    },
+    "invite_received": {
+      "title": "Hai ricevuto un invito a unirti a un'organizzazione",
+      "body": "Controlla la tua email per accettare l'invito."
+    },
+    "team_member_joined": {
+      "title": "Un nuovo membro si è unito al tuo team",
+      "body": "Qualcuno ha accettato un invito alla tua organizzazione."
+    },
+    "ingest_health_degraded": {
+      "title": "Il sito {{name}} ha smesso di inviare dati",
+      "body": "Nessun dato ricevuto nelle ultime 24 ore."
+    },
+    "token_first_use": {
+      "title": "Primo utilizzo del token di integrazione",
+      "body": "Un token ha effettuato il primo push di dati a CEI."
+    }
   }
 }

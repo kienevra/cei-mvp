@@ -21,7 +21,12 @@ function fmtDt(raw: string): string {
 
 function toMsg(err: unknown, fallback: string): string {
   const e = err as any;
-  return e?.response?.data?.detail ?? e?.response?.data?.message ?? e?.message ?? fallback;
+  const raw = e?.response?.data?.detail ?? e?.response?.data?.message ?? e?.message ?? fallback;
+  if (typeof raw === "string") return raw;
+  if (raw !== null && typeof raw === "object") {
+    return (raw as any).message ?? (raw as any).msg ?? JSON.stringify(raw);
+  }
+  return fallback;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -125,7 +130,12 @@ const ConnectConsultant: React.FC<{ onLinked?: () => void }> = ({ onLinked }) =>
       setTimeout(() => setSendSuccess(false), 3000);
       load();
     } catch (e: unknown) {
-      setSendError(toMsg(e, "Failed to send link request."));
+      const status = (e as any)?.response?.status;
+      if (status === 409) {
+        setSendError("A request has already been sent to this consultant. Please wait for them to respond.");
+      } else {
+        setSendError(toMsg(e, "Failed to send link request."));
+      }
     } finally {
       setSending(false);
     }

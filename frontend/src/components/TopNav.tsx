@@ -3,6 +3,7 @@ import React, { useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useTranslation } from "react-i18next";
+import NotificationBell from "./NotificationBell";
 
 const TopNav: React.FC = () => {
   const { user, logout } = useAuth();
@@ -117,41 +118,56 @@ const TopNav: React.FC = () => {
         {/* Desktop user info (hidden on mobile) */}
         <div className="cei-topnav-right hide-on-mobile">
           {/* Language switcher (desktop) */}
+          {user && <NotificationBell />}
           <div
             style={{
               display: "inline-flex",
-              alignItems: "center",
-              gap: "0.35rem",
+              background: "rgba(15,23,42,0.8)",
+              borderRadius: "999px",
+              padding: "0.12rem",
+              border: "1px solid rgba(148,163,184,0.2)",
+              gap: "0.1rem",
               marginRight: "0.75rem",
             }}
             aria-label={t("i18n.language", { defaultValue: "Language" })}
-            title={t("i18n.language", { defaultValue: "Language" })}
           >
             <button
               type="button"
-              className="cei-btn cei-btn-ghost"
+              onClick={() => setLang("it")}
+              aria-pressed={currentLang === "it"}
               style={{
-                padding: "0.25rem 0.5rem",
-                fontSize: "0.78rem",
-                opacity: currentLang === "en" ? 1 : 0.75,
+                padding: "0.3rem 0.75rem",
+                borderRadius: "999px",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                cursor: "pointer",
+                border: "none",
+                background: currentLang === "it" ? "rgba(34,197,94,0.15)" : "transparent",
+                color: currentLang === "it" ? "#22c55e" : "#94a3b8",
+                transition: "all 0.2s",
               }}
-              onClick={() => setLang("en")}
-              aria-pressed={currentLang === "en"}
             >
-              EN
+              IT
             </button>
             <button
               type="button"
-              className="cei-btn cei-btn-ghost"
+              onClick={() => setLang("en")}
+              aria-pressed={currentLang === "en"}
               style={{
-                padding: "0.25rem 0.5rem",
-                fontSize: "0.78rem",
-                opacity: currentLang === "it" ? 1 : 0.75,
+                padding: "0.3rem 0.75rem",
+                borderRadius: "999px",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                cursor: "pointer",
+                border: "none",
+                background: currentLang === "en" ? "rgba(34,197,94,0.15)" : "transparent",
+                color: currentLang === "en" ? "#22c55e" : "#94a3b8",
+                transition: "all 0.2s",
               }}
-              onClick={() => setLang("it")}
-              aria-pressed={currentLang === "it"}
             >
-              IT
+              EN
             </button>
           </div>
 
@@ -233,40 +249,51 @@ const TopNav: React.FC = () => {
                 {/* Language switcher (mobile) */}
                 <div
                   style={{
-                    display: "flex",
-                    gap: "0.4rem",
-                    alignItems: "center",
-                    flexWrap: "wrap",
+                    display: "inline-flex",
+                    background: "rgba(15,23,42,0.8)",
+                    borderRadius: "999px",
+                    padding: "0.12rem",
+                    border: "1px solid rgba(148,163,184,0.2)",
+                    gap: "0.1rem",
                   }}
                 >
-                  <span style={{ fontSize: "0.78rem", opacity: 0.85 }}>
-                    {t("i18n.language", { defaultValue: "Language" })}:
-                  </span>
                   <button
                     type="button"
-                    className="cei-btn cei-btn-ghost"
+                    onClick={() => setLang("it")}
+                    aria-pressed={currentLang === "it"}
                     style={{
-                      padding: "0.25rem 0.5rem",
-                      fontSize: "0.78rem",
-                      opacity: currentLang === "en" ? 1 : 0.75,
+                      padding: "0.3rem 0.75rem",
+                      borderRadius: "999px",
+                      fontSize: "0.75rem",
+                      fontWeight: 600,
+                      letterSpacing: "0.04em",
+                      cursor: "pointer",
+                      border: "none",
+                      background: currentLang === "it" ? "rgba(34,197,94,0.15)" : "transparent",
+                      color: currentLang === "it" ? "#22c55e" : "#94a3b8",
+                      transition: "all 0.2s",
                     }}
-                    onClick={() => setLang("en")}
-                    aria-pressed={currentLang === "en"}
                   >
-                    EN
+                    IT
                   </button>
                   <button
                     type="button"
-                    className="cei-btn cei-btn-ghost"
+                    onClick={() => setLang("en")}
+                    aria-pressed={currentLang === "en"}
                     style={{
-                      padding: "0.25rem 0.5rem",
-                      fontSize: "0.78rem",
-                      opacity: currentLang === "it" ? 1 : 0.75,
+                      padding: "0.3rem 0.75rem",
+                      borderRadius: "999px",
+                      fontSize: "0.75rem",
+                      fontWeight: 600,
+                      letterSpacing: "0.04em",
+                      cursor: "pointer",
+                      border: "none",
+                      background: currentLang === "en" ? "rgba(34,197,94,0.15)" : "transparent",
+                      color: currentLang === "en" ? "#22c55e" : "#94a3b8",
+                      transition: "all 0.2s",
                     }}
-                    onClick={() => setLang("it")}
-                    aria-pressed={currentLang === "it"}
                   >
-                    IT
+                    EN
                   </button>
                 </div>
 
