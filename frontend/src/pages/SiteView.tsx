@@ -175,7 +175,7 @@ const getOppIdKey = (opp: OpportunityMeasure): string => {
   return String(raw);
 };
 
-const SiteView: React.FC = () => {
+const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
   const { t } = useTranslation();
 
   const { id } = useParams<{ id: string }>();
@@ -1038,7 +1038,7 @@ const SiteView: React.FC = () => {
               marginBottom: "0.2rem",
             }}
           >
-            <Link to="/sites" style={{ color: "var(--cei-text-accent)" }}>
+            <Link to={backTo ?? "/sites"} style={{ color: "var(--cei-text-accent)" }}>
               {t("siteView.nav.backToSites", { defaultValue: "← Back to sites" })}
             </Link>
           </div>

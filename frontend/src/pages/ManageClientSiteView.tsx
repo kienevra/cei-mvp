@@ -35,7 +35,7 @@ const ManageClientSiteView: React.FC = () => {
 
   if (!ready || !orgId || !id) return null;
 
-  return <SiteView />;
+  return <SiteView backTo={`/manage/client-orgs/${orgId}#sites`} />;
 };
 
 export default ManageClientSiteView;

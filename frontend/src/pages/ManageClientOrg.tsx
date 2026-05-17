@@ -893,7 +893,10 @@ const ManageClientOrg: React.FC = () => {
   const [org, setOrg] = useState<ClientOrg | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    const hash = window.location.hash.replace("#", "");
+    return (TAB_KEYS as readonly string[]).includes(hash) ? hash as TabKey : "overview";
+  });
   const [downloading, setDownloading] = useState(false);
 
   const loadOrg = useCallback(async () => {
