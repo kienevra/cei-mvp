@@ -973,6 +973,8 @@
       "subtitle": "Lascia l'org o fai offboard di un cliente.",
       "currentOrg": "Org corrente:",
       "role": "Ruolo:",
+      "unlink": "Scollega dal consulente",
+      "unlinking": "Scollegamento…",
       "leave": "Lascia organizzazione",
       "leaving": "Uscita…",
       "offboard": "Offboard organizzazione",

@@ -1106,7 +1106,7 @@ const Account: React.FC = () => {
                   opacity: !isOwner || unlinking ? 0.55 : 1,
                 }}
               >
-                {unlinking ? "Unlinking…" : "Unlink from consultant"}
+                {unlinking ? t("account.orgControls.unlinking") : t("account.orgControls.unlink")}
               </button>
             )}
             <button
