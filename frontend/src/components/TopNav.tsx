@@ -179,8 +179,9 @@ const TopNav: React.FC = () => {
           </button>
         </div>
 
-        {/* Mobile menu toggle — 3-dot button */}
-        <div className="cei-mobile-menu-toggle">
+        {/* Mobile menu toggle — bell + 3-dot button */}
+        <div className="cei-mobile-menu-toggle" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          {user && <NotificationBell />}
           <button
             type="button"
             aria-label={
@@ -216,7 +217,7 @@ const TopNav: React.FC = () => {
               position: "absolute",
               top: "3.25rem",
               right: "0.75rem",
-              left: "0.75rem",
+              width: "280px",
               borderRadius: "0.9rem",
               background: "rgba(15, 23, 42, 0.98)",
               border: "1px solid rgba(31, 41, 55, 0.85)",
