@@ -180,7 +180,7 @@ const TopNav: React.FC = () => {
         </div>
 
         {/* Mobile menu toggle — bell + 3-dot button */}
-        <div className="cei-mobile-menu-toggle" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <div className="cei-mobile-menu-toggle" style={{ alignItems: "center", gap: "0.5rem" }}>
           {user && <NotificationBell />}
           <button
             type="button"
