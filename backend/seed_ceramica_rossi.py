@@ -26,8 +26,7 @@ SITES = [
     {"id": "site-3", "name": "Plant C", "base_kwh": 55.0},
 ]
 
-DAYS_BACK  = 30
-DATE_OFFSET_DAYS = 0  # increase this if you need to re-seed with fresh timestamps
+DAYS_BACK  = 90
 BATCH_SIZE = 200   # records per POST
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -119,7 +118,8 @@ def main():
     print(f"Token: {token[:20]}…")
 
     now   = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    start = now - timedelta(days=DAYS_BACK + DATE_OFFSET_DAYS)
+    start = now - timedelta(days=41)  # fill the gap from ~41 days ago to now
+    end   = now - timedelta(hours=1)  # seed right up to now
 
     for site in SITES:
         site_id   = site["id"]
@@ -130,7 +130,7 @@ def main():
         total   = 0
         current = start
 
-        while current <= now:
+        while current <= end:
             batch.append({
                 "site_id":   site_id,
                 "timestamp": current.isoformat(),

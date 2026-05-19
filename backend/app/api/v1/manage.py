@@ -1311,6 +1311,14 @@ def _apply_link(db: Session, req: OrgLinkRequest) -> None:
         body="Il tuo account è ora gestito da un consulente CEI.",
         extra={"managing_org_id": req.managing_org_id, "managing_org_name": managing_org.name if managing_org else ""},
     )
+    notify(
+        db,
+        org_id=req.managing_org_id,
+        type=NotifType.LINK_REQUEST_ACCEPTED,
+        title=f"{client_org.name} ha accettato la richiesta",
+        body="L'organizzazione è ora nel tuo portfolio.",
+        extra={"client_org_id": client_org.id, "client_org_name": client_org.name},
+    )
     db.commit()
     db.refresh(req)
 

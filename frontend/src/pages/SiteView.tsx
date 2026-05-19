@@ -212,6 +212,7 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
   const [noteError, setNoteError] = useState<string | null>(null);
 
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
+  const [activityOpen, setActivityOpen] = useState(false);
 
   const [opportunities, setOpportunities] = useState<OpportunityMeasure[]>([]);
   const [oppsLoading, setOppsLoading] = useState(false);
@@ -1632,85 +1633,116 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
 
       {siteKey && (
         <section style={{ marginTop: "0.75rem" }}>
-          <div className="dashboard-main-grid">
-            <div className="cei-card">
-              <div className="cei-card-header">
-                <div>
-                  <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-                    {t("siteView.notes.title", { defaultValue: "Add site note" })}
+          <button
+            type="button"
+            onClick={() => setActivityOpen(o => !o)}
+            style={{
+              width: "100%",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "0.65rem 1rem",
+              background: "radial-gradient(circle at top left, #0f172a, #020617)",
+              border: "1px solid rgba(148,163,184,0.16)",
+              borderRadius: activityOpen ? "0.75rem 0.75rem 0 0" : "0.75rem",
+              cursor: "pointer",
+              color: "var(--cei-text-muted)",
+              fontSize: "0.85rem",
+            }}
+          >
+            <span style={{ fontWeight: 600, color: "var(--cei-text-main)" }}>
+              📋 {t("siteView.notes.title", { defaultValue: "Activity & Notes" })}
+            </span>
+            <span style={{ fontSize: "0.75rem" }}>{activityOpen ? "▲ Hide" : "▼ Show"}</span>
+          </button>
+
+          {activityOpen && (
+            <div style={{
+              border: "1px solid rgba(148,163,184,0.16)",
+              borderTop: "none",
+              borderRadius: "0 0 0.75rem 0.75rem",
+              padding: "1rem",
+              background: "radial-gradient(circle at top left, #0f172a, #020617)",
+            }}>
+              <div className="dashboard-main-grid">
+                <div className="cei-card">
+                  <div className="cei-card-header">
+                    <div>
+                      <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
+                        {t("siteView.notes.title", { defaultValue: "Add site note" })}
+                      </div>
+                      <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+                        {t("siteView.notes.subtitle", {
+                          defaultValue: "Log operational changes, decisions, or observations.",
+                        })}
+                      </div>
+                    </div>
+                    {noteSaving && (
+                      <span className="cei-pill cei-pill-neutral">
+                        {t("common.savingEllipsis", { defaultValue: "Saving…" })}
+                      </span>
+                    )}
                   </div>
-                  <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-                    {t("siteView.notes.subtitle", {
-                      defaultValue:
-                        "Log operational changes, decisions, or observations. These events populate the activity timeline for this site.",
-                    })}
-                  </div>
+
+                  {noteError && (
+                    <div style={{ marginTop: "0.5rem", fontSize: "0.78rem", color: "#f97373" }}>{noteError}</div>
+                  )}
+
+                  <form onSubmit={handleAddSiteNote} style={{ marginTop: "0.6rem" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                      <input
+                        type="text"
+                        placeholder={t("siteView.notes.titlePlaceholder", { defaultValue: "Short title (optional)" })}
+                        value={noteTitle}
+                        onChange={(e) => setNoteTitle(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "0.45rem 0.6rem",
+                          borderRadius: "0.5rem",
+                          border: "1px solid rgba(148, 163, 184, 0.5)",
+                          backgroundColor: "rgba(15,23,42,0.9)",
+                          color: "var(--cei-text-main)",
+                          fontSize: "0.85rem",
+                        }}
+                      />
+                      <textarea
+                        placeholder={t("siteView.notes.bodyPlaceholder", {
+                          defaultValue: "What changed at this site? E.g. 'HVAC schedule updated'",
+                        })}
+                        value={noteBody}
+                        onChange={(e) => setNoteBody(e.target.value)}
+                        rows={3}
+                        style={{
+                          width: "100%",
+                          padding: "0.5rem 0.6rem",
+                          borderRadius: "0.5rem",
+                          border: "1px solid rgba(148, 163, 184, 0.5)",
+                          backgroundColor: "rgba(15,23,42,0.9)",
+                          color: "var(--cei-text-main)",
+                          fontSize: "0.85rem",
+                          resize: "vertical",
+                        }}
+                      />
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.2rem" }}>
+                        <button
+                          type="submit"
+                          className="cei-btn"
+                          disabled={noteSaving || (!noteTitle && !noteBody)}
+                          style={{ fontSize: "0.8rem", padding: "0.35rem 0.9rem" }}
+                        >
+                          {noteSaving
+                            ? t("common.savingEllipsis", { defaultValue: "Saving…" })
+                            : t("siteView.notes.save", { defaultValue: "Save note" })}
+                        </button>
+                      </div>
+                    </div>
+                  </form>
                 </div>
-                {noteSaving && (
-                  <span className="cei-pill cei-pill-neutral">
-                    {t("common.savingEllipsis", { defaultValue: "Saving…" })}
-                  </span>
-                )}
+
+                <SiteTimelineCard siteId={siteKey} windowHours={168} refreshKey={timelineRefreshKey} />
               </div>
-
-              {noteError && (
-                <div style={{ marginTop: "0.5rem", fontSize: "0.78rem", color: "#f97373" }}>{noteError}</div>
-              )}
-
-              <form onSubmit={handleAddSiteNote} style={{ marginTop: "0.6rem" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                  <input
-                    type="text"
-                    placeholder={t("siteView.notes.titlePlaceholder", { defaultValue: "Short title (optional)" })}
-                    value={noteTitle}
-                    onChange={(e) => setNoteTitle(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "0.45rem 0.6rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid rgba(148, 163, 184, 0.5)",
-                      backgroundColor: "rgba(15,23,42,0.9)",
-                      color: "var(--cei-text-main)",
-                      fontSize: "0.85rem",
-                    }}
-                  />
-                  <textarea
-                    placeholder={t("siteView.notes.bodyPlaceholder", {
-                      defaultValue:
-                        "What changed at this site? E.g. 'HVAC schedule updated', 'Line 2 on reduced shift', 'Night audit performed'.",
-                    })}
-                    value={noteBody}
-                    onChange={(e) => setNoteBody(e.target.value)}
-                    rows={3}
-                    style={{
-                      width: "100%",
-                      padding: "0.5rem 0.6rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid rgba(148, 163, 184, 0.5)",
-                      backgroundColor: "rgba(15,23,42,0.9)",
-                      color: "var(--cei-text-main)",
-                      fontSize: "0.85rem",
-                      resize: "vertical",
-                    }}
-                  />
-                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.2rem" }}>
-                    <button
-                      type="submit"
-                      className="cei-btn"
-                      disabled={noteSaving || (!noteTitle && !noteBody)}
-                      style={{ fontSize: "0.8rem", padding: "0.35rem 0.9rem" }}
-                    >
-                      {noteSaving
-                        ? t("common.savingEllipsis", { defaultValue: "Saving…" })
-                        : t("siteView.notes.save", { defaultValue: "Save note" })}
-                    </button>
-                  </div>
-                </div>
-              </form>
             </div>
-
-            <SiteTimelineCard siteId={siteKey} windowHours={168} refreshKey={timelineRefreshKey} />
-          </div>
+          )}
         </section>
       )}
 
