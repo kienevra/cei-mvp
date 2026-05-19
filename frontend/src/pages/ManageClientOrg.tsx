@@ -10,8 +10,9 @@ import {
   listClientOrgUsers, inviteClientOrgUser, getClientOrgThresholds,
   updateClientOrgThresholds, updateClientOrgPricing, downloadClientReport,
   getClientOrgReport,
+  getClientOrgTimeseriesSummary,
   type ClientOrg, type Site, type IntegrationToken, type IntegrationTokenWithSecret,
-  type ClientOrgUser, type AlertThresholds, type ClientReportOut,
+  type ClientOrgUser, type AlertThresholds, type ClientReportOut, type TimeseriesSummary,
 } from "../services/manageApi";
 
 function fmtDt(raw: string | null | undefined): string {
@@ -85,16 +86,25 @@ function KpiChip({ label, value, sub }: { label: string; value: React.ReactNode;
 // Energy tab
 // ---------------------------------------------------------------------------
 function EnergyTab({ orgId }: { orgId: number }) {
-  const { t } = useTranslation();
   const navigate = useNavigate();
   const [report, setReport] = useState<ClientReportOut | null>(null);
+  const [summary24h, setSummary24h] = useState<TimeseriesSummary | null>(null);
+  const [summary7d, setSummary7d] = useState<TimeseriesSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    getClientOrgReport(orgId)
-      .then(setReport)
+    Promise.all([
+      getClientOrgReport(orgId),
+      getClientOrgTimeseriesSummary(orgId, 24),
+      getClientOrgTimeseriesSummary(orgId, 168),
+    ])
+      .then(([rep, s24, s7]) => {
+        setReport(rep);
+        setSummary24h(s24);
+        setSummary7d(s7);
+      })
       .catch((e: unknown) => setError(toUiMsg(e, "Failed to load energy data.")))
       .finally(() => setLoading(false));
   }, [orgId]);
@@ -103,83 +113,114 @@ function EnergyTab({ orgId }: { orgId: number }) {
   if (error) return <ErrorBanner message={error} onClose={() => setError(null)} />;
   if (!report) return null;
 
-  const hasElec = report.electricity_price_per_kwh != null;
-  const tariff = hasElec ? Number(report.electricity_price_per_kwh) : null;
+  const tariff  = report.electricity_price_per_kwh != null ? Number(report.electricity_price_per_kwh) : null;
+  const kwh24h  = summary24h?.total_value ?? null;
+  const kwh7d   = summary7d?.total_value  ?? null;
+  const cost24h = tariff != null && kwh24h != null ? (kwh24h * tariff).toFixed(2) : null;
+  const cost7d  = tariff != null && kwh7d  != null ? (kwh7d  * tariff).toFixed(2) : null;
 
-  const cost24h = tariff != null ? (report.records_last_24h * tariff).toFixed(2) : null;
-  const cost7d = tariff != null ? (report.records_last_7d * tariff).toFixed(2) : null;
+  const activeSites   = report.active_site_ids.length;
+  const totalSites    = report.total_sites;
+  const coveragePct   = totalSites > 0 ? Math.round((activeSites / totalSites) * 100) : 0;
+  const hasHistory    = report.total_timeseries_records >= 720;
+  const hasTariff     = tariff != null;
+  const lastIngestAge = report.last_ingestion_at
+    ? Math.round((Date.now() - new Date(report.last_ingestion_at).getTime()) / 3600000)
+    : null;
+  const isLive = lastIngestAge != null && lastIngestAge < 25;
+
+  const iso50001Score = [isLive, hasTariff, activeSites === totalSites && totalSites > 0, hasHistory].filter(Boolean).length;
+  const iso50001Color = iso50001Score === 4 ? "#22c55e" : iso50001Score >= 2 ? "#f59e0b" : "#ef4444";
+  const iso50001Label = iso50001Score === 4 ? "Pronto" : iso50001Score >= 2 ? "Parziale" : "Non pronto";
+
+  const check = (ok: boolean, label: string, fix: string) => (
+    <div key={label} style={{ display: "flex", gap: "0.6rem", alignItems: "flex-start", padding: "0.5rem 0", borderBottom: "1px solid rgba(148,163,184,0.08)" }}>
+      <span style={{ color: ok ? "#22c55e" : "#ef4444", fontSize: "1rem", marginTop: "0.05rem", flexShrink: 0 }}>{ok ? "✓" : "✗"}</span>
+      <div>
+        <div style={{ fontSize: "0.85rem", color: "var(--cei-text-main)", fontWeight: ok ? 400 : 500 }}>{label}</div>
+        {!ok && <div style={{ fontSize: "0.78rem", color: "#f59e0b", marginTop: "0.15rem" }}>{fix}</div>}
+      </div>
+    </div>
+  );
 
   return (
-    <div>
-      <div style={{ fontWeight: 600, marginBottom: "1rem" }}>Energy overview</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
 
-      {/* KPI chips */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1.5rem" }}>
-        <KpiChip label="Total records" value={report.total_timeseries_records.toLocaleString()} sub="All time" />
-        <KpiChip label="Records (24h)" value={report.records_last_24h.toLocaleString()} />
-        <KpiChip label="Records (7d)" value={report.records_last_7d.toLocaleString()} />
-        <KpiChip label="Last ingestion" value={report.last_ingestion_at ? fmtDt(report.last_ingestion_at) : "—"} />
-        {cost24h && <KpiChip label="Est. cost (24h)" value={`€${cost24h}`} sub={`@ €${tariff}/kWh`} />}
-        {cost7d && <KpiChip label="Est. cost (7d)" value={`€${cost7d}`} />}
+      {/* ISO 50001 readiness banner */}
+      <div style={{ padding: "1rem 1.25rem", borderRadius: "0.75rem", border: `1px solid ${iso50001Color}33`, background: `${iso50001Color}0d`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem" }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: "0.95rem", color: iso50001Color }}>ISO 50001 Readiness — {iso50001Label}</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", marginTop: "0.2rem" }}>
+            {iso50001Score}/4 requisiti soddisfatti per un report EnPI verificabile
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: "0.4rem" }}>
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} style={{ width: "28px", height: "6px", borderRadius: "3px", background: i < iso50001Score ? iso50001Color : "rgba(148,163,184,0.2)" }} />
+          ))}
+        </div>
       </div>
 
-      {/* Ingestion status */}
-      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Ingestion status</div>
-      <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", marginBottom: "1.25rem" }}>
-        {report.last_ingestion_at
-          ? `Last data received: ${fmtDt(report.last_ingestion_at)}`
-          : "No data ingested yet for this organization. Use the Tokens tab to create an integration token and start pushing data."}
+      {/* KPI row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "0.75rem" }}>
+        <KpiChip label="Copertura siti" value={<span style={{ color: coveragePct === 100 ? "#22c55e" : "#f59e0b" }}>{coveragePct}%</span>} sub={`${activeSites}/${totalSites} attivi`} />
+        <KpiChip label="Energia (24h)" value={kwh24h != null ? `${Math.round(kwh24h).toLocaleString()} kWh` : "—"} sub={summary24h?.points ? `${summary24h.points} letture` : "Nessun dato"} />
+        <KpiChip label="Energia (7gg)" value={kwh7d  != null ? `${Math.round(kwh7d).toLocaleString()} kWh`  : "—"} sub={summary7d?.points  ? `${summary7d.points} letture`  : "Nessun dato"} />
+        {cost24h && <KpiChip label="Costo est. (24h)" value={<span style={{ color: "#22c55e" }}>€{cost24h}</span>} sub={`@ €${tariff}/kWh`} />}
+        {cost7d  && <KpiChip label="Costo est. (7gg)" value={<span style={{ color: "#22c55e" }}>€{cost7d}</span>}  sub="Basato su tariffa" />}
+        <KpiChip label="Ultimo dato" value={lastIngestAge != null ? `${lastIngestAge}h fa` : "—"} sub={isLive ? "✓ In tempo reale" : "⚠ Ritardo"} />
       </div>
 
-      {/* Active sites with data */}
-      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Sites ({report.total_sites})</div>
-      {report.sites.length === 0 ? (
-        <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>No sites configured yet.</div>
-      ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.84rem" }}>
-          <thead>
-            <tr>
-              {["Site", "Site ID", "Location", "Has recent data"].map((h) => (
-                <th key={h} style={{ textAlign: "left", padding: "0.4rem 0.6rem", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", borderBottom: "1px solid var(--cei-border-subtle)" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {report.sites.map((site, idx) => {
-              const hasData = report.active_site_ids.includes(site.site_id ?? `site-${site.id}`);
-              return (
-                <tr key={site.id} style={{ background: idx % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)" }}>
-                  <td style={{ padding: "0.5rem 0.6rem", fontWeight: 500 }}>
-                  <button
-                    style={{ background: "none", border: "none", color: "var(--cei-text-main)", cursor: "pointer", fontWeight: 500, padding: 0, textDecoration: "underline" }}
-                    onClick={() => navigate(`/manage/client-orgs/${orgId}/sites/${site.id}`)}
-                  >
-                    {site.name}
-                  </button>
-                </td>
-                  <td style={{ padding: "0.5rem 0.6rem" }}><code style={{ fontSize: "0.78rem", background: "rgba(148,163,184,0.1)", padding: "0.1rem 0.4rem", borderRadius: "0.25rem" }}>{site.site_id ?? `site-${site.id}`}</code></td>
-                  <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</td>
-                  <td style={{ padding: "0.5rem 0.6rem" }}>
-                    <span style={{ color: hasData ? "var(--cei-green, #22c55e)" : "var(--cei-text-muted)", fontSize: "0.8rem" }}>
-                      {hasData ? "● Active" : "●‹ No recent data"}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-
-      {/* Energy pricing */}
-      <div style={{ borderTop: "1px solid var(--cei-border-subtle)", margin: "1.5rem 0" }} />
-      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Energy pricing</div>
-      <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", lineHeight: 1.7 }}>
-        <div><strong>Sources:</strong> {report.primary_energy_sources ?? "—"}</div>
-        <div><strong>Electricity:</strong> {report.electricity_price_per_kwh != null ? `€${report.electricity_price_per_kwh}/kWh` : "Not configured"}</div>
-        <div><strong>Gas:</strong> {report.gas_price_per_kwh != null ? `€${report.gas_price_per_kwh}/kWh` : "Not configured"}</div>
-        <div><strong>Currency:</strong> {report.currency_code ?? "—"}</div>
+      {/* Per-site status */}
+      <div>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Stato impianti</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+          {report.sites.length === 0 ? (
+            <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>Nessun impianto configurato.</div>
+          ) : report.sites.map((site) => {
+            const siteKey = site.site_id ?? `site-${site.id}`;
+            const active  = report.active_site_ids.includes(siteKey);
+            return (
+              <div key={site.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.6rem 0.85rem", borderRadius: "0.5rem", border: "1px solid var(--cei-border-subtle)", background: "rgba(148,163,184,0.04)" }}>
+                <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+                  <span style={{ color: active ? "#22c55e" : "#94a3b8", fontSize: "0.7rem" }}>●</span>
+                  <div>
+                    <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{site.name}</div>
+                    <div style={{ fontSize: "0.76rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <span style={{ fontSize: "0.78rem", color: active ? "#22c55e" : "#94a3b8" }}>{active ? "Dati recenti" : "Nessun dato recente"}</span>
+                  <button style={btnSecondary} onClick={() => navigate(`/manage/client-orgs/${orgId}/sites/${site.id}`)}>Apri →</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
+
+      {/* ISO 50001 checklist */}
+      <div>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Checklist ISO 50001</div>
+        <div style={{ background: "rgba(148,163,184,0.04)", borderRadius: "0.6rem", border: "1px solid var(--cei-border-subtle)", padding: "0.25rem 1rem" }}>
+          {check(isLive,       "Ingestion dati continua (< 25h)", "Verificare il token di integrazione nella tab Tokens")}
+          {check(hasTariff,    "Tariffa elettrica configurata",    "Aggiungere il costo €/kWh nella tab Overview")}
+          {check(activeSites === totalSites && totalSites > 0, "Tutti gli impianti trasmettono dati", "Verificare la connessione sui siti inattivi")}
+          {check(hasHistory,   "Storico dati ≥ 30 giorni (720 letture)", "Attendere accumulo dati o eseguire backfill CSV")}
+        </div>
+      </div>
+
+      {/* Tariff config summary */}
+      <div>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Configurazione energetica</div>
+        <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", lineHeight: 1.8, background: "rgba(148,163,184,0.04)", borderRadius: "0.6rem", border: "1px solid var(--cei-border-subtle)", padding: "0.75rem 1rem" }}>
+          <div><strong style={{ color: "var(--cei-text-main)" }}>Fonti:</strong> {report.primary_energy_sources ?? "Non configurato"}</div>
+          <div><strong style={{ color: "var(--cei-text-main)" }}>Elettricità:</strong> {report.electricity_price_per_kwh != null ? `€${report.electricity_price_per_kwh}/kWh` : "Non configurato"}</div>
+          <div><strong style={{ color: "var(--cei-text-main)" }}>Gas:</strong> {report.gas_price_per_kwh != null ? `€${report.gas_price_per_kwh}/kWh` : "Non configurato"}</div>
+          <div><strong style={{ color: "var(--cei-text-main)" }}>Valuta:</strong> {report.currency_code ?? "—"}</div>
+        </div>
+      </div>
+
     </div>
   );
 }
@@ -204,61 +245,115 @@ function AlertsTab({ orgId }: { orgId: number }) {
   if (error) return <ErrorBanner message={error} onClose={() => setError(null)} />;
   if (!report) return null;
 
-  const alertStatusColor = report.open_alerts === 0
-    ? "var(--cei-green, #22c55e)"
-    : report.critical_alerts > 0
-    ? "var(--cei-red, #ef4444)"
-    : "var(--cei-amber, #f59e0b)";
+  // Filter to plant-level events only — exclude org link/unlink/user events
+  const plantEvents = report.recent_audit_events.filter((ev) => {
+    const tp = (ev.type ?? "").toLowerCase();
+    return !tp.includes("link") && !tp.includes("unlink") && !tp.includes("user") && !tp.includes("org_");
+  });
+
+  const overallStatus = report.critical_alerts > 0 ? "critical" : report.open_alerts > 0 ? "warning" : "ok";
+  const statusColor   = overallStatus === "critical" ? "#ef4444" : overallStatus === "warning" ? "#f59e0b" : "#22c55e";
+  const statusLabel   = overallStatus === "critical" ? "⚠ Criticità rilevate" : overallStatus === "warning" ? "⚡ Anomalie in corso" : "✓ Tutti gli impianti nella norma";
+
+  const siteHealth = (site: { id: number; name: string; site_id: string | null }) => {
+    const active = report.active_site_ids.includes(site.site_id ?? `site-${site.id}`);
+    if (!active) return { color: "#94a3b8", label: "Nessun dato", icon: "○" };
+    if (report.critical_alerts > 0) return { color: "#ef4444", label: "Verificare", icon: "●" };
+    if (report.open_alerts > 0)     return { color: "#f59e0b", label: "Anomalia",   icon: "●" };
+    return { color: "#22c55e", label: "Normale", icon: "●" };
+  };
+
+  const lastIngestAge = report.last_ingestion_at
+    ? Math.round((Date.now() - new Date(report.last_ingestion_at).getTime()) / 3600000)
+    : null;
+  const dataGap = lastIngestAge != null && lastIngestAge > 48;
 
   return (
-    <div>
-      <div style={{ fontWeight: 600, marginBottom: "1rem" }}>Alert summary</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1.5rem" }}>
-        <KpiChip
-          label="Open alerts"
-          value={<span style={{ color: alertStatusColor }}>{report.open_alerts}</span>}
-        />
-        <KpiChip
-          label="Critical"
-          value={<span style={{ color: report.critical_alerts > 0 ? "var(--cei-red, #ef4444)" : "var(--cei-text-muted)" }}>{report.critical_alerts}</span>}
-        />
-        <KpiChip label="Alerts (7d)" value={report.alerts_last_7d} sub="All severities" />
-      </div>
-
-      {/* Alert status summary */}
-      <div style={{ padding: "1rem", borderRadius: "0.6rem", border: `1px solid ${alertStatusColor}33`, background: `${alertStatusColor}0d`, marginBottom: "1.25rem" }}>
-        <div style={{ fontWeight: 600, color: alertStatusColor, marginBottom: "0.3rem" }}>
-          {report.open_alerts === 0
-            ? "✓ No open alerts"
-            : report.critical_alerts > 0
-            ? `⚠  ${report.critical_alerts} critical alert${report.critical_alerts > 1 ? "s" : ""} require attention`
-            : `${report.open_alerts} open alert${report.open_alerts > 1 ? "s" : ""}`}
-        </div>
+      {/* Overall status banner */}
+      <div style={{ padding: "1rem 1.25rem", borderRadius: "0.75rem", border: `1px solid ${statusColor}33`, background: `${statusColor}0d` }}>
+        <div style={{ fontWeight: 700, fontSize: "0.95rem", color: statusColor, marginBottom: "0.25rem" }}>{statusLabel}</div>
         <div style={{ fontSize: "0.82rem", color: "var(--cei-text-muted)" }}>
-          {report.alerts_last_7d} alerts triggered in the last 7 days.
-          {report.open_alerts > 0 && " Review the alert thresholds in the Thresholds tab to adjust sensitivity."}
+          {report.alerts_last_7d} alert negli ultimi 7 giorni · {report.open_alerts} aperti · {report.critical_alerts} critici
         </div>
       </div>
 
-      {/* Recent audit events that may relate to alerts */}
-      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Recent activity</div>
-      {report.recent_audit_events.length === 0 ? (
-        <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>No recent activity recorded.</div>
-      ) : (
+      {/* KPI row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: "0.75rem" }}>
+        <KpiChip label="Alert aperti"   value={<span style={{ color: report.open_alerts     > 0 ? "#f59e0b" : "#22c55e" }}>{report.open_alerts}</span>} />
+        <KpiChip label="Critici"        value={<span style={{ color: report.critical_alerts  > 0 ? "#ef4444" : "#22c55e" }}>{report.critical_alerts}</span>} />
+        <KpiChip label="Alert (7gg)"    value={report.alerts_last_7d} sub="Tutti i livelli" />
+        <KpiChip label="Siti attivi"    value={`${report.active_site_ids.length}/${report.total_sites}`} sub="Con dati recenti" />
+      </div>
+
+      {/* Per-site health grid */}
+      <div>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Stato impianti</div>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-          {report.recent_audit_events.slice(0, 10).map((ev) => (
-            <div key={ev.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", borderRadius: "0.4rem", background: "rgba(148,163,184,0.05)", border: "1px solid var(--cei-border-subtle)", fontSize: "0.82rem" }}>
-              <span>{ev.title}</span>
-              <span style={{ color: "var(--cei-text-muted)", fontSize: "0.76rem", flexShrink: 0, marginLeft: "1rem" }}>{fmtDt(ev.created_at)}</span>
-            </div>
-          ))}
+          {report.sites.length === 0 ? (
+            <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>Nessun impianto configurato.</div>
+          ) : report.sites.map((site) => {
+            const health = siteHealth(site);
+            return (
+              <div key={site.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.65rem 0.85rem", borderRadius: "0.5rem", border: `1px solid ${health.color}33`, background: `${health.color}08` }}>
+                <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+                  <span style={{ color: health.color, fontSize: "0.8rem" }}>{health.icon}</span>
+                  <span style={{ fontWeight: 500, fontSize: "0.875rem" }}>{site.name}</span>
+                </div>
+                <span style={{ fontSize: "0.8rem", fontWeight: 600, color: health.color }}>{health.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Compliance flags */}
+      <div>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Segnalazioni normative</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <div style={{ padding: "0.65rem 0.85rem", borderRadius: "0.5rem", border: `1px solid ${dataGap ? "#ef4444" : "#22c55e"}33`, background: `${dataGap ? "#ef4444" : "#22c55e"}08`, fontSize: "0.84rem" }}>
+            <span style={{ fontWeight: 600, color: dataGap ? "#ef4444" : "#22c55e" }}>{dataGap ? "⚠ Gap dati rilevato" : "✓ Continuità dati"}</span>
+            <span style={{ color: "var(--cei-text-muted)", marginLeft: "0.5rem" }}>
+              {dataGap ? `Nessun dato da ${lastIngestAge}h — lacuna potenzialmente non conforme per audit CBAM` : "Flusso dati continuo — idoneo per MRV CBAM/ETS"}
+            </span>
+          </div>
+          <div style={{ padding: "0.65rem 0.85rem", borderRadius: "0.5rem", border: `1px solid ${report.critical_alerts > 0 ? "#ef4444" : "#22c55e"}33`, background: `${report.critical_alerts > 0 ? "#ef4444" : "#22c55e"}08`, fontSize: "0.84rem" }}>
+            <span style={{ fontWeight: 600, color: report.critical_alerts > 0 ? "#ef4444" : "#22c55e" }}>
+              {report.critical_alerts > 0 ? `⚠ ${report.critical_alerts} anomalia critica` : "✓ Nessuna anomalia critica"}
+            </span>
+            <span style={{ color: "var(--cei-text-muted)", marginLeft: "0.5rem" }}>
+              {report.critical_alerts > 0 ? "Consigliata revisione prima del prossimo audit ETS" : "Profilo di consumo nella norma per ETS Phase 4"}
+            </span>
+          </div>
+          <div style={{ padding: "0.65rem 0.85rem", borderRadius: "0.5rem", border: "1px solid rgba(148,163,184,0.16)", background: "rgba(148,163,184,0.04)", fontSize: "0.84rem" }}>
+            <span style={{ fontWeight: 600, color: "#f59e0b" }}>ℹ ETS Phase 4</span>
+            <span style={{ color: "var(--cei-text-muted)", marginLeft: "0.5rem" }}>
+              Quote gratuite ridotte del 4.4%/anno — verificare baseline e opportunità di efficienza nel tab Energia
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Plant-level events only */}
+      {plantEvents.length > 0 && (
+        <div>
+          <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Attività impianti recente</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+            {plantEvents.slice(0, 8).map((ev) => (
+              <div key={ev.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", borderRadius: "0.4rem", background: "rgba(148,163,184,0.04)", border: "1px solid var(--cei-border-subtle)", fontSize: "0.82rem" }}>
+                <span style={{ color: "var(--cei-text-main)" }}>{ev.title}</span>
+                <span style={{ color: "var(--cei-text-muted)", fontSize: "0.76rem", flexShrink: 0, marginLeft: "1rem" }}>{fmtDt(ev.created_at)}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
-      <div style={{ marginTop: "1rem", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-        Alert thresholds can be customized per organization in the <strong>Thresholds</strong> tab.
+      <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
+        Soglie alert personalizzabili nella tab <strong>Thresholds</strong>.
       </div>
+
     </div>
   );
 }
@@ -268,14 +363,18 @@ function AlertsTab({ orgId }: { orgId: number }) {
 // ---------------------------------------------------------------------------
 function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
   const [report, setReport] = useState<ClientReportOut | null>(null);
+  const [summary7d, setSummary7d] = useState<TimeseriesSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
-    getClientOrgReport(orgId)
-      .then(setReport)
+    Promise.all([
+      getClientOrgReport(orgId),
+      getClientOrgTimeseriesSummary(orgId, 168),
+    ])
+      .then(([rep, s7]) => { setReport(rep); setSummary7d(s7); })
       .catch((e: unknown) => setError(toUiMsg(e, "Failed to load report data.")))
       .finally(() => setLoading(false));
   }, [orgId]);
@@ -291,94 +390,141 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
   if (error) return <ErrorBanner message={error} onClose={() => setError(null)} />;
   if (!report) return null;
 
-  const hasElec = report.electricity_price_per_kwh != null;
-  const tariff = hasElec ? Number(report.electricity_price_per_kwh) : null;
-  const totalCostEst = tariff != null ? (report.records_last_7d * tariff).toFixed(2) : null;
+  const tariff = report.electricity_price_per_kwh != null ? Number(report.electricity_price_per_kwh) : null;
+  const kwh7d  = summary7d?.total_value ?? null;
+  const cost7d = tariff != null && kwh7d != null ? (kwh7d * tariff).toFixed(2) : null;
+
+  const lastIngestAge  = report.last_ingestion_at
+    ? Math.round((Date.now() - new Date(report.last_ingestion_at).getTime()) / 3600000)
+    : null;
+  const isLive         = lastIngestAge != null && lastIngestAge < 25;
+  const hasHistory     = report.total_timeseries_records >= 720;
+  const hasTariff      = tariff != null;
+  const allSitesActive = report.active_site_ids.length === report.total_sites && report.total_sites > 0;
+
+  const isoChecks = [
+    { ok: isLive,                       label: "Ingestion continua (< 25h)",           detail: "Necessario per EnPI verificabile" },
+    { ok: hasTariff,                    label: "Tariffa €/kWh configurata",            detail: "Necessario per calcolo costi ISO 50001" },
+    { ok: allSitesActive,               label: "Tutti gli impianti trasmettono dati",   detail: "Copertura completa del portfolio" },
+    { ok: hasHistory,                   label: "Storico ≥ 30 giorni",                  detail: "Baseline statistica affidabile" },
+    { ok: report.open_alerts === 0,     label: "Nessun alert aperto",                  detail: "Profilo di consumo nella norma" },
+  ];
+  const isoScore  = isoChecks.filter(c => c.ok).length;
+  const isoColor  = isoScore === 5 ? "#22c55e" : isoScore >= 3 ? "#f59e0b" : "#ef4444";
+  const isoStatus = isoScore === 5 ? "Conforme" : isoScore >= 3 ? "In progress" : "Non conforme";
+
+  const cbamChecks = [
+    { ok: isLive,     label: "Dati MRV aggiornati (< 25h)",   detail: "CBAM richiede dati verificati su richiesta" },
+    { ok: hasHistory, label: "Storico emissioni ≥ 30 giorni", detail: "Necessario per dichiarazione doganale" },
+    { ok: hasTariff,  label: "Vettore energetico configurato", detail: "Identificazione fonte emissioni" },
+  ];
+  const cbamScore  = cbamChecks.filter(c => c.ok).length;
+  const cbamColor  = cbamScore === 3 ? "#22c55e" : cbamScore >= 2 ? "#f59e0b" : "#ef4444";
+  const cbamStatus = cbamScore === 3 ? "Pronto" : cbamScore >= 2 ? "Parziale" : "Non pronto";
+
+  const checkRow = (ok: boolean, label: string, detail: string) => (
+    <div key={label} style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", padding: "0.5rem 0", borderBottom: "1px solid rgba(148,163,184,0.08)" }}>
+      <span style={{ color: ok ? "#22c55e" : "#ef4444", fontSize: "1rem", flexShrink: 0, marginTop: "0.05rem" }}>{ok ? "✓" : "✗"}</span>
+      <div>
+        <div style={{ fontSize: "0.85rem", color: "var(--cei-text-main)", fontWeight: ok ? 400 : 500 }}>{label}</div>
+        <div style={{ fontSize: "0.76rem", color: "var(--cei-text-muted)", marginTop: "0.1rem" }}>{detail}</div>
+      </div>
+    </div>
+  );
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: "0.75rem" }}>
-        <div style={{ fontWeight: 600 }}>7-day portfolio report</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+
+      {/* PDF download header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem" }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: "1rem" }}>Report portfolio — {orgName}</div>
+          <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", marginTop: "0.2rem" }}>
+            Generato: {fmtDt(report.generated_at)} · {report.total_sites} impianti · {report.total_timeseries_records.toLocaleString()} letture totali
+            {kwh7d != null && ` · ${Math.round(kwh7d).toLocaleString()} kWh (7gg)`}
+            {cost7d != null && ` · €${cost7d} costo est.`}
+          </div>
+        </div>
         <button style={btnPrimary} onClick={handleDownload} disabled={downloading}>
-          {downloading ? "Downloading…" : "↓ Download PDF report"}
+          {downloading ? "Download…" : "↓ Scarica PDF"}
         </button>
       </div>
 
-      <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", marginBottom: "1.25rem" }}>
-        Generated: {fmtDt(report.generated_at)} · Managing org: {report.managing_org_name}
-      </div>
-
-      {/* Summary KPIs */}
-      <div style={{ fontWeight: 600, marginBottom: "0.75rem" }}>Summary</div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1.5rem" }}>
-        <KpiChip label="Total records" value={report.total_timeseries_records.toLocaleString()} sub="All time" />
-        <KpiChip label="Records (7d)" value={report.records_last_7d.toLocaleString()} />
-        <KpiChip label="Records (24h)" value={report.records_last_24h.toLocaleString()} />
-        <KpiChip label="Total sites" value={report.total_sites} />
-        <KpiChip label="Active sites" value={report.active_site_ids.length} sub="With recent data" />
-        <KpiChip label="Open alerts" value={report.open_alerts} />
-        <KpiChip label="Critical alerts" value={report.critical_alerts} />
-        <KpiChip label="Users" value={report.total_users} />
-        <KpiChip label="Active tokens" value={report.active_tokens} />
-        {totalCostEst && <KpiChip label="Est. cost (7d)" value={`€${totalCostEst}`} sub={`@ €${tariff}/kWh`} />}
-      </div>
-
-      {/* Sites breakdown */}
-      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Sites breakdown</div>
-      {report.sites.length === 0 ? (
-        <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", marginBottom: "1.25rem" }}>No sites configured.</div>
-      ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.84rem", marginBottom: "1.5rem" }}>
-          <thead>
-            <tr>
-              {["Site", "Site ID", "Location", "Status"].map((h) => (
-                <th key={h} style={{ textAlign: "left", padding: "0.4rem 0.6rem", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", borderBottom: "1px solid var(--cei-border-subtle)" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {report.sites.map((site, idx) => {
-              const active = report.active_site_ids.includes(site.site_id ?? `site-${site.id}`);
-              return (
-                <tr key={site.id} style={{ background: idx % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)" }}>
-                  <td style={{ padding: "0.5rem 0.6rem", fontWeight: 500 }}>{site.name}</td>
-                  <td style={{ padding: "0.5rem 0.6rem" }}><code style={{ fontSize: "0.78rem", background: "rgba(148,163,184,0.1)", padding: "0.1rem 0.4rem", borderRadius: "0.25rem" }}>{site.site_id ?? `site-${site.id}`}</code></td>
-                  <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</td>
-                  <td style={{ padding: "0.5rem 0.6rem" }}>
-                    <span style={{ color: active ? "var(--cei-green, #22c55e)" : "var(--cei-text-muted)", fontSize: "0.8rem" }}>
-                      {active ? "● Active" : "●‹ Silent"}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-
-      {/* Energy config */}
-      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Energy configuration</div>
-      <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", lineHeight: 1.8, marginBottom: "1.5rem" }}>
-        <div><strong>Primary sources:</strong> {report.primary_energy_sources ?? "Not configured"}</div>
-        <div><strong>Electricity tariff:</strong> {report.electricity_price_per_kwh != null ? `€${report.electricity_price_per_kwh}/kWh` : "Not configured"}</div>
-        <div><strong>Gas tariff:</strong> {report.gas_price_per_kwh != null ? `€${report.gas_price_per_kwh}/kWh` : "Not configured"}</div>
-        <div><strong>Currency:</strong> {report.currency_code ?? "—"}</div>
-      </div>
-
-      {/* Recent audit events */}
-      <div style={{ fontWeight: 600, marginBottom: "0.6rem" }}>Recent audit trail</div>
-      {report.recent_audit_events.length === 0 ? (
-        <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>No audit events yet.</div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-          {report.recent_audit_events.map((ev) => (
-            <div key={ev.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", borderRadius: "0.4rem", background: "rgba(148,163,184,0.05)", border: "1px solid var(--cei-border-subtle)", fontSize: "0.82rem" }}>
-              <span>{ev.title}</span>
-              <span style={{ color: "var(--cei-text-muted)", fontSize: "0.76rem", flexShrink: 0, marginLeft: "1rem" }}>{fmtDt(ev.created_at)}</span>
-            </div>
-          ))}
+      {/* ISO 50001 compliance */}
+      <div style={{ borderRadius: "0.75rem", border: `1px solid ${isoColor}33`, overflow: "hidden" }}>
+        <div style={{ padding: "0.75rem 1rem", background: `${isoColor}0d`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 700, color: isoColor }}>ISO 50001 — {isoStatus}</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>{isoScore}/5 requisiti</div>
         </div>
-      )}
+        <div style={{ padding: "0 1rem 0.25rem" }}>
+          {isoChecks.map(c => checkRow(c.ok, c.label, c.detail))}
+        </div>
+      </div>
+
+      {/* CBAM readiness */}
+      <div style={{ borderRadius: "0.75rem", border: `1px solid ${cbamColor}33`, overflow: "hidden" }}>
+        <div style={{ padding: "0.75rem 1rem", background: `${cbamColor}0d`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 700, color: cbamColor }}>CBAM Readiness — {cbamStatus}</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>{cbamScore}/3 requisiti · In vigore da gen 2026</div>
+        </div>
+        <div style={{ padding: "0 1rem 0.25rem" }}>
+          {cbamChecks.map(c => checkRow(c.ok, c.label, c.detail))}
+        </div>
+      </div>
+
+      {/* ETS Phase 4 note */}
+      <div style={{ padding: "0.85rem 1rem", borderRadius: "0.6rem", border: "1px solid rgba(245,158,11,0.3)", background: "rgba(245,158,11,0.06)", fontSize: "0.84rem" }}>
+        <div style={{ fontWeight: 600, color: "#f59e0b", marginBottom: "0.3rem" }}>ℹ ETS Phase 4 — Riduzione quote gratuite</div>
+        <div style={{ color: "var(--cei-text-muted)", lineHeight: 1.6 }}>
+          Le quote ETS gratuite si riducono del <strong style={{ color: "var(--cei-text-main)" }}>4.4% ogni anno</strong> fino al 2030.
+          Per {orgName}, questo significa che ogni anno il costo delle emissioni non coperte aumenta.
+          I dati CEI permettono di identificare e documentare le riduzioni di consumo per massimizzare le quote disponibili.
+        </div>
+      </div>
+
+      {/* 7-day summary table */}
+      <div>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Riepilogo 7 giorni per impianto</div>
+        {report.sites.length === 0 ? (
+          <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>Nessun impianto configurato.</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.84rem" }}>
+            <thead>
+              <tr>
+                {["Impianto", "Posizione", "Stato", "Energia 7gg", "Costo est.", "Conformità"].map(h => (
+                  <th key={h} style={{ textAlign: "left", padding: "0.4rem 0.6rem", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", borderBottom: "1px solid var(--cei-border-subtle)" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {report.sites.map((site, idx) => {
+                const active   = report.active_site_ids.includes(site.site_id ?? `site-${site.id}`);
+                const siteKwh  = kwh7d != null && active ? Math.round(kwh7d / Math.max(report.total_sites, 1)) : null;
+                const siteCost = tariff != null && siteKwh != null ? `€${(siteKwh * tariff).toFixed(0)}` : "—";
+                return (
+                  <tr key={site.id} style={{ background: idx % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)" }}>
+                    <td style={{ padding: "0.5rem 0.6rem", fontWeight: 500 }}>{site.name}</td>
+                    <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</td>
+                    <td style={{ padding: "0.5rem 0.6rem" }}>
+                      <span style={{ color: active ? "#22c55e" : "#94a3b8", fontSize: "0.8rem" }}>{active ? "● Attivo" : "○ Silente"}</span>
+                    </td>
+                    <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-main)", fontWeight: 500 }}>
+                      {siteKwh != null ? `${siteKwh.toLocaleString()} kWh` : "—"}
+                    </td>
+                    <td style={{ padding: "0.5rem 0.6rem", color: "#22c55e", fontWeight: 500 }}>{siteCost}</td>
+                    <td style={{ padding: "0.5rem 0.6rem" }}>
+                      <span style={{ fontSize: "0.76rem", padding: "0.15rem 0.5rem", borderRadius: "999px", background: active && isoScore >= 3 ? "rgba(34,197,94,0.12)" : "rgba(148,163,184,0.1)", color: active && isoScore >= 3 ? "#22c55e" : "#94a3b8" }}>
+                        {active && isoScore >= 3 ? "In norma" : "Da verificare"}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
     </div>
   );
 }
@@ -513,12 +659,7 @@ function SitesTab({ orgId }: { orgId: number }) {
                 <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.8rem" }}>{fmtDt(site.created_at)}</td>
                 <td style={{ padding: "0.5rem 0.6rem" }}>
                   <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                    <button
-                      style={btnSecondary}
-                     onClick={() => navigate(`/manage/client-orgs/${orgId}/sites/${site.id}`)}
-                    >
-                      View
-                    </button>
+                    <button style={btnSecondary} onClick={() => navigate(`/manage/client-orgs/${orgId}/sites/${site.id}`)}>View</button>
                     <button style={btnDanger} onClick={() => setConfirmDelete(site)} disabled={deletingId === site.id}>
                       {deletingId === site.id ? t("manage.client.sites.deletingBtn") : t("manage.client.sites.deleteBtn")}
                     </button>
@@ -738,10 +879,10 @@ function UsersTab({ orgId }: { orgId: number }) {
           <div style={{ fontWeight: 600, color: "var(--cei-green, #22c55e)", marginBottom: "0.4rem" }}>{t("manage.client.users.inviteBanner", { email: inviteResult.email })}</div>
           <code style={{ fontSize: "0.82rem", wordBreak: "break-all", display: "block", marginBottom: "0.6rem" }}>{inviteResult.token}</code>
           <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", marginBottom: "0.6rem" }}>{t("manage.client.users.inviteHint")}</div>
-<div style={{ fontSize: "0.78rem", marginBottom: "0.6rem" }}>
-  <span style={{ color: "var(--cei-text-muted)" }}>Accept link: </span>
-  <code style={{ fontSize: "0.78rem", wordBreak: "break-all" }}>{inviteResult.accept_url}</code>
-</div>
+          <div style={{ fontSize: "0.78rem", marginBottom: "0.6rem" }}>
+            <span style={{ color: "var(--cei-text-muted)" }}>Accept link: </span>
+            <code style={{ fontSize: "0.78rem", wordBreak: "break-all" }}>{inviteResult.accept_url}</code>
+          </div>
           <button style={btnSecondary} onClick={() => { navigator.clipboard.writeText(inviteResult.token); setCopied("token"); setTimeout(() => setCopied(null), 1500); }}>
             {copied === "token" ? "Copied!" : t("manage.client.users.copyToken")}
           </button>
@@ -956,6 +1097,3 @@ const ManageClientOrg: React.FC = () => {
 };
 
 export default ManageClientOrg;
-
-
-

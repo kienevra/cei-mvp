@@ -418,3 +418,21 @@ export async function getClientOrgReport(clientOrgId: number): Promise<ClientRep
   const resp = await api.get(`/manage/client-orgs/${clientOrgId}/report`);
   return resp.data as ClientReportOut;
 }
+
+export type TimeseriesSummary = {
+  total_value: number;
+  points: number;
+  from_timestamp: string | null;
+  to_timestamp: string | null;
+  window_hours: number;
+};
+
+export async function getClientOrgTimeseriesSummary(
+  clientOrgId: number,
+  windowHours: number
+): Promise<TimeseriesSummary> {
+  const resp = await api.get(`/timeseries/summary?window_hours=${windowHours}`, {
+    headers: { "X-CEI-ORG-ID": String(clientOrgId) },
+  });
+  return resp.data as TimeseriesSummary;
+}
