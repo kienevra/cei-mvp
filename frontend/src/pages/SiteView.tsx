@@ -23,6 +23,7 @@ import type { OpportunityMeasure } from "../services/api";
 import { buildHybridNarrative } from "../utils/hybridNarrative";
 import SiteAlertsStrip from "../components/SiteAlertsStrip";
 import { downloadCsv } from "../utils/csv";
+import { getSiteConfig, updateSiteConfig, calculateEmissions, type SiteConfig, type EmissionsResult } from "../services/api";
 import SiteTimelineCard from "../components/SiteTimelineCard";
 import SiteEnergyChart from "../components/SiteEnergyChart";
 import SiteForecastChart from "../components/SiteForecastChart";
@@ -2065,9 +2066,253 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
           )}
         </div>
       </section>
+
+      {/* ── Site Configuration & Emissions ── */}
+      {numericSiteId && (
+        <SiteConfigPanel siteId={numericSiteId} />
+      )}
     </div>
   );
 };
+// ── Site Configuration & Emissions Panel ──────────────────────────────────────
+function SiteConfigPanel({ siteId }: { siteId: number }) {
+  const [config, setConfig] = useState<SiteConfig | null>(null);
+  const [emissions, setEmissions] = useState<EmissionsResult | null>(null);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [form, setForm] = useState<Partial<SiteConfig>>({});
+
+  useEffect(() => {
+    getSiteConfig(siteId).then(c => { setConfig(c); setForm(c); }).catch(() => {});
+    calculateEmissions(168).then(setEmissions).catch(() => {});
+  }, [siteId]);
+
+  const handleSave = async () => {
+    setSaving(true); setSaveMsg(null);
+    try {
+      const updated = await updateSiteConfig(siteId, {
+        electricity_price_per_kwh:  form.electricity_price_per_kwh  ?? null,
+        gas_price_per_kwh:          form.gas_price_per_kwh          ?? null,
+        currency_code:              form.currency_code              ?? null,
+        country_code:               form.country_code               ?? null,
+        framework:                  form.framework                  ?? null,
+        sector_code:                form.sector_code                ?? null,
+        primary_energy_source:      form.primary_energy_source      ?? null,
+        annual_production_volume:   form.annual_production_volume   ?? null,
+        production_unit:            form.production_unit            ?? null,
+        free_allocation_tonnes:     form.free_allocation_tonnes     ?? null,
+        reporting_year:             form.reporting_year             ?? null,
+      });
+      setConfig(updated);
+      setForm(updated);
+      setSaveMsg("✓ Salvato");
+      // Refresh emissions with new config
+      calculateEmissions(168).then(setEmissions).catch(() => {});
+      setTimeout(() => setSaveMsg(null), 2500);
+    } catch { setSaveMsg("Errore nel salvataggio"); }
+    finally { setSaving(false); }
+  };
+
+  const inp: React.CSSProperties = {
+    padding: "0.4rem 0.6rem", borderRadius: "0.4rem",
+    border: "1px solid rgba(148,163,184,0.3)",
+    background: "rgba(15,23,42,0.8)", color: "var(--cei-text-main)",
+    fontSize: "0.83rem", width: "100%",
+  };
+
+  const row = (label: string, content: React.ReactNode) => (
+    <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: "0.5rem", alignItems: "center", marginBottom: "0.6rem" }}>
+      <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>{label}</div>
+      <div>{content}</div>
+    </div>
+  );
+
+  const etsColor = emissions?.ets_surplus_deficit != null
+    ? emissions.ets_surplus_deficit >= 0 ? "#22c55e" : "#ef4444"
+    : "#94a3b8";
+
+  const bmColor = emissions?.benchmark_gap_pct != null
+    ? emissions.benchmark_gap_pct <= 0 ? "#22c55e" : "#f59e0b"
+    : "#94a3b8";
+
+  return (
+    <section style={{ marginTop: "0.75rem" }}>
+      {/* Emissions summary — always visible */}
+      {emissions && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "0.75rem", marginBottom: "0.75rem" }}>
+          {/* tCO₂ card */}
+          <div style={{ background: "radial-gradient(circle at top left,#0f172a,#020617)", border: "1px solid rgba(148,163,184,0.16)", borderRadius: "0.75rem", padding: "0.85rem 1rem" }}>
+            <div style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", marginBottom: "0.25rem" }}>CO₂ (7 giorni)</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "#38bdf8" }}>{emissions.total_tco2.toFixed(2)}</div>
+            <div style={{ fontSize: "0.72rem", color: "var(--cei-text-muted)" }}>tCO₂ · {emissions.emission_factor_kg_co2_kwh} kg/kWh</div>
+          </div>
+          {/* Annualised */}
+          <div style={{ background: "radial-gradient(circle at top left,#0f172a,#020617)", border: "1px solid rgba(148,163,184,0.16)", borderRadius: "0.75rem", padding: "0.85rem 1rem" }}>
+            <div style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", marginBottom: "0.25rem" }}>CO₂ proiettato/anno</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "#38bdf8" }}>{emissions.annualised_tco2.toFixed(0)}</div>
+            <div style={{ fontSize: "0.72rem", color: "var(--cei-text-muted)" }}>tCO₂/anno · {emissions.framework}</div>
+          </div>
+          {/* ETS position */}
+          <div style={{ background: "radial-gradient(circle at top left,#0f172a,#020617)", border: `1px solid ${etsColor}33`, borderRadius: "0.75rem", padding: "0.85rem 1rem" }}>
+            <div style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", marginBottom: "0.25rem" }}>Posizione ETS</div>
+            <div style={{ fontSize: "1.1rem", fontWeight: 700, color: etsColor }}>
+              {emissions.ets_surplus_deficit != null
+                ? `${emissions.ets_surplus_deficit >= 0 ? "+" : ""}${emissions.ets_surplus_deficit.toFixed(1)} tCO₂`
+                : "—"}
+            </div>
+            <div style={{ fontSize: "0.72rem", color: "var(--cei-text-muted)" }}>
+              {emissions.ets_surplus_deficit != null
+                ? emissions.ets_surplus_deficit >= 0 ? "Surplus — quota disponibile" : `Deficit — €${emissions.ets_credit_cost_eur?.toFixed(0)} est.`
+                : "Configura quota ETS"}
+            </div>
+          </div>
+          {/* Benchmark */}
+          <div style={{ background: "radial-gradient(circle at top left,#0f172a,#020617)", border: `1px solid ${bmColor}33`, borderRadius: "0.75rem", padding: "0.85rem 1rem" }}>
+            <div style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", marginBottom: "0.25rem" }}>vs Benchmark settore</div>
+            <div style={{ fontSize: "1.1rem", fontWeight: 700, color: bmColor }}>
+              {emissions.benchmark_gap_pct != null ? `${emissions.benchmark_gap_pct > 0 ? "+" : ""}${emissions.benchmark_gap_pct.toFixed(1)}%` : "—"}
+            </div>
+            <div style={{ fontSize: "0.72rem", color: "var(--cei-text-muted)" }}>
+              {emissions.benchmark_gap_pct != null
+                ? emissions.benchmark_gap_pct <= 0 ? "Sotto benchmark ✓" : "Sopra benchmark"
+                : emissions.sector_code ? "Configura produzione" : "Configura settore"}
+            </div>
+          </div>
+          {/* EnPI */}
+          {emissions.enpi_kwh_per_unit != null && (
+            <div style={{ background: "radial-gradient(circle at top left,#0f172a,#020617)", border: "1px solid rgba(148,163,184,0.16)", borderRadius: "0.75rem", padding: "0.85rem 1rem" }}>
+              <div style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", marginBottom: "0.25rem" }}>EnPI (ISO 50001)</div>
+              <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--cei-text-main)" }}>{emissions.enpi_kwh_per_unit.toFixed(1)}</div>
+              <div style={{ fontSize: "0.72rem", color: "var(--cei-text-muted)" }}>kWh per {emissions.production_unit ?? "unità"}</div>
+            </div>
+          )}
+          {/* CBAM */}
+          <div style={{ background: "radial-gradient(circle at top left,#0f172a,#020617)", border: `1px solid ${emissions.is_cbam_ready ? "#22c55e33" : "#f59e0b33"}`, borderRadius: "0.75rem", padding: "0.85rem 1rem" }}>
+            <div style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", marginBottom: "0.25rem" }}>CBAM</div>
+            <div style={{ fontSize: "1rem", fontWeight: 700, color: emissions.is_cbam_ready ? "#22c55e" : "#f59e0b" }}>
+              {emissions.is_cbam_ready ? "✓ Pronto" : "⚠ Non pronto"}
+            </div>
+            <div style={{ fontSize: "0.72rem", color: "var(--cei-text-muted)" }}>
+              {emissions.is_cbam_ready ? "Dati MRV sufficienti" : `${emissions.data_window_days}/30 giorni dati`}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Config toggle */}
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "0.65rem 1rem",
+          background: "radial-gradient(circle at top left,#0f172a,#020617)",
+          border: "1px solid rgba(148,163,184,0.16)",
+          borderRadius: open ? "0.75rem 0.75rem 0 0" : "0.75rem",
+          cursor: "pointer", color: "var(--cei-text-muted)", fontSize: "0.85rem",
+        }}
+      >
+        <span style={{ fontWeight: 600, color: "var(--cei-text-main)" }}>
+          ⚙️ Configurazione impianto (energia & emissioni)
+        </span>
+        <span style={{ fontSize: "0.75rem" }}>{open ? "▲ Chiudi" : "▼ Configura"}</span>
+      </button>
+
+      {open && (
+        <div style={{
+          border: "1px solid rgba(148,163,184,0.16)", borderTop: "none",
+          borderRadius: "0 0 0.75rem 0.75rem", padding: "1.25rem",
+          background: "radial-gradient(circle at top left,#0f172a,#020617)",
+        }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 2rem" }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: "0.82rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "0.75rem" }}>Tariffe energetiche</div>
+              {row("Elettricità (€/kWh)", <input style={inp} type="number" step="0.0001" min="0" value={form.electricity_price_per_kwh ?? ""} onChange={e => setForm(f => ({ ...f, electricity_price_per_kwh: e.target.value ? parseFloat(e.target.value) : null as any }))} placeholder="es. 0.23" />)}
+              {row("Gas (€/kWh)", <input style={inp} type="number" step="0.0001" min="0" value={form.gas_price_per_kwh ?? ""} onChange={e => setForm(f => ({ ...f, gas_price_per_kwh: e.target.value ? parseFloat(e.target.value) : null as any }))} placeholder="es. 0.08" />)}
+              {row("Valuta", <input style={{ ...inp, maxWidth: "80px" }} value={form.currency_code ?? ""} onChange={e => setForm(f => ({ ...f, currency_code: e.target.value }))} placeholder="EUR" maxLength={3} />)}
+            </div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: "0.82rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "0.75rem" }}>Configurazione emissioni</div>
+              {row("Paese", <input style={{ ...inp, maxWidth: "80px" }} value={form.country_code ?? ""} onChange={e => setForm(f => ({ ...f, country_code: e.target.value.toUpperCase() }))} placeholder="ITA" maxLength={3} />)}
+              {row("Framework", (
+                <select style={inp} value={form.framework ?? ""} onChange={e => setForm(f => ({ ...f, framework: e.target.value }))}>
+                  <option value="">Seleziona...</option>
+                  <option value="EU_ETS">EU ETS Phase 4</option>
+                  <option value="CBAM">CBAM</option>
+                  <option value="UK_ETS">UK ETS</option>
+                  <option value="VCS">Verra VCS</option>
+                  <option value="GOLD_STANDARD">Gold Standard</option>
+                  <option value="ISO14064">ISO 14064</option>
+                  <option value="CN_ETS">China ETS</option>
+                  <option value="IN_PAT">India PAT</option>
+                </select>
+              ))}
+              {row("Settore industriale", (
+                <select style={inp} value={form.sector_code ?? ""} onChange={e => setForm(f => ({ ...f, sector_code: e.target.value }))}>
+                  <option value="">Seleziona...</option>
+                  <option value="ceramics">Ceramica</option>
+                  <option value="cement">Cemento</option>
+                  <option value="steel">Acciaio</option>
+                  <option value="glass">Vetro</option>
+                  <option value="chemicals">Chimica</option>
+                  <option value="food">Alimentare</option>
+                  <option value="paper">Carta</option>
+                  <option value="aluminium">Alluminio</option>
+                  <option value="manufacturing">Manifattura generica</option>
+                </select>
+              ))}
+              {row("Fonte energia primaria", (
+                <select style={inp} value={form.primary_energy_source ?? ""} onChange={e => setForm(f => ({ ...f, primary_energy_source: e.target.value }))}>
+                  <option value="">Seleziona...</option>
+                  <option value="electricity">Elettricità</option>
+                  <option value="natural_gas">Gas naturale</option>
+                  <option value="lpg">GPL</option>
+                  <option value="diesel">Diesel</option>
+                  <option value="biomass">Biomassa</option>
+                </select>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ borderTop: "1px solid rgba(148,163,184,0.1)", margin: "1rem 0" }} />
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 2rem" }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: "0.82rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "0.75rem" }}>Produzione (per EnPI)</div>
+              {row("Volume produzione/anno", <input style={inp} type="number" min="0" value={form.annual_production_volume ?? ""} onChange={e => setForm(f => ({ ...f, annual_production_volume: e.target.value ? parseFloat(e.target.value) : null as any }))} placeholder="es. 5000" />)}
+              {row("Unità di misura", <input style={inp} value={form.production_unit ?? ""} onChange={e => setForm(f => ({ ...f, production_unit: e.target.value }))} placeholder="tonne / m2 / unità" />)}
+            </div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: "0.82rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "0.75rem" }}>ETS / Quota</div>
+              {row("Quote gratuite ETS (tCO₂/anno)", <input style={inp} type="number" min="0" value={form.free_allocation_tonnes ?? ""} onChange={e => setForm(f => ({ ...f, free_allocation_tonnes: e.target.value ? parseFloat(e.target.value) : null as any }))} placeholder="es. 500" />)}
+              {row("Anno di riferimento", <input style={inp} type="number" min="2020" max="2030" value={form.reporting_year ?? ""} onChange={e => setForm(f => ({ ...f, reporting_year: e.target.value ? parseInt(e.target.value) : null as any }))} placeholder="2026" />)}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "1rem", marginTop: "1rem" }}>
+            {saveMsg && <span style={{ fontSize: "0.82rem", color: saveMsg.startsWith("✓") ? "#22c55e" : "#ef4444" }}>{saveMsg}</span>}
+            <button
+              type="button"
+              className="cei-btn"
+              onClick={handleSave}
+              disabled={saving}
+              style={{ fontSize: "0.82rem", padding: "0.4rem 1.1rem" }}
+            >
+              {saving ? "Salvataggio…" : "Salva configurazione"}
+            </button>
+          </div>
+
+          {config?.config_updated_at && (
+            <div style={{ fontSize: "0.72rem", color: "var(--cei-text-muted)", marginTop: "0.5rem", textAlign: "right" }}>
+              Ultimo aggiornamento: {new Date(config.config_updated_at).toLocaleString()}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
 
 function buildSiteEfficiencySuggestions(
   t: (key: string, opts?: any) => string,

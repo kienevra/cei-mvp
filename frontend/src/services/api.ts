@@ -449,7 +449,76 @@ export async function deleteSite(id: string | number) {
   const r = await api.delete(`/sites/${id}`);
   return r.data;
 }
+export type SiteConfig = {
+  site_id: number;
+  site_name: string;
+  electricity_price_per_kwh: number | null;
+  gas_price_per_kwh: number | null;
+  currency_code: string | null;
+  country_code: string | null;
+  framework: string | null;
+  sector_code: string | null;
+  primary_energy_source: string | null;
+  secondary_energy_source: string | null;
+  annual_production_volume: number | null;
+  production_unit: string | null;
+  free_allocation_tonnes: number | null;
+  reporting_year: number | null;
+  config_updated_at: string | null;
+};
 
+export type EmissionsResult = {
+  organization_id: number;
+  organization_name: string;
+  country_code: string;
+  framework: string;
+  framework_label: string;
+  sector_code: string | null;
+  reporting_year: number;
+  energy_source: string;
+  total_kwh: number;
+  total_tco2: number;
+  emission_factor_kg_co2_kwh: number;
+  annualised_tco2: number;
+  annualised_kwh: number;
+  free_allocation_tonnes: number | null;
+  ets_surplus_deficit: number | null;
+  ets_credit_cost_eur: number | null;
+  ets_position_label: string;
+  benchmark_value: number | null;
+  production_volume: number | null;
+  production_unit: string | null;
+  actual_intensity: number | null;
+  benchmark_gap: number | null;
+  benchmark_gap_pct: number | null;
+  benchmark_position_label: string;
+  enpi_kwh_per_unit: number | null;
+  emissions_intensity: number | null;
+  data_window_days: number;
+  data_points: number;
+  calculation_method: string;
+  factor_source: string | null;
+  is_cbam_ready: boolean;
+  calculated_at: string;
+};
+
+export async function getSiteConfig(siteId: string | number): Promise<SiteConfig> {
+  const resp = await api.get(`/sites/${siteId}/config`);
+  return resp.data;
+}
+
+export async function updateSiteConfig(
+  siteId: string | number,
+  payload: Partial<Omit<SiteConfig, "site_id" | "site_name" | "config_updated_at">>
+): Promise<SiteConfig> {
+  const resp = await api.patch(`/sites/${siteId}/config`, payload);
+  return resp.data;
+}
+
+export async function calculateEmissions(windowHours = 168): Promise<EmissionsResult> {
+  const resp = await api.get(`/emissions/calculate?window_hours=${windowHours}`);
+  return resp.data;
+}
 export async function getTimeseriesSummary(params: {
   site_id?: string;
   meter_id?: string;
