@@ -389,3 +389,75 @@ def calculate_emissions(
         is_cbam_ready              = result.is_cbam_ready,
         calculated_at              = result.calculated_at.isoformat(),
     )
+@router.get(
+    "/calculate/site/{site_id}",
+    response_model=EmissionsResultOut,
+    summary="Calculate CO₂ emissions for a single site",
+)
+def calculate_site_emissions(
+    site_id:      int,
+    window_hours: int = 168,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Calculate CO₂ emissions for a single site using site-level config.
+    Falls back to org-level config then defaults.
+    """
+    from app.models import Site as SiteModel
+    site = db.query(SiteModel).filter(SiteModel.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    user_org_id = current_user.organization_id
+    if site.org_id != user_org_id:
+        client_org = db.query(Organization).filter(
+            Organization.id == site.org_id,
+            Organization.managed_by_org_id == user_org_id,
+        ).first()
+        if not client_org:
+            raise HTTPException(status_code=403, detail="Not authorized to access this site.")
+
+    calc   = EmissionsCalculator(db)
+    result = calc.calculate_for_site(site_id=site_id, window_hours=window_hours)
+
+    if not result:
+        raise HTTPException(
+            status_code=422,
+            detail="Unable to calculate emissions. Check site config and timeseries data.",
+        )
+
+    return EmissionsResultOut(
+        organization_id            = result.organization_id,
+        organization_name          = result.organization_name,
+        country_code               = result.country_code,
+        framework                  = result.framework,
+        framework_label            = result.calculation_method,
+        sector_code                = result.sector_code,
+        reporting_year             = result.reporting_year,
+        energy_source              = result.energy_source,
+        total_kwh                  = result.total_kwh,
+        total_tco2                 = result.total_tco2,
+        emission_factor_kg_co2_kwh = result.emission_factor_kg_co2_kwh,
+        annualised_tco2            = result.annualised_tco2,
+        annualised_kwh             = result.annualised_kwh,
+        free_allocation_tonnes     = result.free_allocation_tonnes,
+        ets_surplus_deficit        = result.ets_surplus_deficit,
+        ets_credit_cost_eur        = result.ets_credit_cost_eur,
+        ets_position_label         = result.ets_position_label,
+        benchmark_value            = result.benchmark_value,
+        production_volume          = result.production_volume,
+        production_unit            = result.production_unit,
+        actual_intensity           = result.actual_intensity,
+        benchmark_gap              = result.benchmark_gap,
+        benchmark_gap_pct          = result.benchmark_gap_pct,
+        benchmark_position_label   = result.benchmark_position_label,
+        enpi_kwh_per_unit          = result.enpi_kwh_per_unit,
+        emissions_intensity        = result.emissions_intensity,
+        data_window_days           = result.data_window_days,
+        data_points                = result.data_points,
+        calculation_method         = result.calculation_method,
+        factor_source              = result.factor_source,
+        is_cbam_ready              = result.is_cbam_ready,
+        calculated_at              = result.calculated_at.isoformat(),
+    )

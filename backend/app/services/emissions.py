@@ -380,10 +380,141 @@ class EmissionsCalculator:
 
         return float(result.total_kwh or 0), int(result.data_points or 0)
 
+    def get_kwh_for_site(
+        self,
+        site_id: int,
+        window_hours: int = 168,
+    ) -> tuple[float, int]:
+        """Sum kWh for the last N hours for a single site."""
+        from datetime import timedelta
+        cutoff   = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+        site_ids = [f"site-{site_id}", str(site_id)]
+        result   = self.db.query(
+            func.sum(TimeseriesRecord.value).label("total_kwh"),
+            func.count(TimeseriesRecord.id).label("data_points"),
+        ).filter(
+            and_(
+                TimeseriesRecord.site_id.in_(site_ids),
+                TimeseriesRecord.timestamp >= cutoff,
+            )
+        ).first()
+        return float(result.total_kwh or 0), int(result.data_points or 0)
+
+    def calculate_for_site(
+        self,
+        site_id: int,
+        window_hours: int = 168,
+    ) -> Optional[EmissionsResult]:
+        """
+        Calculate emissions for a single site using site-level config.
+        Falls back to org-level config then defaults.
+        """
+        from app.models import Site as SiteModel
+        site = self.db.query(SiteModel).filter(SiteModel.id == site_id).first()
+        if not site:
+            return None
+
+        org = self.db.query(Organization).filter(
+            Organization.id == site.org_id
+        ).first()
+        if not org:
+            return None
+
+        # Load org-level config as fallback
+        org_config = self.db.query(OrgEmissionsConfig).filter(
+            OrgEmissionsConfig.organization_id == site.org_id
+        ).first()
+
+        # Resolution: site → org → default
+        def resolve(site_val, org_val, default):
+            return site_val if site_val is not None else (org_val if org_val is not None else default)
+
+        country_code   = resolve(site.country_code,            org_config.country_code            if org_config else None, "ITA")
+        framework      = resolve(site.framework,               org_config.framework               if org_config else None, "EU_ETS")
+        energy_source  = resolve(site.primary_energy_source,   org_config.primary_energy_source   if org_config else None, "electricity")
+        sector_code    = resolve(site.sector_code,             org_config.sector_code             if org_config else None, None)
+        reporting_year = resolve(site.reporting_year,          org_config.reporting_year          if org_config else None, datetime.now(timezone.utc).year)
+        production_volume = resolve(
+            float(site.annual_production_volume) if site.annual_production_volume else None,
+            float(org_config.annual_production_volume) if (org_config and org_config.annual_production_volume) else None,
+            None
+        )
+        production_unit = resolve(site.production_unit,        org_config.production_unit         if org_config else None, None)
+        free_alloc      = resolve(
+            float(site.free_allocation_tonnes) if site.free_allocation_tonnes else None,
+            float(org_config.free_allocation_tonnes) if (org_config and org_config.free_allocation_tonnes) else None,
+            None
+        )
+
+        # Get kWh for this site only
+        total_kwh, data_points = self.get_kwh_for_site(site_id, window_hours)
+        data_window_days = window_hours // 24
+
+        # Get emission factor
+        ef = self.get_emission_factor(country_code, energy_source, reporting_year, framework)
+        if not ef:
+            return None
+
+        factor     = float(ef.factor_kg_co2_kwh)
+        total_tco2 = total_kwh * factor / 1000.0
+
+        # Annualise
+        days_in_year    = 365
+        annualised_tco2 = total_tco2 * (days_in_year / data_window_days) if data_window_days > 0 else 0
+        annualised_kwh  = total_kwh  * (days_in_year / data_window_days) if data_window_days > 0 else 0
+
+        # ETS position
+        ets_surplus_deficit = (free_alloc - total_tco2) if free_alloc is not None else None
+        ets_credit_cost_eur = abs(ets_surplus_deficit) * ETS_CARBON_PRICE_EUR if (ets_surplus_deficit is not None and ets_surplus_deficit < 0) else None
+
+        # Benchmark
+        benchmark_value = actual_intensity = benchmark_gap = benchmark_gap_pct = None
+        enpi_kwh_per_unit = emissions_intensity = None
+        if sector_code:
+            bm = self.get_sector_benchmark(framework, sector_code, reporting_year)
+            if bm:
+                benchmark_value = float(bm.benchmark_value)
+                if production_volume and production_volume > 0:
+                    actual_intensity    = total_tco2 / production_volume
+                    enpi_kwh_per_unit   = total_kwh  / production_volume
+                    emissions_intensity = actual_intensity
+                    benchmark_gap       = actual_intensity - benchmark_value
+                    benchmark_gap_pct   = (benchmark_gap / benchmark_value * 100) if benchmark_value > 0 else None
+
+        return EmissionsResult(
+            organization_id            = site.org_id,
+            organization_name          = f"{org.name} — {site.name}",
+            country_code               = country_code,
+            framework                  = framework,
+            sector_code                = sector_code,
+            reporting_year             = reporting_year,
+            total_kwh                  = round(total_kwh, 3),
+            total_tco2                 = round(total_tco2, 3),
+            emission_factor_kg_co2_kwh = factor,
+            energy_source              = energy_source,
+            free_allocation_tonnes     = free_alloc,
+            ets_surplus_deficit        = round(ets_surplus_deficit, 3) if ets_surplus_deficit is not None else None,
+            ets_credit_cost_eur        = round(ets_credit_cost_eur, 2) if ets_credit_cost_eur is not None else None,
+            benchmark_value            = benchmark_value,
+            production_volume          = production_volume,
+            production_unit            = production_unit,
+            actual_intensity           = round(actual_intensity, 6)    if actual_intensity    is not None else None,
+            benchmark_gap              = round(benchmark_gap, 6)       if benchmark_gap       is not None else None,
+            benchmark_gap_pct          = round(benchmark_gap_pct, 2)   if benchmark_gap_pct   is not None else None,
+            enpi_kwh_per_unit          = round(enpi_kwh_per_unit, 3)   if enpi_kwh_per_unit   is not None else None,
+            emissions_intensity        = round(emissions_intensity, 6) if emissions_intensity is not None else None,
+            annualised_tco2            = round(annualised_tco2, 3),
+            annualised_kwh             = round(annualised_kwh, 3),
+            data_window_days           = data_window_days,
+            data_points                = data_points,
+            calculation_method         = FRAMEWORKS.get(framework, framework),
+            factor_source              = ef.source_url,
+        )
+
     def calculate(
         self,
         organization_id: int,
-        window_hours: Optional[int] = None,   # if None, uses reporting_year
+        window_hours: Optional[int] = None,
     ) -> Optional[EmissionsResult]:
         """
         Main calculation entry point.

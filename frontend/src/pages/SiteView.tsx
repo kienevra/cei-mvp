@@ -23,7 +23,7 @@ import type { OpportunityMeasure } from "../services/api";
 import { buildHybridNarrative } from "../utils/hybridNarrative";
 import SiteAlertsStrip from "../components/SiteAlertsStrip";
 import { downloadCsv } from "../utils/csv";
-import { getSiteConfig, updateSiteConfig, calculateEmissions, type SiteConfig, type EmissionsResult } from "../services/api";
+import { getSiteConfig, updateSiteConfig, calculateSiteEmissions, type SiteConfig, type EmissionsResult } from "../services/api";
 import SiteTimelineCard from "../components/SiteTimelineCard";
 import SiteEnergyChart from "../components/SiteEnergyChart";
 import SiteForecastChart from "../components/SiteForecastChart";
@@ -214,6 +214,7 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
 
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [hybridOpen, setHybridOpen] = useState(false);
 
   const [opportunities, setOpportunities] = useState<OpportunityMeasure[]>([]);
   const [oppsLoading, setOppsLoading] = useState(false);
@@ -1055,20 +1056,19 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
               ? t("common.loadingEllipsis", { defaultValue: "Loading…" })
               : site?.name || t("siteView.title.fallback", { defaultValue: "Site" })}
           </h1>
+          {hybrid?.headline && (
+            <p style={{ marginTop: "0.25rem", fontSize: "0.88rem", color: "var(--cei-text-accent)", fontWeight: 500 }}>
+              {hybrid.headline}
+            </p>
+          )}
           <p
             style={{
-              marginTop: "0.3rem",
-              fontSize: "0.85rem",
+              marginTop: "0.2rem",
+              fontSize: "0.8rem",
               color: "var(--cei-text-muted)",
             }}
           >
-            {t("siteView.header.subtitle", {
-              defaultValue: "Per-site performance view. Energy metrics are filtered by",
-            })}{" "}
-            <code>site_id = {siteKey ?? "?"}</code>{" "}
-            {t("siteView.header.subtitleTail", {
-              defaultValue: "in the timeseries table.",
-            })}
+            <code>site_id = {siteKey ?? "?"}</code>
           </p>
         </div>
         <div
@@ -1509,7 +1509,7 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
       </section>
 
       {/* Trend + metadata */}
-      <section className="dashboard-main-grid">
+      <section>
         <div className="cei-card" style={{ maxWidth: "100%", overflow: "hidden" }}>
           <div
             style={{
@@ -1569,181 +1569,11 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
           )}
         </div>
 
-        <div className="cei-card">
-          <div style={{ marginBottom: "0.6rem" }}>
-            <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-              {t("siteView.metaCard.title", { defaultValue: "Site metadata" })}
-            </div>
-            <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              {t("siteView.metaCard.subtitle", {
-                defaultValue:
-                  "Basic descriptive information for this site. We'll extend this with tags, baseline, and other fields later.",
-              })}
-            </div>
-          </div>
-
-          {siteLoading && (
-            <div style={{ padding: "1.2rem 0.5rem", display: "flex", justifyContent: "center" }}>
-              <LoadingSpinner />
-            </div>
-          )}
-
-          {!siteLoading && site && (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "minmax(0, 1fr)",
-                rowGap: "0.4rem",
-                fontSize: "0.85rem",
-              }}
-            >
-              <div>
-                <span style={{ color: "var(--cei-text-muted)" }}>
-                  {t("siteView.metaCard.name", { defaultValue: "Name:" })}
-                </span>{" "}
-                <span>{site.name}</span>
-              </div>
-              <div>
-                <span style={{ color: "var(--cei-text-muted)" }}>
-                  {t("siteView.metaCard.location", { defaultValue: "Location:" })}
-                </span>{" "}
-                <span>{site.location || "—"}</span>
-              </div>
-              <div>
-                <span style={{ color: "var(--cei-text-muted)" }}>
-                  {t("siteView.metaCard.internalId", { defaultValue: "Internal ID:" })}
-                </span>{" "}
-                <span>{site.id}</span>
-              </div>
-            </div>
-          )}
-
-          {!siteLoading && !site && !siteError && (
-            <div style={{ fontSize: "0.85rem", color: "var(--cei-text-muted)" }}>
-              {t("siteView.metaCard.notFound", { defaultValue: "Site not found." })}
-            </div>
-          )}
-        </div>
-      </section>
+        </section>
 
       {siteKey && (
         <section style={{ marginTop: "0.75rem" }}>
           <SiteAlertsStrip siteKey={siteKey} limit={3} />
-        </section>
-      )}
-
-      {siteKey && (
-        <section style={{ marginTop: "0.75rem" }}>
-          <button
-            type="button"
-            onClick={() => setActivityOpen(o => !o)}
-            style={{
-              width: "100%",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "0.65rem 1rem",
-              background: "radial-gradient(circle at top left, #0f172a, #020617)",
-              border: "1px solid rgba(148,163,184,0.16)",
-              borderRadius: activityOpen ? "0.75rem 0.75rem 0 0" : "0.75rem",
-              cursor: "pointer",
-              color: "var(--cei-text-muted)",
-              fontSize: "0.85rem",
-            }}
-          >
-            <span style={{ fontWeight: 600, color: "var(--cei-text-main)" }}>
-              📋 {t("siteView.notes.title", { defaultValue: "Activity & Notes" })}
-            </span>
-            <span style={{ fontSize: "0.75rem" }}>{activityOpen ? "▲ Hide" : "▼ Show"}</span>
-          </button>
-
-          {activityOpen && (
-            <div style={{
-              border: "1px solid rgba(148,163,184,0.16)",
-              borderTop: "none",
-              borderRadius: "0 0 0.75rem 0.75rem",
-              padding: "1rem",
-              background: "radial-gradient(circle at top left, #0f172a, #020617)",
-            }}>
-              <div className="dashboard-main-grid">
-                <div className="cei-card">
-                  <div className="cei-card-header">
-                    <div>
-                      <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-                        {t("siteView.notes.title", { defaultValue: "Add site note" })}
-                      </div>
-                      <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-                        {t("siteView.notes.subtitle", {
-                          defaultValue: "Log operational changes, decisions, or observations.",
-                        })}
-                      </div>
-                    </div>
-                    {noteSaving && (
-                      <span className="cei-pill cei-pill-neutral">
-                        {t("common.savingEllipsis", { defaultValue: "Saving…" })}
-                      </span>
-                    )}
-                  </div>
-
-                  {noteError && (
-                    <div style={{ marginTop: "0.5rem", fontSize: "0.78rem", color: "#f97373" }}>{noteError}</div>
-                  )}
-
-                  <form onSubmit={handleAddSiteNote} style={{ marginTop: "0.6rem" }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                      <input
-                        type="text"
-                        placeholder={t("siteView.notes.titlePlaceholder", { defaultValue: "Short title (optional)" })}
-                        value={noteTitle}
-                        onChange={(e) => setNoteTitle(e.target.value)}
-                        style={{
-                          width: "100%",
-                          padding: "0.45rem 0.6rem",
-                          borderRadius: "0.5rem",
-                          border: "1px solid rgba(148, 163, 184, 0.5)",
-                          backgroundColor: "rgba(15,23,42,0.9)",
-                          color: "var(--cei-text-main)",
-                          fontSize: "0.85rem",
-                        }}
-                      />
-                      <textarea
-                        placeholder={t("siteView.notes.bodyPlaceholder", {
-                          defaultValue: "What changed at this site? E.g. 'HVAC schedule updated'",
-                        })}
-                        value={noteBody}
-                        onChange={(e) => setNoteBody(e.target.value)}
-                        rows={3}
-                        style={{
-                          width: "100%",
-                          padding: "0.5rem 0.6rem",
-                          borderRadius: "0.5rem",
-                          border: "1px solid rgba(148, 163, 184, 0.5)",
-                          backgroundColor: "rgba(15,23,42,0.9)",
-                          color: "var(--cei-text-main)",
-                          fontSize: "0.85rem",
-                          resize: "vertical",
-                        }}
-                      />
-                      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.2rem" }}>
-                        <button
-                          type="submit"
-                          className="cei-btn"
-                          disabled={noteSaving || (!noteTitle && !noteBody)}
-                          style={{ fontSize: "0.8rem", padding: "0.35rem 0.9rem" }}
-                        >
-                          {noteSaving
-                            ? t("common.savingEllipsis", { defaultValue: "Saving…" })
-                            : t("siteView.notes.save", { defaultValue: "Save note" })}
-                        </button>
-                      </div>
-                    </div>
-                  </form>
-                </div>
-
-                <SiteTimelineCard siteId={siteKey} windowHours={168} refreshKey={timelineRefreshKey} />
-              </div>
-            </div>
-          )}
         </section>
       )}
 
@@ -1760,29 +1590,8 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
         </section>
       )}
 
-      {/* CEI hybrid view */}
-      {hybrid && (
-        <section style={{ marginTop: "0.75rem" }}>
-          <div className="cei-card">
-            <div style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--cei-text-muted)" }}>
-              {t("siteView.hybrid.title", { defaultValue: "CEI hybrid view" })}
-            </div>
-            <div style={{ marginTop: "0.3rem", fontSize: "0.9rem", fontWeight: 600 }}>{hybrid.headline}</div>
-            <ul
-              style={{
-                marginTop: "0.5rem",
-                paddingLeft: "1.1rem",
-                fontSize: "0.8rem",
-                color: "var(--cei-text-muted)",
-                lineHeight: 1.6,
-              }}
-            >
-              {hybrid.bullets.map((b, idx) => (
-                <li key={idx}>{b}</li>
-              ))}
-            </ul>
-          </div>
-        </section>
+      {numericSiteId && (
+        <SiteConfigPanel siteId={numericSiteId} />
       )}
 
       {/* Opportunities + baseline insights */}
@@ -2067,10 +1876,157 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
         </div>
       </section>
 
-      {/* ── Site Configuration & Emissions ── */}
-      {numericSiteId && (
-        <SiteConfigPanel siteId={numericSiteId} />
+      {/* CEI hybrid view */}
+      {hybrid && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <button
+            type="button"
+            onClick={() => setHybridOpen(o => !o)}
+            style={{
+              width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "0.55rem 1rem",
+              background: "radial-gradient(circle at top left,#0f172a,#020617)",
+              border: "1px solid rgba(148,163,184,0.16)",
+              borderRadius: hybridOpen ? "0.75rem 0.75rem 0 0" : "0.75rem",
+              cursor: "pointer", fontSize: "0.82rem",
+            }}
+          >
+            <span style={{ color: "var(--cei-text-muted)" }}>📊 {t("siteView.hybrid.title", { defaultValue: "CEI hybrid view" })} — analisi dettagliata</span>
+            <span style={{ fontSize: "0.72rem", color: "var(--cei-text-muted)" }}>{hybridOpen ? "▲" : "▼"}</span>
+          </button>
+          {hybridOpen && (
+            <div style={{
+              border: "1px solid rgba(148,163,184,0.16)", borderTop: "none",
+              borderRadius: "0 0 0.75rem 0.75rem", padding: "0.85rem 1rem",
+              background: "radial-gradient(circle at top left,#0f172a,#020617)",
+            }}>
+              <div style={{ fontSize: "0.88rem", fontWeight: 600, marginBottom: "0.4rem" }}>{hybrid.headline}</div>
+              <ul style={{ paddingLeft: "1.1rem", fontSize: "0.8rem", color: "var(--cei-text-muted)", lineHeight: 1.6, margin: 0 }}>
+                {hybrid.bullets.map((b, idx) => (
+                  <li key={idx}>{b}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
       )}
+
+      {siteKey && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <button
+            type="button"
+            onClick={() => setActivityOpen(o => !o)}
+            style={{
+              width: "100%",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "0.65rem 1rem",
+              background: "radial-gradient(circle at top left, #0f172a, #020617)",
+              border: "1px solid rgba(148,163,184,0.16)",
+              borderRadius: activityOpen ? "0.75rem 0.75rem 0 0" : "0.75rem",
+              cursor: "pointer",
+              color: "var(--cei-text-muted)",
+              fontSize: "0.85rem",
+            }}
+          >
+            <span style={{ fontWeight: 600, color: "var(--cei-text-main)" }}>
+              📋 {t("siteView.notes.title", { defaultValue: "Activity & Notes" })}
+            </span>
+            <span style={{ fontSize: "0.75rem" }}>{activityOpen ? "▲ Hide" : "▼ Show"}</span>
+          </button>
+
+          {activityOpen && (
+            <div style={{
+              border: "1px solid rgba(148,163,184,0.16)",
+              borderTop: "none",
+              borderRadius: "0 0 0.75rem 0.75rem",
+              padding: "1rem",
+              background: "radial-gradient(circle at top left, #0f172a, #020617)",
+            }}>
+              <div className="dashboard-main-grid">
+                <div className="cei-card">
+                  <div className="cei-card-header">
+                    <div>
+                      <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
+                        {t("siteView.notes.title", { defaultValue: "Add site note" })}
+                      </div>
+                      <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+                        {t("siteView.notes.subtitle", {
+                          defaultValue: "Log operational changes, decisions, or observations.",
+                        })}
+                      </div>
+                    </div>
+                    {noteSaving && (
+                      <span className="cei-pill cei-pill-neutral">
+                        {t("common.savingEllipsis", { defaultValue: "Saving…" })}
+                      </span>
+                    )}
+                  </div>
+
+                  {noteError && (
+                    <div style={{ marginTop: "0.5rem", fontSize: "0.78rem", color: "#f97373" }}>{noteError}</div>
+                  )}
+
+                  <form onSubmit={handleAddSiteNote} style={{ marginTop: "0.6rem" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                      <input
+                        type="text"
+                        placeholder={t("siteView.notes.titlePlaceholder", { defaultValue: "Short title (optional)" })}
+                        value={noteTitle}
+                        onChange={(e) => setNoteTitle(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "0.45rem 0.6rem",
+                          borderRadius: "0.5rem",
+                          border: "1px solid rgba(148, 163, 184, 0.5)",
+                          backgroundColor: "rgba(15,23,42,0.9)",
+                          color: "var(--cei-text-main)",
+                          fontSize: "0.85rem",
+                        }}
+                      />
+                      <textarea
+                        placeholder={t("siteView.notes.bodyPlaceholder", {
+                          defaultValue: "What changed at this site? E.g. 'HVAC schedule updated'",
+                        })}
+                        value={noteBody}
+                        onChange={(e) => setNoteBody(e.target.value)}
+                        rows={3}
+                        style={{
+                          width: "100%",
+                          padding: "0.5rem 0.6rem",
+                          borderRadius: "0.5rem",
+                          border: "1px solid rgba(148, 163, 184, 0.5)",
+                          backgroundColor: "rgba(15,23,42,0.9)",
+                          color: "var(--cei-text-main)",
+                          fontSize: "0.85rem",
+                          resize: "vertical",
+                        }}
+                      />
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.2rem" }}>
+                        <button
+                          type="submit"
+                          className="cei-btn"
+                          disabled={noteSaving || (!noteTitle && !noteBody)}
+                          style={{ fontSize: "0.8rem", padding: "0.35rem 0.9rem" }}
+                        >
+                          {noteSaving
+                            ? t("common.savingEllipsis", { defaultValue: "Saving…" })
+                            : t("siteView.notes.save", { defaultValue: "Save note" })}
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+
+                <SiteTimelineCard siteId={siteKey} windowHours={168} refreshKey={timelineRefreshKey} />
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── Site Configuration & Emissions ── */}
     </div>
   );
 };
@@ -2085,7 +2041,7 @@ function SiteConfigPanel({ siteId }: { siteId: number }) {
 
   useEffect(() => {
     getSiteConfig(siteId).then(c => { setConfig(c); setForm(c); }).catch(() => {});
-    calculateEmissions(168).then(setEmissions).catch(() => {});
+    calculateSiteEmissions(siteId, 168).then(setEmissions).catch(() => {});
   }, [siteId]);
 
   const handleSave = async () => {
@@ -2108,7 +2064,7 @@ function SiteConfigPanel({ siteId }: { siteId: number }) {
       setForm(updated);
       setSaveMsg("✓ Salvato");
       // Refresh emissions with new config
-      calculateEmissions(168).then(setEmissions).catch(() => {});
+      calculateSiteEmissions(siteId, 168).then(setEmissions).catch(() => {});
       setTimeout(() => setSaveMsg(null), 2500);
     } catch { setSaveMsg("Errore nel salvataggio"); }
     finally { setSaving(false); }

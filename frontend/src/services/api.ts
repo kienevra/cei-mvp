@@ -519,6 +519,11 @@ export async function calculateEmissions(windowHours = 168): Promise<EmissionsRe
   const resp = await api.get(`/emissions/calculate?window_hours=${windowHours}`);
   return resp.data;
 }
+
+export async function calculateSiteEmissions(siteId: number, windowHours = 168): Promise<EmissionsResult> {
+  const resp = await api.get(`/emissions/calculate/site/${siteId}?window_hours=${windowHours}`);
+  return resp.data;
+}
 export async function getTimeseriesSummary(params: {
   site_id?: string;
   meter_id?: string;
