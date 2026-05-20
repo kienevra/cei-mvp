@@ -684,3 +684,73 @@ class PushSubscription(Base):
     __table_args__ = (
         UniqueConstraint("endpoint", name="uq_push_subscription_endpoint"),
     )
+
+# Emissions models — add these to backend/app/models.py
+
+# ── EmissionFactor ────────────────────────────────────────────────────────────
+class EmissionFactor(Base):
+    """
+    Official CO₂ emission factors by country, energy source, year and framework.
+    Sources: ISPRA (Italy), DESNZ (UK), EPA (USA), KEBS (Kenya), EEA (EU avg).
+    """
+    __tablename__ = "emission_factor"
+
+    id                = Column(Integer, primary_key=True)
+    country_code      = Column(String(3),    nullable=False)   # ISO 3166-1 alpha-3
+    region_code       = Column(String(16),   nullable=True)    # EU, EAC, UK, NA, SSA, VOLUNTARY
+    energy_source     = Column(String(32),   nullable=False)   # electricity, natural_gas, lpg, diesel, biomass
+    factor_kg_co2_kwh = Column(Numeric(10,6),nullable=False)   # kg CO₂ per kWh
+    valid_year        = Column(Integer,      nullable=False)
+    framework         = Column(String(32),   nullable=False)   # EU_ETS, CBAM, UK_ETS, VCS, GOLD_STANDARD, ISO14064
+    source_url        = Column(Text,         nullable=True)
+    notes             = Column(Text,         nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── SectorBenchmark ───────────────────────────────────────────────────────────
+class SectorBenchmark(Base):
+    """
+    ETS free-allocation benchmarks and voluntary market baselines per sector.
+    EU ETS Phase 4: 4.4% annual reduction in free allocations through 2030.
+    """
+    __tablename__ = "sector_benchmark"
+
+    id                    = Column(Integer,       primary_key=True)
+    framework             = Column(String(32),    nullable=False)  # EU_ETS, CBAM, VCS, GOLD_STANDARD
+    sector_code           = Column(String(32),    nullable=False)  # ceramics, cement, steel, food, chemicals
+    benchmark_value       = Column(Numeric(12,6), nullable=False)  # tCO₂ per unit of product
+    product_unit          = Column(String(32),    nullable=False)  # tonne, m2, MWh
+    valid_from_year       = Column(Integer,       nullable=False)
+    valid_to_year         = Column(Integer,       nullable=True)   # null = still valid
+    reduction_rate_pct    = Column(Numeric(6,4),  nullable=True)   # ETS Phase 4 = 4.4%/yr
+    notes                 = Column(Text,          nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── OrgEmissionsConfig ────────────────────────────────────────────────────────
+class OrgEmissionsConfig(Base):
+    """
+    Per-organization emissions configuration.
+    Set by the consultant in the client org Overview tab.
+    Drives the emissions calculator service.
+    """
+    __tablename__ = "org_emissions_config"
+
+    id                       = Column(Integer, primary_key=True)
+    organization_id          = Column(Integer,
+                                      ForeignKey("organization.id", ondelete="CASCADE"),
+                                      nullable=False, unique=True)
+    country_code             = Column(String(3),     nullable=False, default="ITA")
+    framework                = Column(String(32),    nullable=False, default="EU_ETS")
+    sector_code              = Column(String(32),    nullable=True)    # ceramics, cement, etc.
+    primary_energy_source    = Column(String(32),    nullable=False, default="electricity")
+    secondary_energy_source  = Column(String(32),    nullable=True)
+    annual_production_volume = Column(Numeric(18,3), nullable=True)   # units/year
+    production_unit          = Column(String(32),    nullable=True)   # tonne, m2, units
+    reporting_year           = Column(Integer,       nullable=True)
+    free_allocation_tonnes   = Column(Numeric(12,3), nullable=True)   # ETS free quota (tCO₂)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at               = Column(DateTime(timezone=True), server_default=func.now(),
+                                      onupdate=func.now())
+
+    organization = relationship("Organization", backref="emissions_config")

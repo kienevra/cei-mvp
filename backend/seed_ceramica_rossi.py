@@ -118,8 +118,8 @@ def main():
     print(f"Token: {token[:20]}…")
 
     now   = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    start = now - timedelta(days=41)  # fill the gap from ~41 days ago to now
-    end   = now - timedelta(hours=1)  # seed right up to now
+    start = now - timedelta(hours=32)  # just before the last data point
+    end   = now - timedelta(hours=1)
 
     for site in SITES:
         site_id   = site["id"]
