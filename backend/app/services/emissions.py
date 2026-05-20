@@ -401,22 +401,55 @@ class EmissionsCalculator:
         if not org:
             return None
 
-        # Use defaults if no config set
-        country_code   = config.country_code if config else "ITA"
-        framework      = config.framework    if config else "EU_ETS"
-        energy_source  = config.primary_energy_source if config else "electricity"
-        sector_code    = config.sector_code  if config else None
-        reporting_year = (
-            config.reporting_year if (config and config.reporting_year)
-            else datetime.now(timezone.utc).year
+        # Resolution order: site-level → org-level → hardcoded defaults
+        # Get sites for this org to check site-level config
+        from app.models import Site as SiteModel
+        sites = self.db.query(SiteModel).filter(
+            SiteModel.org_id == organization_id
+        ).all()
+
+        # Use first configured site as representative, or fall back to org config
+        site_config = next(
+            (s for s in sites if s.country_code or s.primary_energy_source),
+            None
         )
-        production_volume = float(config.annual_production_volume) if (
-            config and config.annual_production_volume
-        ) else None
-        production_unit = config.production_unit if config else None
-        free_alloc = float(config.free_allocation_tonnes) if (
-            config and config.free_allocation_tonnes
-        ) else None
+
+        country_code  = (
+            (site_config.country_code       if site_config and site_config.country_code       else None) or
+            (config.country_code            if config                                          else None) or
+            "ITA"
+        )
+        framework     = (
+            (site_config.framework          if site_config and site_config.framework          else None) or
+            (config.framework               if config                                          else None) or
+            "EU_ETS"
+        )
+        energy_source = (
+            (site_config.primary_energy_source if site_config and site_config.primary_energy_source else None) or
+            (config.primary_energy_source   if config                                          else None) or
+            "electricity"
+        )
+        sector_code   = (
+            (site_config.sector_code        if site_config and site_config.sector_code        else None) or
+            (config.sector_code             if config                                          else None)
+        )
+        production_volume = (
+            (float(site_config.annual_production_volume) if site_config and site_config.annual_production_volume else None) or
+            (float(config.annual_production_volume)      if config and config.annual_production_volume           else None)
+        )
+        production_unit = (
+            (site_config.production_unit    if site_config and site_config.production_unit    else None) or
+            (config.production_unit         if config                                          else None)
+        )
+        free_alloc = (
+            (float(site_config.free_allocation_tonnes) if site_config and site_config.free_allocation_tonnes else None) or
+            (float(config.free_allocation_tonnes)      if config and config.free_allocation_tonnes           else None)
+        )
+        reporting_year = (
+            (site_config.reporting_year     if site_config and site_config.reporting_year     else None) or
+            (config.reporting_year          if config and config.reporting_year               else None) or
+            datetime.now(timezone.utc).year
+        )
 
         # Get kWh data
         if window_hours:

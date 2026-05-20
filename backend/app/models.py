@@ -212,6 +212,21 @@ class Site(Base):
     name = Column(String, nullable=False)
     location = Column(String)
 
+    # ── Site-level energy & emissions config ──────────────────────────────────
+    electricity_price_per_kwh  = Column(Numeric(10, 4), nullable=True)
+    gas_price_per_kwh          = Column(Numeric(10, 4), nullable=True)
+    currency_code              = Column(String(3),      nullable=True)
+    country_code               = Column(String(3),      nullable=True)
+    framework                  = Column(String(32),     nullable=True)
+    sector_code                = Column(String(32),     nullable=True)
+    primary_energy_source      = Column(String(32),     nullable=True)
+    secondary_energy_source    = Column(String(32),     nullable=True)
+    annual_production_volume   = Column(Numeric(18, 3), nullable=True)
+    production_unit            = Column(String(32),     nullable=True)
+    free_allocation_tonnes     = Column(Numeric(12, 3), nullable=True)
+    reporting_year             = Column(Integer,        nullable=True)
+    config_updated_at          = Column(DateTime(timezone=True), nullable=True)
+
     # ✅ Cross-DB default
     created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
 

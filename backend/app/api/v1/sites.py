@@ -278,3 +278,126 @@ def delete_site(
         deleted_site_events,
     )
     return
+
+# ── Site config schemas ────────────────────────────────────────────────────────
+
+class SiteConfigIn(BaseModel):
+    electricity_price_per_kwh:  Optional[float] = None
+    gas_price_per_kwh:          Optional[float] = None
+    currency_code:              Optional[str]   = None
+    country_code:               Optional[str]   = None
+    framework:                  Optional[str]   = None
+    sector_code:                Optional[str]   = None
+    primary_energy_source:      Optional[str]   = None
+    secondary_energy_source:    Optional[str]   = None
+    annual_production_volume:   Optional[float] = None
+    production_unit:            Optional[str]   = None
+    free_allocation_tonnes:     Optional[float] = None
+    reporting_year:             Optional[int]   = None
+
+
+class SiteConfigOut(BaseModel):
+    site_id:                    int
+    site_name:                  str
+    electricity_price_per_kwh:  Optional[float]
+    gas_price_per_kwh:          Optional[float]
+    currency_code:              Optional[str]
+    country_code:               Optional[str]
+    framework:                  Optional[str]
+    sector_code:                Optional[str]
+    primary_energy_source:      Optional[str]
+    secondary_energy_source:    Optional[str]
+    annual_production_volume:   Optional[float]
+    production_unit:            Optional[str]
+    free_allocation_tonnes:     Optional[float]
+    reporting_year:             Optional[int]
+    config_updated_at:          Optional[str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+@router.get("/{site_id}/config", response_model=SiteConfigOut)
+def get_site_config(
+    site_id: int,
+    db: Session = Depends(get_db),
+    ctx: OrgContext = Depends(get_org_context),
+):
+    """Get energy and emissions config for a site."""
+    org_id = _org_id_from_ctx(ctx)
+    q = db.query(Site).filter(Site.id == site_id)
+    if org_id:
+        q = q.filter(Site.org_id == org_id)
+    site = q.first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    return SiteConfigOut(
+        site_id                   = site.id,
+        site_name                 = site.name,
+        electricity_price_per_kwh = float(site.electricity_price_per_kwh) if site.electricity_price_per_kwh else None,
+        gas_price_per_kwh         = float(site.gas_price_per_kwh)         if site.gas_price_per_kwh         else None,
+        currency_code             = site.currency_code,
+        country_code              = site.country_code,
+        framework                 = site.framework,
+        sector_code               = site.sector_code,
+        primary_energy_source     = site.primary_energy_source,
+        secondary_energy_source   = site.secondary_energy_source,
+        annual_production_volume  = float(site.annual_production_volume)  if site.annual_production_volume  else None,
+        production_unit           = site.production_unit,
+        free_allocation_tonnes    = float(site.free_allocation_tonnes)    if site.free_allocation_tonnes    else None,
+        reporting_year            = site.reporting_year,
+        config_updated_at         = site.config_updated_at.isoformat() if site.config_updated_at else None,
+    )
+
+
+@router.patch("/{site_id}/config", response_model=SiteConfigOut)
+def update_site_config(
+    site_id: int,
+    body: SiteConfigIn,
+    db: Session = Depends(get_db),
+    ctx: OrgContext = Depends(get_org_context),
+):
+    """Update energy and emissions config for a site."""
+    from datetime import datetime, timezone
+    org_id = _org_id_from_ctx(ctx)
+    q = db.query(Site).filter(Site.id == site_id)
+    if org_id:
+        q = q.filter(Site.org_id == org_id)
+    site = q.first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    if body.electricity_price_per_kwh  is not None: site.electricity_price_per_kwh  = body.electricity_price_per_kwh
+    if body.gas_price_per_kwh          is not None: site.gas_price_per_kwh          = body.gas_price_per_kwh
+    if body.currency_code              is not None: site.currency_code              = body.currency_code.upper()
+    if body.country_code               is not None: site.country_code               = body.country_code.upper()
+    if body.framework                  is not None: site.framework                  = body.framework.upper()
+    if body.sector_code                is not None: site.sector_code                = body.sector_code.lower()
+    if body.primary_energy_source      is not None: site.primary_energy_source      = body.primary_energy_source.lower()
+    if body.secondary_energy_source    is not None: site.secondary_energy_source    = body.secondary_energy_source.lower()
+    if body.annual_production_volume   is not None: site.annual_production_volume   = body.annual_production_volume
+    if body.production_unit            is not None: site.production_unit            = body.production_unit
+    if body.free_allocation_tonnes     is not None: site.free_allocation_tonnes     = body.free_allocation_tonnes
+    if body.reporting_year             is not None: site.reporting_year             = body.reporting_year
+    site.config_updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(site)
+
+    return SiteConfigOut(
+        site_id                   = site.id,
+        site_name                 = site.name,
+        electricity_price_per_kwh = float(site.electricity_price_per_kwh) if site.electricity_price_per_kwh else None,
+        gas_price_per_kwh         = float(site.gas_price_per_kwh)         if site.gas_price_per_kwh         else None,
+        currency_code             = site.currency_code,
+        country_code              = site.country_code,
+        framework                 = site.framework,
+        sector_code               = site.sector_code,
+        primary_energy_source     = site.primary_energy_source,
+        secondary_energy_source   = site.secondary_energy_source,
+        annual_production_volume  = float(site.annual_production_volume)  if site.annual_production_volume  else None,
+        production_unit           = site.production_unit,
+        free_allocation_tonnes    = float(site.free_allocation_tonnes)    if site.free_allocation_tonnes    else None,
+        reporting_year            = site.reporting_year,
+        config_updated_at         = site.config_updated_at.isoformat() if site.config_updated_at else None,
+    )
