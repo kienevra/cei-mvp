@@ -6,12 +6,12 @@ import { useNavigate } from 'react-router-dom';
  * Redirects to /login if not authenticated.
  */
 export function useRequireAuth() {
-  const { accessToken } = useAuth();
+  const { token } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!accessToken) {
+    if (!token) {
       navigate('/login');
     }
-  }, [accessToken, navigate]);
+  }, [token, navigate]);
 }

@@ -1393,6 +1393,18 @@
     }
   },
   "notifications": {
+     "ui": {
+      "title": "Notifiche",
+      "unread": "{{count}} non lette",
+      "markAllRead": "Segna tutte come lette",
+      "empty": "Nessuna notifica",
+      "loading": "Caricamento…",
+      "justNow": "adesso",
+      "minutesAgo": "{{n}}m fa",
+      "hoursAgo": "{{n}}h fa",
+      "daysAgo": "{{n}}g fa",
+      "dismiss": "Chiudi"
+    },
     "link_request_received": {
       "title": "{{name}} vuole gestire il tuo account",
       "body": "Hai ricevuto una richiesta di collegamento. Vai su Account per accettare o rifiutare."

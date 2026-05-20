@@ -86,6 +86,7 @@ function KpiChip({ label, value, sub }: { label: string; value: React.ReactNode;
 // Energy tab
 // ---------------------------------------------------------------------------
 function EnergyTab({ orgId }: { orgId: number }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [report, setReport] = useState<ClientReportOut | null>(null);
   const [summary24h, setSummary24h] = useState<TimeseriesSummary | null>(null);
@@ -131,7 +132,7 @@ function EnergyTab({ orgId }: { orgId: number }) {
 
   const iso50001Score = [isLive, hasTariff, activeSites === totalSites && totalSites > 0, hasHistory].filter(Boolean).length;
   const iso50001Color = iso50001Score === 4 ? "#22c55e" : iso50001Score >= 2 ? "#f59e0b" : "#ef4444";
-  const iso50001Label = iso50001Score === 4 ? "Pronto" : iso50001Score >= 2 ? "Parziale" : "Non pronto";
+  const iso50001Label = iso50001Score === 4 ? t("manage.energy.ready") : iso50001Score >= 2 ? t("manage.energy.partial") : t("manage.energy.notReady");
 
   const check = (ok: boolean, label: string, fix: string) => (
     <div key={label} style={{ display: "flex", gap: "0.6rem", alignItems: "flex-start", padding: "0.5rem 0", borderBottom: "1px solid rgba(148,163,184,0.08)" }}>
@@ -151,7 +152,7 @@ function EnergyTab({ orgId }: { orgId: number }) {
         <div>
           <div style={{ fontWeight: 700, fontSize: "0.95rem", color: iso50001Color }}>ISO 50001 Readiness — {iso50001Label}</div>
           <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)", marginTop: "0.2rem" }}>
-            {iso50001Score}/4 requisiti soddisfatti per un report EnPI verificabile
+            {t("manage.energy.isoSubtitle", { defaultValue: "{{score}}/4 requirements met for a verifiable EnPI report", score: iso50001Score })}
           </div>
         </div>
         <div style={{ display: "flex", gap: "0.4rem" }}>
@@ -163,20 +164,20 @@ function EnergyTab({ orgId }: { orgId: number }) {
 
       {/* KPI row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "0.75rem" }}>
-        <KpiChip label="Copertura siti" value={<span style={{ color: coveragePct === 100 ? "#22c55e" : "#f59e0b" }}>{coveragePct}%</span>} sub={`${activeSites}/${totalSites} attivi`} />
-        <KpiChip label="Energia (24h)" value={kwh24h != null ? `${Math.round(kwh24h).toLocaleString()} kWh` : "—"} sub={summary24h?.points ? `${summary24h.points} letture` : "Nessun dato"} />
-        <KpiChip label="Energia (7gg)" value={kwh7d  != null ? `${Math.round(kwh7d).toLocaleString()} kWh`  : "—"} sub={summary7d?.points  ? `${summary7d.points} letture`  : "Nessun dato"} />
-        {cost24h && <KpiChip label="Costo est. (24h)" value={<span style={{ color: "#22c55e" }}>€{cost24h}</span>} sub={`@ €${tariff}/kWh`} />}
-        {cost7d  && <KpiChip label="Costo est. (7gg)" value={<span style={{ color: "#22c55e" }}>€{cost7d}</span>}  sub="Basato su tariffa" />}
-        <KpiChip label="Ultimo dato" value={lastIngestAge != null ? `${lastIngestAge}h fa` : "—"} sub={isLive ? "✓ In tempo reale" : "⚠ Ritardo"} />
+        <KpiChip label={t("manage.energy.siteCoverage", { defaultValue: "Site coverage" })} value={<span style={{ color: coveragePct === 100 ? "#22c55e" : "#f59e0b" }}>{coveragePct}%</span>} sub={`${activeSites}/${totalSites} ${t("manage.energy.active", { defaultValue: "active" })}`} />
+        <KpiChip label={t("manage.energy.energy24h", { defaultValue: "Energy (24h)" })} value={kwh24h != null ? `${Math.round(kwh24h).toLocaleString()} kWh` : "—"} sub={summary24h?.points ? `${summary24h.points} ${t("manage.energy.readings", { defaultValue: "readings" })}` : t("manage.energy.noData", { defaultValue: "No data" })} />
+        <KpiChip label={t("manage.energy.energy7d", { defaultValue: "Energy (7d)" })} value={kwh7d != null ? `${Math.round(kwh7d).toLocaleString()} kWh` : "—"} sub={summary7d?.points ? `${summary7d.points} ${t("manage.energy.readings", { defaultValue: "readings" })}` : t("manage.energy.noData", { defaultValue: "No data" })} />
+        {cost24h && <KpiChip label={t("manage.energy.costEst24h", { defaultValue: "Est. cost (24h)" })} value={<span style={{ color: "#22c55e" }}>€{cost24h}</span>} sub={`@ €${tariff}/kWh`} />}
+        {cost7d  && <KpiChip label={t("manage.energy.costEst7d",  { defaultValue: "Est. cost (7d)" })}  value={<span style={{ color: "#22c55e" }}>€{cost7d}</span>}  sub={t("manage.energy.basedOnTariff", { defaultValue: "Based on tariff" })} />}
+        <KpiChip label={t("manage.energy.lastData", { defaultValue: "Last data" })} value={lastIngestAge != null ? `${lastIngestAge}h ${t("manage.energy.ago", { defaultValue: "ago" })}` : "—"} sub={isLive ? `✓ ${t("manage.energy.live", { defaultValue: "Live" })}` : `⚠ ${t("manage.energy.delayed", { defaultValue: "Delayed" })}`} />
       </div>
 
       {/* Per-site status */}
       <div>
-        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Stato impianti</div>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("manage.energy.siteStatus", { defaultValue: "Site status" })}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
           {report.sites.length === 0 ? (
-            <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>Nessun impianto configurato.</div>
+            <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>{t("manage.energy.noSites", { defaultValue: "No sites configured." })}</div>
           ) : report.sites.map((site) => {
             const siteKey = site.site_id ?? `site-${site.id}`;
             const active  = report.active_site_ids.includes(siteKey);
@@ -190,8 +191,8 @@ function EnergyTab({ orgId }: { orgId: number }) {
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                  <span style={{ fontSize: "0.78rem", color: active ? "#22c55e" : "#94a3b8" }}>{active ? "Dati recenti" : "Nessun dato recente"}</span>
-                  <button style={btnSecondary} onClick={() => navigate(`/manage/client-orgs/${orgId}/sites/${site.id}`)}>Apri →</button>
+                  <span style={{ fontSize: "0.78rem", color: active ? "#22c55e" : "#94a3b8" }}>{active ? t("manage.energy.recentData", { defaultValue: "Recent data" }) : t("manage.energy.noRecentData", { defaultValue: "No recent data" })}</span>
+                  <button style={btnSecondary} onClick={() => navigate(`/manage/client-orgs/${orgId}/sites/${site.id}`)}>{t("manage.energy.open", { defaultValue: "Open →" })}</button>
                 </div>
               </div>
             );
@@ -201,23 +202,23 @@ function EnergyTab({ orgId }: { orgId: number }) {
 
       {/* ISO 50001 checklist */}
       <div>
-        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Checklist ISO 50001</div>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("manage.energy.isoChecklist", { defaultValue: "ISO 50001 Checklist" })}</div>
         <div style={{ background: "rgba(148,163,184,0.04)", borderRadius: "0.6rem", border: "1px solid var(--cei-border-subtle)", padding: "0.25rem 1rem" }}>
-          {check(isLive,       "Ingestion dati continua (< 25h)", "Verificare il token di integrazione nella tab Tokens")}
-          {check(hasTariff,    "Tariffa elettrica configurata",    "Aggiungere il costo €/kWh nella tab Overview")}
-          {check(activeSites === totalSites && totalSites > 0, "Tutti gli impianti trasmettono dati", "Verificare la connessione sui siti inattivi")}
-          {check(hasHistory,   "Storico dati ≥ 30 giorni (720 letture)", "Attendere accumulo dati o eseguire backfill CSV")}
+          {check(isLive,    t("manage.energy.check.ingestion",  { defaultValue: "Continuous data ingestion (< 25h)" }), t("manage.energy.check.ingestionFix",  { defaultValue: "Check integration token in Tokens tab" }))}
+          {check(hasTariff, t("manage.energy.check.tariff",     { defaultValue: "Electricity tariff configured" }),     t("manage.energy.check.tariffFix",     { defaultValue: "Add €/kWh cost in Overview tab" }))}
+          {check(activeSites === totalSites && totalSites > 0, t("manage.energy.check.allSites", { defaultValue: "All sites transmitting data" }), t("manage.energy.check.allSitesFix", { defaultValue: "Check connection on inactive sites" }))}
+          {check(hasHistory, t("manage.energy.check.history",   { defaultValue: "Data history ≥ 30 days" }),            t("manage.energy.check.historyFix",    { defaultValue: "Wait for data accumulation or run CSV backfill" }))}
         </div>
       </div>
 
       {/* Tariff config summary */}
       <div>
-        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Configurazione energetica</div>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("manage.energy.config", { defaultValue: "Energy configuration" })}</div>
         <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", lineHeight: 1.8, background: "rgba(148,163,184,0.04)", borderRadius: "0.6rem", border: "1px solid var(--cei-border-subtle)", padding: "0.75rem 1rem" }}>
-          <div><strong style={{ color: "var(--cei-text-main)" }}>Fonti:</strong> {report.primary_energy_sources ?? "Non configurato"}</div>
-          <div><strong style={{ color: "var(--cei-text-main)" }}>Elettricità:</strong> {report.electricity_price_per_kwh != null ? `€${report.electricity_price_per_kwh}/kWh` : "Non configurato"}</div>
-          <div><strong style={{ color: "var(--cei-text-main)" }}>Gas:</strong> {report.gas_price_per_kwh != null ? `€${report.gas_price_per_kwh}/kWh` : "Non configurato"}</div>
-          <div><strong style={{ color: "var(--cei-text-main)" }}>Valuta:</strong> {report.currency_code ?? "—"}</div>
+          <div><strong style={{ color: "var(--cei-text-main)" }}>{t("manage.energy.sources", { defaultValue: "Sources:" })}</strong> {report.primary_energy_sources ?? t("manage.energy.notConfigured", { defaultValue: "Not configured" })}</div>
+          <div><strong style={{ color: "var(--cei-text-main)" }}>{t("manage.energy.electricity", { defaultValue: "Electricity:" })}</strong> {report.electricity_price_per_kwh != null ? `€${report.electricity_price_per_kwh}/kWh` : t("manage.energy.notConfigured", { defaultValue: "Not configured" })}</div>
+          <div><strong style={{ color: "var(--cei-text-main)" }}>{t("manage.energy.gas", { defaultValue: "Gas:" })}</strong> {report.gas_price_per_kwh != null ? `€${report.gas_price_per_kwh}/kWh` : t("manage.energy.notConfigured", { defaultValue: "Not configured" })}</div>
+          <div><strong style={{ color: "var(--cei-text-main)" }}>{t("manage.energy.currency", { defaultValue: "Currency:" })}</strong> {report.currency_code ?? "—"}</div>
         </div>
       </div>
 
@@ -229,6 +230,7 @@ function EnergyTab({ orgId }: { orgId: number }) {
 // Alerts tab
 // ---------------------------------------------------------------------------
 function AlertsTab({ orgId }: { orgId: number }) {
+  const { t } = useTranslation();
   const [report, setReport] = useState<ClientReportOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -253,14 +255,14 @@ function AlertsTab({ orgId }: { orgId: number }) {
 
   const overallStatus = report.critical_alerts > 0 ? "critical" : report.open_alerts > 0 ? "warning" : "ok";
   const statusColor   = overallStatus === "critical" ? "#ef4444" : overallStatus === "warning" ? "#f59e0b" : "#22c55e";
-  const statusLabel   = overallStatus === "critical" ? "⚠ Criticità rilevate" : overallStatus === "warning" ? "⚡ Anomalie in corso" : "✓ Tutti gli impianti nella norma";
+  const statusLabel   = overallStatus === "critical" ? `⚠ ${t("manage.alerts.critical", { defaultValue: "Critical issues detected" })}` : overallStatus === "warning" ? `⚡ ${t("manage.alerts.warning", { defaultValue: "Anomalies in progress" })}` : `✓ ${t("manage.alerts.ok", { defaultValue: "All sites normal" })}`;
 
   const siteHealth = (site: { id: number; name: string; site_id: string | null }) => {
     const active = report.active_site_ids.includes(site.site_id ?? `site-${site.id}`);
-    if (!active) return { color: "#94a3b8", label: "Nessun dato", icon: "○" };
-    if (report.critical_alerts > 0) return { color: "#ef4444", label: "Verificare", icon: "●" };
-    if (report.open_alerts > 0)     return { color: "#f59e0b", label: "Anomalia",   icon: "●" };
-    return { color: "#22c55e", label: "Normale", icon: "●" };
+    if (!active) return { color: "#94a3b8", label: t("manage.alerts.noData", { defaultValue: "No data" }), icon: "○" };
+    if (report.critical_alerts > 0) return { color: "#ef4444", label: t("manage.alerts.check", { defaultValue: "Check required" }), icon: "●" };
+    if (report.open_alerts > 0)     return { color: "#f59e0b", label: t("manage.alerts.anomaly", { defaultValue: "Anomaly" }),       icon: "●" };
+    return { color: "#22c55e", label: t("manage.alerts.normal", { defaultValue: "Normal" }), icon: "●" };
   };
 
   const lastIngestAge = report.last_ingestion_at
@@ -275,24 +277,24 @@ function AlertsTab({ orgId }: { orgId: number }) {
       <div style={{ padding: "1rem 1.25rem", borderRadius: "0.75rem", border: `1px solid ${statusColor}33`, background: `${statusColor}0d` }}>
         <div style={{ fontWeight: 700, fontSize: "0.95rem", color: statusColor, marginBottom: "0.25rem" }}>{statusLabel}</div>
         <div style={{ fontSize: "0.82rem", color: "var(--cei-text-muted)" }}>
-          {report.alerts_last_7d} alert negli ultimi 7 giorni · {report.open_alerts} aperti · {report.critical_alerts} critici
+          {t("manage.alerts.summary", { defaultValue: "{{n}} alerts in the last 7 days · {{open}} open · {{critical}} critical", n: report.alerts_last_7d, open: report.open_alerts, critical: report.critical_alerts })}
         </div>
       </div>
 
       {/* KPI row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: "0.75rem" }}>
-        <KpiChip label="Alert aperti"   value={<span style={{ color: report.open_alerts     > 0 ? "#f59e0b" : "#22c55e" }}>{report.open_alerts}</span>} />
-        <KpiChip label="Critici"        value={<span style={{ color: report.critical_alerts  > 0 ? "#ef4444" : "#22c55e" }}>{report.critical_alerts}</span>} />
-        <KpiChip label="Alert (7gg)"    value={report.alerts_last_7d} sub="Tutti i livelli" />
-        <KpiChip label="Siti attivi"    value={`${report.active_site_ids.length}/${report.total_sites}`} sub="Con dati recenti" />
+        <KpiChip label={t("manage.alerts.openAlerts",  { defaultValue: "Open alerts" })}  value={<span style={{ color: report.open_alerts     > 0 ? "#f59e0b" : "#22c55e" }}>{report.open_alerts}</span>} />
+        <KpiChip label={t("manage.alerts.criticalKpi", { defaultValue: "Critical" })}     value={<span style={{ color: report.critical_alerts  > 0 ? "#ef4444" : "#22c55e" }}>{report.critical_alerts}</span>} />
+        <KpiChip label={t("manage.alerts.alerts7d",    { defaultValue: "Alerts (7d)" })}  value={report.alerts_last_7d} sub={t("manage.alerts.allLevels", { defaultValue: "All levels" })} />
+        <KpiChip label={t("manage.alerts.activeSites", { defaultValue: "Active sites" })} value={`${report.active_site_ids.length}/${report.total_sites}`} sub={t("manage.alerts.withRecentData", { defaultValue: "With recent data" })} />
       </div>
 
       {/* Per-site health grid */}
       <div>
-        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Stato impianti</div>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("manage.alerts.siteStatus", { defaultValue: "Site status" })}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
           {report.sites.length === 0 ? (
-            <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>Nessun impianto configurato.</div>
+            <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>{t("manage.reports.noSites", { defaultValue: "No sites configured." })}</div>
           ) : report.sites.map((site) => {
             const health = siteHealth(site);
             return (
@@ -310,26 +312,26 @@ function AlertsTab({ orgId }: { orgId: number }) {
 
       {/* Compliance flags */}
       <div>
-        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Segnalazioni normative</div>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("manage.alerts.complianceFlags", { defaultValue: "Compliance flags" })}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           <div style={{ padding: "0.65rem 0.85rem", borderRadius: "0.5rem", border: `1px solid ${dataGap ? "#ef4444" : "#22c55e"}33`, background: `${dataGap ? "#ef4444" : "#22c55e"}08`, fontSize: "0.84rem" }}>
-            <span style={{ fontWeight: 600, color: dataGap ? "#ef4444" : "#22c55e" }}>{dataGap ? "⚠ Gap dati rilevato" : "✓ Continuità dati"}</span>
+            <span style={{ fontWeight: 600, color: dataGap ? "#ef4444" : "#22c55e" }}>{dataGap ? `⚠ ${t("manage.alerts.dataGap", { defaultValue: "Data gap detected" })}` : `✓ ${t("manage.alerts.dataContinuity", { defaultValue: "Data continuity" })}`}</span>
             <span style={{ color: "var(--cei-text-muted)", marginLeft: "0.5rem" }}>
-              {dataGap ? `Nessun dato da ${lastIngestAge}h — lacuna potenzialmente non conforme per audit CBAM` : "Flusso dati continuo — idoneo per MRV CBAM/ETS"}
+              {dataGap ? t("manage.alerts.dataGapDesc", { defaultValue: "No data for {{h}}h — potential CBAM audit gap", h: lastIngestAge }) : t("manage.alerts.dataContinuityDesc", { defaultValue: "Continuous data flow — suitable for CBAM/ETS MRV" })}
             </span>
           </div>
           <div style={{ padding: "0.65rem 0.85rem", borderRadius: "0.5rem", border: `1px solid ${report.critical_alerts > 0 ? "#ef4444" : "#22c55e"}33`, background: `${report.critical_alerts > 0 ? "#ef4444" : "#22c55e"}08`, fontSize: "0.84rem" }}>
             <span style={{ fontWeight: 600, color: report.critical_alerts > 0 ? "#ef4444" : "#22c55e" }}>
-              {report.critical_alerts > 0 ? `⚠ ${report.critical_alerts} anomalia critica` : "✓ Nessuna anomalia critica"}
+              {report.critical_alerts > 0 ? `⚠ ${report.critical_alerts} ${t("manage.alerts.criticalAnomaly", { defaultValue: "critical anomaly" })}` : `✓ ${t("manage.alerts.noCritical", { defaultValue: "No critical anomalies" })}`}
             </span>
             <span style={{ color: "var(--cei-text-muted)", marginLeft: "0.5rem" }}>
-              {report.critical_alerts > 0 ? "Consigliata revisione prima del prossimo audit ETS" : "Profilo di consumo nella norma per ETS Phase 4"}
+              {report.critical_alerts > 0 ? t("manage.alerts.reviewBeforeETS", { defaultValue: "Review recommended before next ETS audit" }) : t("manage.alerts.normalForETS", { defaultValue: "Consumption profile normal for ETS Phase 4" })}
             </span>
           </div>
           <div style={{ padding: "0.65rem 0.85rem", borderRadius: "0.5rem", border: "1px solid rgba(148,163,184,0.16)", background: "rgba(148,163,184,0.04)", fontSize: "0.84rem" }}>
             <span style={{ fontWeight: 600, color: "#f59e0b" }}>ℹ ETS Phase 4</span>
             <span style={{ color: "var(--cei-text-muted)", marginLeft: "0.5rem" }}>
-              Quote gratuite ridotte del 4.4%/anno — verificare baseline e opportunità di efficienza nel tab Energia
+              {t("manage.alerts.etsNote", { defaultValue: "Free allowances reduced 4.4%/year — check baseline and efficiency opportunities in Energy tab" })}
             </span>
           </div>
         </div>
@@ -338,7 +340,7 @@ function AlertsTab({ orgId }: { orgId: number }) {
       {/* Plant-level events only */}
       {plantEvents.length > 0 && (
         <div>
-          <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Attività impianti recente</div>
+          <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("manage.alerts.recentActivity", { defaultValue: "Recent plant activity" })}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
             {plantEvents.slice(0, 8).map((ev) => (
               <div key={ev.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", borderRadius: "0.4rem", background: "rgba(148,163,184,0.04)", border: "1px solid var(--cei-border-subtle)", fontSize: "0.82rem" }}>
@@ -351,7 +353,7 @@ function AlertsTab({ orgId }: { orgId: number }) {
       )}
 
       <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-        Soglie alert personalizzabili nella tab <strong>Thresholds</strong>.
+        {t("manage.alerts.thresholdsNote", { defaultValue: "Alert thresholds can be customized in the" })} <strong>Thresholds</strong> {t("manage.alerts.tab", { defaultValue: "tab" })}.
       </div>
 
     </div>
@@ -362,6 +364,7 @@ function AlertsTab({ orgId }: { orgId: number }) {
 // Reports tab
 // ---------------------------------------------------------------------------
 function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
+  const { t } = useTranslation();
   const [report, setReport] = useState<ClientReportOut | null>(null);
   const [summary7d, setSummary7d] = useState<TimeseriesSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -403,24 +406,24 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
   const allSitesActive = report.active_site_ids.length === report.total_sites && report.total_sites > 0;
 
   const isoChecks = [
-    { ok: isLive,                       label: "Ingestion continua (< 25h)",           detail: "Necessario per EnPI verificabile" },
-    { ok: hasTariff,                    label: "Tariffa €/kWh configurata",            detail: "Necessario per calcolo costi ISO 50001" },
-    { ok: allSitesActive,               label: "Tutti gli impianti trasmettono dati",   detail: "Copertura completa del portfolio" },
-    { ok: hasHistory,                   label: "Storico ≥ 30 giorni",                  detail: "Baseline statistica affidabile" },
-    { ok: report.open_alerts === 0,     label: "Nessun alert aperto",                  detail: "Profilo di consumo nella norma" },
+    { ok: isLive,                   label: t("manage.reports.check.ingestion",  { defaultValue: "Continuous ingestion (< 25h)" }),          detail: t("manage.reports.check.ingestionDetail",  { defaultValue: "Required for verifiable EnPI" }) },
+    { ok: hasTariff,                label: t("manage.reports.check.tariff",     { defaultValue: "€/kWh tariff configured" }),                detail: t("manage.reports.check.tariffDetail",     { defaultValue: "Required for ISO 50001 cost calculation" }) },
+    { ok: allSitesActive,           label: t("manage.reports.check.allSites",   { defaultValue: "All sites transmitting data" }),            detail: t("manage.reports.check.allSitesDetail",   { defaultValue: "Complete portfolio coverage" }) },
+    { ok: hasHistory,               label: t("manage.reports.check.history",    { defaultValue: "History ≥ 30 days" }),                      detail: t("manage.reports.check.historyDetail",    { defaultValue: "Reliable statistical baseline" }) },
+    { ok: report.open_alerts === 0, label: t("manage.reports.check.noAlerts",   { defaultValue: "No open alerts" }),                         detail: t("manage.reports.check.noAlertsDetail",   { defaultValue: "Consumption profile normal" }) },
   ];
   const isoScore  = isoChecks.filter(c => c.ok).length;
   const isoColor  = isoScore === 5 ? "#22c55e" : isoScore >= 3 ? "#f59e0b" : "#ef4444";
-  const isoStatus = isoScore === 5 ? "Conforme" : isoScore >= 3 ? "In progress" : "Non conforme";
+  const isoStatus = isoScore === 5 ? t("manage.reports.compliant", { defaultValue: "Compliant" }) : isoScore >= 3 ? t("manage.reports.inProgress", { defaultValue: "In progress" }) : t("manage.reports.nonCompliant", { defaultValue: "Non compliant" });
 
   const cbamChecks = [
-    { ok: isLive,     label: "Dati MRV aggiornati (< 25h)",   detail: "CBAM richiede dati verificati su richiesta" },
-    { ok: hasHistory, label: "Storico emissioni ≥ 30 giorni", detail: "Necessario per dichiarazione doganale" },
-    { ok: hasTariff,  label: "Vettore energetico configurato", detail: "Identificazione fonte emissioni" },
+    { ok: isLive,     label: t("manage.reports.cbam.mrv",     { defaultValue: "MRV data updated (< 25h)" }),        detail: t("manage.reports.cbam.mrvDetail",     { defaultValue: "CBAM requires verified data on demand" }) },
+    { ok: hasHistory, label: t("manage.reports.cbam.history", { defaultValue: "Emissions history ≥ 30 days" }),     detail: t("manage.reports.cbam.historyDetail", { defaultValue: "Required for customs declaration" }) },
+    { ok: hasTariff,  label: t("manage.reports.cbam.source",  { defaultValue: "Energy source configured" }),        detail: t("manage.reports.cbam.sourceDetail",  { defaultValue: "Emissions source identification" }) },
   ];
   const cbamScore  = cbamChecks.filter(c => c.ok).length;
   const cbamColor  = cbamScore === 3 ? "#22c55e" : cbamScore >= 2 ? "#f59e0b" : "#ef4444";
-  const cbamStatus = cbamScore === 3 ? "Pronto" : cbamScore >= 2 ? "Parziale" : "Non pronto";
+  const cbamStatus = cbamScore === 3 ? t("manage.reports.ready", { defaultValue: "Ready" }) : cbamScore >= 2 ? t("manage.reports.partial", { defaultValue: "Partial" }) : t("manage.reports.notReady", { defaultValue: "Not ready" });
 
   const checkRow = (ok: boolean, label: string, detail: string) => (
     <div key={label} style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", padding: "0.5rem 0", borderBottom: "1px solid rgba(148,163,184,0.08)" }}>
@@ -438,15 +441,15 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
       {/* PDF download header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem" }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: "1rem" }}>Report portfolio — {orgName}</div>
+          <div style={{ fontWeight: 700, fontSize: "1rem" }}>{t("manage.reports.title", { defaultValue: "Portfolio report" })} — {orgName}</div>
           <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", marginTop: "0.2rem" }}>
-            Generato: {fmtDt(report.generated_at)} · {report.total_sites} impianti · {report.total_timeseries_records.toLocaleString()} letture totali
-            {kwh7d != null && ` · ${Math.round(kwh7d).toLocaleString()} kWh (7gg)`}
-            {cost7d != null && ` · €${cost7d} costo est.`}
+            {t("manage.reports.generated", { defaultValue: "Generated:" })} {fmtDt(report.generated_at)} · {report.total_sites} {t("manage.reports.sites", { defaultValue: "sites" })} · {report.total_timeseries_records.toLocaleString()} {t("manage.reports.totalReadings", { defaultValue: "total readings" })}
+            {kwh7d != null && ` · ${Math.round(kwh7d).toLocaleString()} kWh (7d)`}
+            {cost7d != null && ` · €${cost7d} ${t("manage.reports.costEst", { defaultValue: "est. cost" })}`}
           </div>
         </div>
         <button style={btnPrimary} onClick={handleDownload} disabled={downloading}>
-          {downloading ? "Download…" : "↓ Scarica PDF"}
+          {downloading ? `${t("manage.reports.downloading", { defaultValue: "Downloading" })}…` : `↓ ${t("manage.reports.downloadPdf", { defaultValue: "Download PDF" })}`}
         </button>
       </div>
 
@@ -454,7 +457,7 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
       <div style={{ borderRadius: "0.75rem", border: `1px solid ${isoColor}33`, overflow: "hidden" }}>
         <div style={{ padding: "0.75rem 1rem", background: `${isoColor}0d`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontWeight: 700, color: isoColor }}>ISO 50001 — {isoStatus}</div>
-          <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>{isoScore}/5 requisiti</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>{isoScore}/5 {t("manage.reports.requirements", { defaultValue: "requirements" })}</div>
         </div>
         <div style={{ padding: "0 1rem 0.25rem" }}>
           {isoChecks.map(c => checkRow(c.ok, c.label, c.detail))}
@@ -465,7 +468,7 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
       <div style={{ borderRadius: "0.75rem", border: `1px solid ${cbamColor}33`, overflow: "hidden" }}>
         <div style={{ padding: "0.75rem 1rem", background: `${cbamColor}0d`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontWeight: 700, color: cbamColor }}>CBAM Readiness — {cbamStatus}</div>
-          <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>{cbamScore}/3 requisiti · In vigore da gen 2026</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>{cbamScore}/3 {t("manage.reports.requirements", { defaultValue: "requirements" })} · {t("manage.reports.cbamInForce", { defaultValue: "In force from Jan 2026" })}</div>
         </div>
         <div style={{ padding: "0 1rem 0.25rem" }}>
           {cbamChecks.map(c => checkRow(c.ok, c.label, c.detail))}
@@ -474,24 +477,31 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
 
       {/* ETS Phase 4 note */}
       <div style={{ padding: "0.85rem 1rem", borderRadius: "0.6rem", border: "1px solid rgba(245,158,11,0.3)", background: "rgba(245,158,11,0.06)", fontSize: "0.84rem" }}>
-        <div style={{ fontWeight: 600, color: "#f59e0b", marginBottom: "0.3rem" }}>ℹ ETS Phase 4 — Riduzione quote gratuite</div>
+        <div style={{ fontWeight: 600, color: "#f59e0b", marginBottom: "0.3rem" }}>ℹ {t("manage.reports.ets.title", { defaultValue: "ETS Phase 4 — Free allowance reduction" })}</div>
         <div style={{ color: "var(--cei-text-muted)", lineHeight: 1.6 }}>
-          Le quote ETS gratuite si riducono del <strong style={{ color: "var(--cei-text-main)" }}>4.4% ogni anno</strong> fino al 2030.
-          Per {orgName}, questo significa che ogni anno il costo delle emissioni non coperte aumenta.
-          I dati CEI permettono di identificare e documentare le riduzioni di consumo per massimizzare le quote disponibili.
+          {t("manage.reports.ets.body1", { defaultValue: "ETS free allowances are reduced by" })} <strong style={{ color: "var(--cei-text-main)" }}>4.4% {t("manage.reports.ets.perYear", { defaultValue: "per year" })}</strong> {t("manage.reports.ets.until2030", { defaultValue: "until 2030." })}
+          {" "}{t("manage.reports.ets.body2", { defaultValue: "For {{name}}, this means the cost of uncovered emissions increases each year.", name: orgName })}
+          {" "}{t("manage.reports.ets.body3", { defaultValue: "CEI data helps identify and document consumption reductions to maximise available allowances." })}
         </div>
       </div>
 
       {/* 7-day summary table */}
       <div>
-        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Riepilogo 7 giorni per impianto</div>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("manage.reports.summary7d", { defaultValue: "7-day summary per site" })}</div>
         {report.sites.length === 0 ? (
-          <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>Nessun impianto configurato.</div>
+          <div style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)" }}>{t("manage.alerts.noSites", { defaultValue: "No sites configured." })}</div>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.84rem" }}>
             <thead>
               <tr>
-                {["Impianto", "Posizione", "Stato", "Energia 7gg", "Costo est.", "Conformità"].map(h => (
+                {[
+                  t("manage.reports.table.site",       { defaultValue: "Site" }),
+                  t("manage.reports.table.location",   { defaultValue: "Location" }),
+                  t("manage.reports.table.status",     { defaultValue: "Status" }),
+                  t("manage.reports.table.energy7d",   { defaultValue: "Energy 7d" }),
+                  t("manage.reports.table.costEst",    { defaultValue: "Est. cost" }),
+                  t("manage.reports.table.compliance", { defaultValue: "Compliance" }),
+                ].map(h => (
                   <th key={h} style={{ textAlign: "left", padding: "0.4rem 0.6rem", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", borderBottom: "1px solid var(--cei-border-subtle)" }}>{h}</th>
                 ))}
               </tr>
@@ -506,7 +516,7 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
                     <td style={{ padding: "0.5rem 0.6rem", fontWeight: 500 }}>{site.name}</td>
                     <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</td>
                     <td style={{ padding: "0.5rem 0.6rem" }}>
-                      <span style={{ color: active ? "#22c55e" : "#94a3b8", fontSize: "0.8rem" }}>{active ? "● Attivo" : "○ Silente"}</span>
+                      <span style={{ color: active ? "#22c55e" : "#94a3b8", fontSize: "0.8rem" }}>{active ? `● ${t("manage.reports.active", { defaultValue: "Active" })}` : `○ ${t("manage.reports.silent", { defaultValue: "Silent" })}`}</span>
                     </td>
                     <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-main)", fontWeight: 500 }}>
                       {siteKwh != null ? `${siteKwh.toLocaleString()} kWh` : "—"}
@@ -514,7 +524,7 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
                     <td style={{ padding: "0.5rem 0.6rem", color: "#22c55e", fontWeight: 500 }}>{siteCost}</td>
                     <td style={{ padding: "0.5rem 0.6rem" }}>
                       <span style={{ fontSize: "0.76rem", padding: "0.15rem 0.5rem", borderRadius: "999px", background: active && isoScore >= 3 ? "rgba(34,197,94,0.12)" : "rgba(148,163,184,0.1)", color: active && isoScore >= 3 ? "#22c55e" : "#94a3b8" }}>
-                        {active && isoScore >= 3 ? "In norma" : "Da verificare"}
+                        {active && isoScore >= 3 ? t("manage.reports.inNorm", { defaultValue: "In norm" }) : t("manage.reports.toVerify", { defaultValue: "To verify" })}
                       </span>
                     </td>
                   </tr>

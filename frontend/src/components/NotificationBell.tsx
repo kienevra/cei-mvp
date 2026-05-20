@@ -36,15 +36,18 @@ function getMeta(type: string) {
 
 // ── Time formatting ───────────────────────────────────────────────────────────
 
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins  = Math.floor(diff / 60_000);
-  const hours = Math.floor(diff / 3_600_000);
-  const days  = Math.floor(diff / 86_400_000);
-  if (mins  <  1) return "just now";
-  if (mins  < 60) return `${mins}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  return `${days}d ago`;
+function useTimeAgo() {
+  const { t } = useTranslation();
+  return (iso: string): string => {
+    const diff  = Date.now() - new Date(iso).getTime();
+    const mins  = Math.floor(diff / 60_000);
+    const hours = Math.floor(diff / 3_600_000);
+    const days  = Math.floor(diff / 86_400_000);
+    if (mins  <  1) return t("notifications.ui.justNow");
+    if (mins  < 60) return t("notifications.ui.minutesAgo", { n: mins });
+    if (hours < 24) return t("notifications.ui.hoursAgo",   { n: hours });
+    return t("notifications.ui.daysAgo", { n: days });
+  };
 }
 
 // ── Bell SVG icon ─────────────────────────────────────────────────────────────
@@ -68,6 +71,7 @@ function BellIcon({ size = 20 }: { size?: number }) {
 const POLL_INTERVAL_MS = 30_000; // poll every 30 seconds
 
 const NotificationBell: React.FC = () => {
+  const timeAgo = useTimeAgo();
   const [unread,        setUnread]        = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [open,          setOpen]          = useState(false);
@@ -285,7 +289,7 @@ const NotificationBell: React.FC = () => {
           }}>
             <div style={{ fontWeight: 600, fontSize: "0.9rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
               <BellIcon size={15} />
-              Notifiche
+              {t("notifications.ui.title")}
               {unread > 0 && (
                 <span style={{
                   fontSize: "0.7rem",
@@ -295,7 +299,7 @@ const NotificationBell: React.FC = () => {
                   color: "#ef4444",
                   fontWeight: 700,
                 }}>
-                  {unread} non lette
+                  {t("notifications.ui.unread", { count: unread })}
                 </span>
               )}
             </div>
@@ -314,7 +318,7 @@ const NotificationBell: React.FC = () => {
                   opacity: markingAll ? 0.6 : 1,
                 }}
               >
-                {markingAll ? "..." : "Segna tutte come lette"}
+                {markingAll ? "..." : t("notifications.ui.markAllRead")}
               </button>
             )}
           </div>
@@ -322,12 +326,12 @@ const NotificationBell: React.FC = () => {
           {/* List */}
           {loading ? (
             <div style={{ padding: "1.5rem", textAlign: "center", color: "#94a3b8", fontSize: "0.85rem" }}>
-              Caricamento…
+              {t("notifications.ui.loading")}
             </div>
           ) : notifications.length === 0 ? (
             <div style={{ padding: "2rem 1rem", textAlign: "center", color: "#94a3b8", fontSize: "0.85rem" }}>
               <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🔔</div>
-              Nessuna notifica
+              {t("notifications.ui.empty")}
             </div>
           ) : (
             <div>
@@ -420,7 +424,7 @@ const NotificationBell: React.FC = () => {
                       <button
                         type="button"
                         onClick={(e) => handleDismiss(e, n.id)}
-                        title="Dismissi"
+                        title={t("notifications.ui.dismiss")}
                         style={{
                           background: "transparent",
                           border: "none",

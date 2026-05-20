@@ -1393,6 +1393,18 @@
     }
   },
   "notifications": {
+    "ui": {
+      "title": "Notifications",
+      "unread": "{{count}} unread",
+      "markAllRead": "Mark all as read",
+      "empty": "No notifications",
+      "loading": "Loading…",
+      "justNow": "just now",
+      "minutesAgo": "{{n}}m ago",
+      "hoursAgo": "{{n}}h ago",
+      "daysAgo": "{{n}}d ago",
+      "dismiss": "Dismiss"
+    },
     "link_request_received": {
       "title": "{{name}} wants to manage your account",
       "body": "You received a link request. Go to Account to accept or reject."

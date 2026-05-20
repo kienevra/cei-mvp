@@ -5,7 +5,7 @@ import api from '../services/api';
 import '@testing-library/jest-dom';
 import type { MockedFunction } from 'jest-mock';
 
-import { jest } from '@jest/globals';
+import { jest, expect, describe, it, beforeEach } from '@jest/globals';
 jest.mock('../services/api');
 
 const mockCsvContent = `timestamp,site_id,meter_id,value,unit\n2025-01-01,site-1,meter-1,100,kWh\n2025-01-02,site-2,meter-2,200,kWh`;
@@ -42,13 +42,4 @@ describe('CSVUpload', () => {
     await waitFor(() => expect(screen.getByText(/Job accepted: job-123/i)).toBeInTheDocument());
   });
 });
-}
-
-function beforeEach(arg0: () => void) {
-  throw new Error('Function not implemented.');
-}
-
-function expect(arg0: any) {
-  throw new Error('Function not implemented.');
-}
 

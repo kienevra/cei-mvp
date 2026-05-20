@@ -12,7 +12,7 @@ export function HealthIndicator({
   error?: any;
 }) {
   if (loading) return <LoadingSpinner />;
-  if (error) return <ErrorBanner error={error} />;
+  if (error) return <ErrorBanner message={error?.message ?? String(error)} onClose={() => {}} />;
   return (
     <div className="health-indicator">
       Backend status: <strong>{status === "ok" ? "Healthy" : "Unhealthy"}</strong>
