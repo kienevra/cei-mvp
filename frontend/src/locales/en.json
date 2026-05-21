@@ -1406,12 +1406,20 @@
       "dismiss": "Dismiss"
     },
     "link_request_received": {
-      "title": "{{name}} wants to manage your account",
-      "body": "You received a link request. Go to Account to accept or reject."
+      "title": "{{name}} wants to join your portfolio",
+      "body": "{{name}} sent you a link request. Go to Manage to accept or reject."
+    },
+    "link_request_sent": {
+      "title": "Link request sent to {{name}}",
+      "body": "Your request is pending. You'll be notified when they respond."
     },
     "link_request_accepted": {
-      "title": "{{name}} accepted your request",
-      "body": "The organization is now in your portfolio."
+      "title": "{{name}}",
+      "body": "{{name}}"
+    },
+    "org_linked": {
+      "title": "{{name}}",
+      "body": "{{name}}"
     },
     "link_request_rejected": {
       "title": "{{name}} declined your request",
@@ -1452,6 +1460,19 @@
     "token_first_use": {
       "title": "Integration token first use",
       "body": "A token made its first data push to CEI."
+    }
+  },
+  "manage": {
+    "onboarding": {
+      "steps": {
+        "managing_org_configured": { "label": "Managing org configured" },
+        "subscription_active":     { "label": "Subscription active" },
+        "first_client_created":    { "label": "First client org created" },
+        "first_site_created":      { "label": "First site created" },
+        "first_token_created":     { "label": "First integration token created" },
+        "first_data_ingested":     { "label": "First data ingested" },
+        "first_user_invited":      { "label": "First user invited" }
+      }
     }
   }
 }

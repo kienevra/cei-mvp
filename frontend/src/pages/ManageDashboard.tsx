@@ -344,8 +344,14 @@ const ManageDashboard: React.FC = () => {
                     {step.complete ? "✓" : "○"}
                   </span>
                   <div>
-                    <div style={{ fontWeight: 500, color: step.complete ? "var(--cei-text-main)" : "var(--cei-text-muted)" }}>{step.label}</div>
-                    {step.detail && <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>{step.detail}</div>}
+                    <div style={{ fontWeight: 500, color: step.complete ? "var(--cei-text-main)" : "var(--cei-text-muted)" }}>
+                      {t(`manage.onboarding.steps.${step.key}.label`, { defaultValue: step.label })}
+                    </div>
+                    {step.detail && (
+                      <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
+                        {t(`manage.onboarding.steps.${step.key}.detail`, { defaultValue: step.detail })}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

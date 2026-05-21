@@ -507,9 +507,25 @@ def org_initiate_link_request(
         message=payload.message,
     )
     db.add(req)
+    from app.services.notification_service import notify, NotifType
+    notify(
+        db,
+        org_id=consultant_org.id,
+        type=NotifType.LINK_REQUEST_RECEIVED,
+        title=f"{my_org.name} wants to join your portfolio",
+        body=f"{my_org.name} sent you a link request. Go to Manage to accept or reject.",
+        extra={"client_org_id": org_id, "client_org_name": my_org.name, "url": "/manage"},
+    )
+    notify(
+        db,
+        org_id=org_id,
+        type=NotifType.LINK_REQUEST_SENT,
+        title=f"Link request sent to {consultant_org.name}",
+        body=f"Your request to join {consultant_org.name} is pending. You'll be notified when they respond.",
+        extra={"managing_org_id": consultant_org.id, "managing_org_name": consultant_org.name, "url": "/account"},
+    )
     db.commit()
     db.refresh(req)
- 
     return OrgLinkRequestOut(
         id=req.id,
         managing_org_id=req.managing_org_id,
@@ -592,17 +608,25 @@ def org_accept_link_request(
         db,
         org_id=req.managing_org_id,
         type=NotifType.LINK_REQUEST_ACCEPTED,
-        title=f"{client_org.name} ha accettato la richiesta",
-        body="L'organizzazione è ora nel tuo portfolio.",
-        extra={"client_org_id": client_org.id, "client_org_name": client_org.name},
+        title=f"{client_org.name} joined your portfolio",
+        body=f"You accepted {client_org.name}'s request. The organization is now in your portfolio.",
+        extra={
+            "client_org_id": client_org.id, "client_org_name": client_org.name, "url": "/manage",
+            "title_it": f"{client_org.name} è entrata nel tuo portfolio",
+            "body_it": f"Hai accettato la richiesta di {client_org.name}. L'organizzazione è ora nel tuo portfolio.",
+        },
     )
     notify(
         db,
         org_id=org_id,
         type=NotifType.ORG_LINKED,
-        title=f"Collegato a {managing_org.name if managing_org else 'un consulente'}",
-        body="Il tuo account è ora gestito da un consulente CEI.",
-        extra={"managing_org_name": managing_org.name if managing_org else ""},
+        title=f"Connected to {managing_org.name if managing_org else 'a consultant'}",
+        body=f"Your account is now managed by {managing_org.name if managing_org else 'a CEI consultant'}.",
+        extra={
+            "managing_org_name": managing_org.name if managing_org else "", "url": "/account",
+            "title_it": f"Collegato a {managing_org.name if managing_org else 'un consulente'}",
+            "body_it": f"Il tuo account è ora gestito da {managing_org.name if managing_org else 'un consulente CEI'}.",
+        },
     )
     db.commit()
     db.refresh(req)

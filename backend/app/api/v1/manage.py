@@ -1136,13 +1136,23 @@ def consultant_initiate_link_request(
         message=payload.message,
     )
     db.add(req)
+    # Notify the target org (client) that they received a request
     notify(
         db,
         org_id=target_org.id,
         type=NotifType.LINK_REQUEST_RECEIVED,
-        title=f"{managing_org.name} vuole gestire il tuo account",
-        body="Hai ricevuto una richiesta di collegamento. Vai su Account per accettare o rifiutare.",
+        title=f"{managing_org.name} wants to manage your account",
+        body=f"You received a link request from {managing_org.name}. Go to Account to accept or reject.",
         extra={"managing_org_id": managing_org_id, "managing_org_name": managing_org.name},
+    )
+    # Notify the consultant org that the request was sent successfully
+    notify(
+        db,
+        org_id=managing_org_id,
+        type=NotifType.LINK_REQUEST_RECEIVED,
+        title=f"Link request sent to {target_org.name}",
+        body=f"Your link request to {target_org.name} is pending. You'll be notified when they respond.",
+        extra={"client_org_id": target_org.id, "client_org_name": target_org.name},
     )
     db.commit()
     db.refresh(req)
@@ -1307,17 +1317,25 @@ def _apply_link(db: Session, req: OrgLinkRequest) -> None:
         db,
         org_id=req.client_org_id,
         type=NotifType.ORG_LINKED,
-        title=f"Collegato a {managing_org.name if managing_org else 'un consulente'}",
-        body="Il tuo account è ora gestito da un consulente CEI.",
-        extra={"managing_org_id": req.managing_org_id, "managing_org_name": managing_org.name if managing_org else ""},
+        title=f"Connected to {managing_org.name if managing_org else 'a consultant'}",
+        body=f"Your account is now managed by {managing_org.name if managing_org else 'a CEI consultant'}.",
+        extra={
+            "managing_org_id": req.managing_org_id, "managing_org_name": managing_org.name if managing_org else "", "url": "/account",
+            "title_it": f"Collegato a {managing_org.name if managing_org else 'un consulente'}",
+            "body_it": f"Il tuo account è ora gestito da {managing_org.name if managing_org else 'un consulente CEI'}.",
+        },
     )
     notify(
         db,
         org_id=req.managing_org_id,
         type=NotifType.LINK_REQUEST_ACCEPTED,
-        title=f"{client_org.name} ha accettato la richiesta",
-        body="L'organizzazione è ora nel tuo portfolio.",
-        extra={"client_org_id": client_org.id, "client_org_name": client_org.name},
+        title=f"{client_org.name} accepted your request",
+        body=f"{client_org.name} accepted your link request. The organization is now in your portfolio.",
+        extra={
+            "client_org_id": client_org.id, "client_org_name": client_org.name, "url": "/manage",
+            "title_it": f"{client_org.name} ha accettato la tua richiesta",
+            "body_it": f"{client_org.name} ha accettato la tua richiesta di collegamento. L'organizzazione è ora nel tuo portfolio.",
+        },
     )
     db.commit()
     db.refresh(req)

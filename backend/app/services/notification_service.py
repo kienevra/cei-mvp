@@ -30,6 +30,7 @@ class NotifType:
     LINK_REQUEST_ACCEPTED  = "link_request_accepted"   # consultant learns org accepted
     LINK_REQUEST_REJECTED  = "link_request_rejected"   # consultant learns org rejected
     LINK_REQUEST_CANCELLED = "link_request_cancelled"  # org learns consultant cancelled
+    LINK_REQUEST_SENT = "link_request_sent"  # sender's confirmation
 
     # Org relationship changes
     ORG_LINKED   = "org_linked"    # org is now managed

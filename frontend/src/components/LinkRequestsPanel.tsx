@@ -10,6 +10,7 @@ import {
   consultantCancelLinkRequest,
   type LinkRequest,
 } from "../services/manageApi";
+import { useTranslation } from "react-i18next";
 
 function fmtDt(raw: string): string {
   const d = new Date(raw);
@@ -88,6 +89,8 @@ interface LinkRequestsPanelProps {
 }
 
 const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => {
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const [requests, setRequests] = useState<LinkRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -166,24 +169,24 @@ const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => 
   return (
     <div>
       <div style={{ fontWeight: 600, fontSize: "1rem", marginBottom: "0.25rem" }}>
-        Link an existing organization
+        {t("manage.linkPanel.title", { defaultValue: "Link an existing organization" })}
       </div>
       <div style={{ fontSize: "0.82rem", color: "var(--cei-text-muted)", marginBottom: "1.25rem" }}>
-        Invite a standalone organization to transfer their CEI profile to your management. They must accept before you gain access. Alternatively, an org owner can send you a request directly from their account.
+        {t("manage.linkPanel.subtitle", { defaultValue: "Invite a standalone organization to transfer their CEI profile to your management. They must accept before you gain access. Alternatively, an org owner can send you a request directly from their account." })}
       </div>
 
       {/* Incoming requests from org owners */}
       {incoming.length > 0 && (
         <div style={{ marginBottom: "1.25rem" }}>
           <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.6rem", color: "var(--cei-amber, #f59e0b)" }}>
-            ● {incoming.length} incoming request{incoming.length !== 1 ? "s" : ""} from organization owners
+            ● {incoming.length} {t("manage.linkPanel.incomingRequests", { defaultValue: "incoming request(s) from organization owners" })}
           </div>
           {incoming.map(req => (
             <div key={req.id} style={{ border: "1px solid rgba(245,158,11,0.3)", background: "rgba(245,158,11,0.05)", borderRadius: "0.5rem", padding: "0.75rem 1rem", marginBottom: "0.5rem", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "1rem", flexWrap: "wrap" }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: "0.88rem" }}>{req.client_org_name}</div>
                 <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", marginTop: "0.2rem" }}>
-                  Requested to join your portfolio · {fmtDt(req.created_at)}
+                  {t("manage.linkPanel.requestedToJoin", { defaultValue: "Requested to join your portfolio" })} · {fmtDt(req.created_at)}
                 </div>
                 {req.message && (
                   <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", marginTop: "0.25rem", fontStyle: "italic" }}>
@@ -193,10 +196,10 @@ const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => 
               </div>
               <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
                 <button style={btnPrimary} onClick={() => handleAccept(req.id)} disabled={actingId === req.id}>
-                  {actingId === req.id ? "…" : "Accept"}
+                  {actingId === req.id ? "…" : t("manage.linkPanel.accept", { defaultValue: "Accept" })}
                 </button>
                 <button style={btnDanger} onClick={() => handleReject(req.id)} disabled={actingId === req.id}>
-                  Reject
+                  {t("manage.linkPanel.reject", { defaultValue: "Reject" })}
                 </button>
               </div>
             </div>
@@ -207,7 +210,7 @@ const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => 
       {/* Send new request */}
       <div style={{ background: "rgba(148,163,184,0.05)", border: "1px solid var(--cei-border-subtle)", borderRadius: "0.6rem", padding: "1rem", marginBottom: "1.25rem" }}>
         <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.75rem" }}>
-          Send a link request to an existing organization
+          {t("manage.linkPanel.sendTitle", { defaultValue: "Send a link request to an existing organization" })}
         </div>
 
         {sendError && (
@@ -215,13 +218,13 @@ const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => 
         )}
         {sendSuccess && (
           <div style={{ color: "var(--cei-green, #22c55e)", fontSize: "0.82rem", marginBottom: "0.6rem" }}>
-            Request sent — the org owner will see it in their account.
+            {t("manage.linkPanel.sendSuccess", { defaultValue: "Request sent — the org owner will see it in their account." })}
           </div>
         )}
 
         <div style={{ marginBottom: "0.6rem" }}>
           <label style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", display: "block", marginBottom: "0.25rem" }}>
-            Organization owner email *
+            {t("manage.linkPanel.emailLabel", { defaultValue: "Organization owner email *" })}
           </label>
           <input
             style={inputStyle}
@@ -231,13 +234,13 @@ const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => 
             onChange={(e) => setEmail(e.target.value)}
           />
           <div style={{ fontSize: "0.72rem", color: "var(--cei-text-muted)", marginTop: "0.25rem" }}>
-            The organization must already have a CEI account.
+            {t("manage.linkPanel.emailHint", { defaultValue: "The organization must already have a CEI account." })}
           </div>
         </div>
 
         <div style={{ marginBottom: "0.75rem" }}>
           <label style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", display: "block", marginBottom: "0.25rem" }}>
-            Message (optional)
+            {t("manage.linkPanel.messageLabel", { defaultValue: "Message (optional)" })}
           </label>
           <input
             style={inputStyle}
@@ -249,7 +252,7 @@ const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => 
         </div>
 
         <button style={btnPrimary} onClick={handleSend} disabled={sending || !email.trim()}>
-          {sending ? "Sending…" : "Send request"}
+          {sending ? t("manage.linkPanel.sending", { defaultValue: "Sending…" }) : t("manage.linkPanel.sendBtn", { defaultValue: "Send request" })}
         </button>
       </div>
 
@@ -259,24 +262,24 @@ const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => 
       )}
 
       {loading ? (
-        <div style={{ color: "var(--cei-text-muted)", fontSize: "0.85rem" }}>Loading…</div>
+        <div style={{ color: "var(--cei-text-muted)", fontSize: "0.85rem" }}>{t("common.loading", { defaultValue: "Loading…" })}</div>
       ) : (
         <>
           {sent.length > 0 && (
             <div style={{ marginBottom: "1.25rem" }}>
-              <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.6rem" }}>Awaiting response</div>
+              <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.6rem" }}>{t("manage.linkPanel.awaitingResponse", { defaultValue: "Awaiting response" })}</div>
               {sent.map(req => (
                 <div key={req.id} style={{ border: "1px solid var(--cei-border-subtle)", borderRadius: "0.5rem", padding: "0.65rem 1rem", marginBottom: "0.4rem", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
                   <div>
                     <span style={{ fontWeight: 500, fontSize: "0.85rem" }}>{req.client_org_name}</span>
                     <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginLeft: "0.5rem" }}>
-                      Sent {fmtDt(req.created_at)}
+                      {t("manage.linkPanel.sent", { defaultValue: "Sent" })} {fmtDt(req.created_at)}
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                     {statusBadge(req.status)}
                     <button style={btnSecondary} onClick={() => handleCancel(req.id)} disabled={actingId === req.id}>
-                      {actingId === req.id ? "…" : "Cancel"}
+                      {actingId === req.id ? "…" : t("manage.linkPanel.cancel", { defaultValue: "Cancel" })}
                     </button>
                   </div>
                 </div>
@@ -287,7 +290,7 @@ const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => 
           {history.length > 0 && (
             <div>
               <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.6rem", color: "var(--cei-text-muted)" }}>
-                Past requests
+                {t("manage.linkPanel.pastRequests", { defaultValue: "Past requests" })}
               </div>
               {history.map(req => (
                 <div key={req.id} style={{ border: "1px solid var(--cei-border-subtle)", borderRadius: "0.5rem", padding: "0.65rem 1rem", marginBottom: "0.4rem", display: "flex", justifyContent: "space-between", alignItems: "center", opacity: 0.65 }}>

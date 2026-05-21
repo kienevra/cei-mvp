@@ -18,6 +18,7 @@ const TYPE_META: Record<string, { icon: string; color: string }> = {
   link_request_accepted:  { icon: "✅", color: "#22c55e" },
   link_request_rejected:  { icon: "❌", color: "#ef4444" },
   link_request_cancelled: { icon: "↩️", color: "#94a3b8" },
+  link_request_sent:      { icon: "📤", color: "#38bdf8" },
   org_linked:             { icon: "🤝", color: "#22c55e" },
   org_unlinked:           { icon: "🔓", color: "#f59e0b" },
   alert_critical:         { icon: "🚨", color: "#ef4444" },
@@ -37,7 +38,7 @@ function getMeta(type: string) {
 // ── Time formatting ───────────────────────────────────────────────────────────
 
 function useTimeAgo() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   return (iso: string): string => {
     const diff  = Date.now() - new Date(iso).getTime();
     const mins  = Math.floor(diff / 60_000);
@@ -79,9 +80,12 @@ const NotificationBell: React.FC = () => {
   const [markingAll,    setMarkingAll]    = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const getNavTarget = (n: Notification): string | null => {
+    // If the notification carries an explicit URL, use it directly
+    if (n.extra?.url) return n.extra.url as string;
+
     const rawSiteId = n.extra?.site_id;
     const numericSiteId = rawSiteId
       ? rawSiteId.toString().replace("site-", "")
@@ -92,6 +96,7 @@ const NotificationBell: React.FC = () => {
       case "link_request_cancelled":
       case "org_unlinked":
       case "invite_received":
+      case "link_request_sent":
         return "/account";
       case "link_request_accepted":
       case "link_request_rejected":
@@ -117,10 +122,14 @@ const NotificationBell: React.FC = () => {
       n.extra?.client_org_name ||
       n.extra?.site_id ||
       "";
+    const isIt = i18n.language?.toLowerCase().startsWith("it");
     const titleKey = `notifications.${n.type}.title`;
     const bodyKey  = `notifications.${n.type}.body`;
-    const title = t(titleKey, { name, defaultValue: n.title });
-    const body  = t(bodyKey,  { name, defaultValue: n.body ?? "" }) || null;
+    // Use Italian fields from extra if available and UI is in Italian
+    const defaultTitle = isIt && n.extra?.title_it ? n.extra.title_it as string : n.title;
+    const defaultBody  = isIt && n.extra?.body_it  ? n.extra.body_it  as string : (n.body ?? "");
+    const title = t(titleKey, { name, defaultValue: defaultTitle });
+    const body  = t(bodyKey,  { name, defaultValue: defaultBody }) || null;
     return { title, body };
   };
 
