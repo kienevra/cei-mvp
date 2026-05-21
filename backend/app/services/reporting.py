@@ -14,6 +14,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     HRFlowable,
+    Image as RLImage,
     KeepTogether,
     Paragraph,
     SimpleDocTemplate,
@@ -21,6 +22,8 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+from pathlib import Path as _Path
+_LOGO_DARK = _Path(__file__).parent / "pdf" / "assets" / "cei_logo_dark.png"
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +305,21 @@ def generate_client_org_pdf(report: Any) -> bytes:
     # -------------------------------------------------------------------
     # 1. Cover
     # -------------------------------------------------------------------
-    story.append(Spacer(1, 10 * mm))
+    # Dark cover strip with logo
+    cover_tbl = Table([[""]], colWidths=[180 * mm])
+    cover_tbl.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), colors.HexColor("#0f172a")),
+        ("TOPPADDING",    (0, 0), (-1, -1), 18),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 18),
+    ]))
+    story.append(cover_tbl)
+
+    if _LOGO_DARK.exists():
+        logo = RLImage(str(_LOGO_DARK), width=36 * mm, height=36 * mm)
+        logo.hAlign = "LEFT"
+        story.append(logo)
+
+    story.append(Spacer(1, 4 * mm))
     story.append(Paragraph("Carbon Efficiency Intelligence", s["cover_sub"]))
     story.append(Paragraph(
         f"Client Report: {r.get('client_org_name', '—')}",

@@ -523,7 +523,10 @@ async def get_mrv_report(
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
-    if site.organization.id != current_user.organization_id:
+    site_org = site.organization
+    is_owner   = site_org.id == current_user.organization_id
+    is_manager = site_org.managed_by_org_id == current_user.organization_id
+    if not (is_owner or is_manager):
         raise HTTPException(status_code=403, detail="Access denied")
 
     # 2. Aggregate timeseries
@@ -762,7 +765,10 @@ async def get_enpi_report(
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
-    if site.organization.id != current_user.organization_id:
+    site_org   = site.organization
+    is_owner   = site_org.id == current_user.organization_id
+    is_manager = site_org.managed_by_org_id == current_user.organization_id
+    if not (is_owner or is_manager):
         raise HTTPException(status_code=403, detail="Access denied")
 
     calculator = EmissionsCalculator(db)

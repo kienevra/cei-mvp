@@ -353,12 +353,19 @@ def _enforce_site_access(
         .first()
     )
     if site_row is None:
-        # 404 prevents org/site existence leakage (matches /timeseries router behavior)
+        # Also allow consultant access: site belongs to a client org managed by this org
+        site_row = (
+            db.query(core_models.Site)
+            .join(core_models.Organization, core_models.Organization.id == core_models.Site.org_id)
+            .filter(core_models.Site.id == n)
+            .filter(core_models.Organization.managed_by_org_id == org_id)
+            .first()
+        )
+    if site_row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Site not found",
         )
-
     return f"site-{n}"
 
 

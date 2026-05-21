@@ -14,6 +14,7 @@ import {
   type ClientOrg, type Site, type IntegrationToken, type IntegrationTokenWithSecret,
   type ClientOrgUser, type AlertThresholds, type ClientReportOut, type TimeseriesSummary,
 } from "../services/manageApi";
+import ComplianceReports from "../components/ComplianceReports";
 
 function fmtDt(raw: string | null | undefined): string {
   if (!raw) return "—";
@@ -449,7 +450,7 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
           </div>
         </div>
         <button style={btnPrimary} onClick={handleDownload} disabled={downloading}>
-          {downloading ? `${t("manage.reports.downloading", { defaultValue: "Downloading" })}…` : `↓ ${t("manage.reports.downloadPdf", { defaultValue: "Download PDF" })}`}
+          {downloading ? `${t("manage.reports.downloading", { defaultValue: "Downloading" })}…` : `↓ ${t("manage.reports.downloadBrief", { defaultValue: "Download Client Brief" })}`}
         </button>
       </div>
 
@@ -534,6 +535,12 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
           </table>
         )}
       </div>
+
+    {/* Compliance PDF Downloads */}
+      <ComplianceReports
+        sites={report.sites.map(s => ({ id: s.id, name: s.name, location: s.location }))}
+        userOrgId={orgId}
+      />
 
     </div>
   );
@@ -1082,7 +1089,7 @@ const ManageClientOrg: React.FC = () => {
             </p>
           </div>
           <button style={btnSecondary} onClick={handleDownloadPdf} disabled={downloading}>
-            {downloading ? t("manage.pdf.downloading") : t("manage.pdf.download")}
+            {downloading ? t("manage.pdf.downloading") : t("manage.pdf.downloadBrief", { defaultValue: "↓ Download Client Brief" })}
           </button>
         </div>
       </section>
