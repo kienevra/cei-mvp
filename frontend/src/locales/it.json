@@ -227,7 +227,35 @@
       "title": "Stato onboarding",
       "checklistTitle": "Checklist onboarding",
       "stepsRemaining_one": "{{count}} passaggio rimanente",
-      "stepsRemaining_other": "{{count}} passaggi rimanenti"
+      "stepsRemaining_other": "{{count}} passaggi rimanenti",
+      "steps": {
+        "managing_org_configured": { "label": "Organizzazione consulente configurata" },
+        "subscription_active":     { "label": "Abbonamento attivo" },
+        "first_client_created":    { "label": "Primo cliente creato" },
+        "first_site_created":      { "label": "Primo impianto creato" },
+        "first_token_created":     { "label": "Primo token di integrazione creato" },
+        "first_data_ingested":     { "label": "Primi dati importati" },
+        "first_user_invited":      { "label": "Primo utente invitato" }
+      }
+    },
+    "linkPanel": {
+      "title": "Collega un'organizzazione esistente",
+      "subtitle": "Invita un'organizzazione standalone a trasferire il proprio profilo CEI alla tua gestione. Devono accettare prima che tu possa accedere. In alternativa, il titolare di un'organizzazione può inviarti una richiesta direttamente dal proprio account.",
+      "incomingRequests": "richiesta/e in arrivo da titolari di organizzazioni",
+      "requestedToJoin": "Ha richiesto di unirsi al tuo portfolio",
+      "accept": "Accetta",
+      "reject": "Rifiuta",
+      "sendTitle": "Invia una richiesta di collegamento a un'organizzazione esistente",
+      "sendSuccess": "Richiesta inviata — il titolare dell'organizzazione la vedrà nel suo account.",
+      "emailLabel": "Email del titolare dell'organizzazione *",
+      "emailHint": "L'organizzazione deve già avere un account CEI.",
+      "messageLabel": "Messaggio (opzionale)",
+      "sending": "Invio in corso…",
+      "sendBtn": "Invia richiesta",
+      "awaitingResponse": "In attesa di risposta",
+      "sent": "Inviata",
+      "cancel": "Annulla",
+      "pastRequests": "Richieste passate"
     },
     "clients": {
       "title": "Organizzazioni clienti",
@@ -1448,38 +1476,6 @@
     "token_first_use": {
       "title": "Primo utilizzo del token di integrazione",
       "body": "Un token ha effettuato il primo push di dati a CEI."
-    }
-  },
- "manage": {
-    "linkPanel": {
-      "title": "Collega un'organizzazione esistente",
-      "subtitle": "Invita un'organizzazione standalone a trasferire il proprio profilo CEI alla tua gestione. Devono accettare prima che tu possa accedere. In alternativa, il titolare di un'organizzazione può inviarti una richiesta direttamente dal proprio account.",
-      "incomingRequests": "richiesta/e in arrivo da titolari di organizzazioni",
-      "requestedToJoin": "Ha richiesto di unirsi al tuo portfolio",
-      "accept": "Accetta",
-      "reject": "Rifiuta",
-      "sendTitle": "Invia una richiesta di collegamento a un'organizzazione esistente",
-      "sendSuccess": "Richiesta inviata — il titolare dell'organizzazione la vedrà nel suo account.",
-      "emailLabel": "Email del titolare dell'organizzazione *",
-      "emailHint": "L'organizzazione deve già avere un account CEI.",
-      "messageLabel": "Messaggio (opzionale)",
-      "sending": "Invio in corso…",
-      "sendBtn": "Invia richiesta",
-      "awaitingResponse": "In attesa di risposta",
-      "sent": "Inviata",
-      "cancel": "Annulla",
-      "pastRequests": "Richieste passate"
-    },
-    "onboarding": {
-      "steps": {
-        "managing_org_configured": { "label": "Organizzazione consulente configurata" },
-        "subscription_active":     { "label": "Abbonamento attivo" },
-        "first_client_created":    { "label": "Primo cliente creato" },
-        "first_site_created":      { "label": "Primo impianto creato" },
-        "first_token_created":     { "label": "Primo token di integrazione creato" },
-        "first_data_ingested":     { "label": "Primi dati importati" },
-        "first_user_invited":      { "label": "Primo utente invitato" }
-      }
     }
   }
 }

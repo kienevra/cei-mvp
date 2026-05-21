@@ -227,7 +227,16 @@
       "title": "Onboarding status",
       "checklistTitle": "Onboarding checklist",
       "stepsRemaining_one": "{{count}} step remaining",
-      "stepsRemaining_other": "{{count}} steps remaining"
+      "stepsRemaining_other": "{{count}} steps remaining",
+      "steps": {
+        "managing_org_configured": { "label": "Managing org configured" },
+        "subscription_active":     { "label": "Subscription active" },
+        "first_client_created":    { "label": "First client org created" },
+        "first_site_created":      { "label": "First site created" },
+        "first_token_created":     { "label": "First integration token created" },
+        "first_data_ingested":     { "label": "First data ingested" },
+        "first_user_invited":      { "label": "First user invited" }
+      }
     },
     "clients": {
       "title": "Client organizations",
@@ -395,6 +404,25 @@
           "minKwh": { "label": "Min total kWh", "hint": "Minimum energy for alert to fire" }
         }
       }
+    },
+    "linkPanel": {
+      "title": "Link an existing organization",
+      "subtitle": "Invite a standalone organization to transfer their CEI profile to your management. They must accept before you gain access. Alternatively, an org owner can send you a request directly from their account.",
+      "incomingRequests": "incoming request(s) from organization owners",
+      "requestedToJoin": "Requested to join your portfolio",
+      "accept": "Accept",
+      "reject": "Reject",
+      "sendTitle": "Send a link request to an existing organization",
+      "sendSuccess": "Request sent — the org owner will see it in their account.",
+      "emailLabel": "Organization owner email *",
+      "emailHint": "The organization must already have a CEI account.",
+      "messageLabel": "Message (optional)",
+      "sending": "Sending…",
+      "sendBtn": "Send request",
+      "awaitingResponse": "Awaiting response",
+      "sent": "Sent",
+      "cancel": "Cancel",
+      "pastRequests": "Past requests"
     }
   },
   "dashboard": {
@@ -1460,19 +1488,6 @@
     "token_first_use": {
       "title": "Integration token first use",
       "body": "A token made its first data push to CEI."
-    }
-  },
-  "manage": {
-    "onboarding": {
-      "steps": {
-        "managing_org_configured": { "label": "Managing org configured" },
-        "subscription_active":     { "label": "Subscription active" },
-        "first_client_created":    { "label": "First client org created" },
-        "first_site_created":      { "label": "First site created" },
-        "first_token_created":     { "label": "First integration token created" },
-        "first_data_ingested":     { "label": "First data ingested" },
-        "first_user_invited":      { "label": "First user invited" }
-      }
     }
   }
 }

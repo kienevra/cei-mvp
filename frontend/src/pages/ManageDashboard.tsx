@@ -56,27 +56,6 @@ function SectionHeading({ children, style }: { children: React.ReactNode; style?
   );
 }
 
-function OnboardingChecklist({ status }: { status: OnboardingStatus }) {
-  const { t } = useTranslation();
-  if (status.all_complete) return null;
-  const pending = status.steps.filter((s: OnboardingStep) => !s.complete);
-  return (
-    <div className="cei-card" style={{ borderLeft: "3px solid var(--cei-amber, #f59e0b)", marginBottom: "1rem" }}>
-      <div style={{ fontWeight: 600, marginBottom: "0.5rem" }}>
-        {t("manage.onboarding.checklistTitle")} — {t("manage.onboarding.stepsRemaining", { count: pending.length })}
-      </div>
-      <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem", lineHeight: 1.8 }}>
-        {pending.map((step: OnboardingStep) => (
-          <li key={step.key} style={{ color: "var(--cei-text-muted)" }}>
-            <strong style={{ color: "var(--cei-text-main)" }}>{step.label}</strong>
-            {step.detail ? ` — ${step.detail}` : ""}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function ClientTable({ summary, analytics, onDownload, downloading, onOrgClick }: {
   summary: PortfolioSummary;
   analytics: PortfolioAnalytics | null;
@@ -278,9 +257,7 @@ const ManageDashboard: React.FC = () => {
       {summaryError && <section style={{ marginTop: "0.75rem" }}><ErrorBanner message={summaryError} onClose={() => setSummaryError(null)} /></section>}
       {downloadError && <section style={{ marginTop: "0.75rem" }}><ErrorBanner message={downloadError} onClose={() => setDownloadError(null)} /></section>}
 
-      {onboarding && !onboarding.all_complete && (
-          <section style={{ marginTop: "1rem" }}><OnboardingChecklist status={onboarding} /></section>
-        )}
+    
         <section style={{ marginTop: "1rem" }}>
           <div className="cei-card">
             <LinkRequestsPanel onAccepted={loadSummary} />
