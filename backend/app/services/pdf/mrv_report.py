@@ -207,6 +207,7 @@ def _s6_calculation(story: List, data: Dict, s: Dict, lang: str) -> None:
             [f"3 — {t('total_emissions', lang)}", t("calc_formula",     lang), _fmt(tco2) + f" {t('tco2_unit', lang)}"],
             [f"4 — {t('prod_volume',     lang)}", f"{unit}",             _fmt(tonne) + f" {unit}"],
             [f"5 — {t('embedded_intensity', lang)}", t("intensity_formula", lang), _fmt(i_per_t, 4) + f" {t('tco2_per_tonne', lang)}"],
+            [f"6 — {t('energy_intensity_label', lang)}", t("energy_intensity_formula", lang), _fmt(total / tonne if tonne > 0 else 0, 2) + f" kWh / {unit}"],
         ],
         col_widths=[CONTENT_W * 0.28, CONTENT_W * 0.40, CONTENT_W * 0.32],
         right_align_from=2,

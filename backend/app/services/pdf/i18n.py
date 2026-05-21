@@ -674,3 +674,17 @@ TRANSLATIONS["it"].update({
         "descritta nel presente documento."
     ),
 })
+
+# ---------------------------------------------------------------------------
+# Energy intensity (MRV row 6)
+# ---------------------------------------------------------------------------
+
+TRANSLATIONS["en"].update({
+    "energy_intensity_label":   "Energy intensity",
+    "energy_intensity_formula": "kWh ÷ production vol.",
+})
+
+TRANSLATIONS["it"].update({
+    "energy_intensity_label":   "Intensità energetica",
+    "energy_intensity_formula": "kWh ÷ vol. produzione",
+})
