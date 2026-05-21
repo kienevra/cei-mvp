@@ -9,8 +9,12 @@ and retrieve CO₂ figures aligned with EU ETS, CBAM, ISO 14064, VCS.
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
+from datetime import date, datetime, timedelta
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -19,6 +23,7 @@ from app.db.session import get_db
 from app.models import (
     User, Organization, OrgEmissionsConfig,
     EmissionFactor, SectorBenchmark,
+    Site, TimeseriesRecord,
 )
 from app.services.emissions import (
     EmissionsCalculator,
@@ -460,4 +465,368 @@ def calculate_site_emissions(
         factor_source              = result.factor_source,
         is_cbam_ready              = result.is_cbam_ready,
         calculated_at              = result.calculated_at.isoformat(),
+    )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MRV Report helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _aggregate_timeseries_for_period(
+    db: Session,
+    site_id: int,
+    period_start: date,
+    period_end: date,
+) -> dict:
+    start_dt = datetime.combine(period_start, datetime.min.time())
+    end_dt   = datetime.combine(period_end,   datetime.min.time())
+
+    records = (
+        db.query(TimeseriesRecord)
+        .filter(
+            TimeseriesRecord.site_id.in_([str(site_id), f"site-{site_id}"]),
+            TimeseriesRecord.timestamp >= start_dt,
+            TimeseriesRecord.timestamp <  end_dt,
+        )
+        .order_by(TimeseriesRecord.timestamp)
+        .all()
+    )
+
+    monthly: dict = defaultdict(float)
+    for rec in records:
+        key = rec.timestamp.strftime("%Y-%m")
+        monthly[key] += float(rec.value or 0)
+
+    sorted_keys    = sorted(monthly.keys())
+    monthly_labels = [datetime.strptime(k, "%Y-%m").strftime("%b %Y") for k in sorted_keys]
+    monthly_kwh    = [monthly[k] for k in sorted_keys]
+
+    return {
+        "total_kwh":      sum(monthly_kwh),
+        "monthly_labels": monthly_labels,
+        "monthly_kwh":    monthly_kwh,
+    }
+
+@router.get("/mrv-report/{site_id}", summary="Generate MRV Declaration PDF")
+async def get_mrv_report(
+    site_id: int,
+    period_start: date  = Query(..., description="Period start date, e.g. 2026-01-01"),
+    period_end: date    = Query(..., description="Period end date,   e.g. 2026-03-31"),
+    quarter: int | None = Query(None, ge=1, le=4),
+    consultant_name: str = Query(""),
+    consultant_org:  str = Query(""),
+    consultant_role: str = Query("Certified Energy Manager"),
+    lang: str            = Query("en", description="Language: en or it"),
+    db: Session          = Depends(get_db),
+    current_user         = Depends(get_current_active_user),
+):
+    # 1. Load site
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    if site.organization.id != current_user.organization_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # 2. Aggregate timeseries
+    ts = _aggregate_timeseries_for_period(db, site_id, period_start, period_end)
+    if ts["total_kwh"] == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="No energy data found for the requested period.",
+        )
+
+    # 3. Resolve emission factor
+    calculator = EmissionsCalculator(db)
+    country    = getattr(site, "country_code", "IT")
+    framework  = getattr(site, "framework",    "EU_ETS")
+    ef_record  = calculator.get_emission_factor(country, "electricity", period_start.year, framework)
+
+    ef_value  = float(ef_record.factor_kg_co2_kwh) if ef_record else 0.280
+    ef_source = (
+        f"{ef_record.country_code} {ef_record.framework} {ef_record.valid_year}"
+        if ef_record else "ISPRA 2024 (default)"
+    )
+    ef_year = ef_record.valid_year if ef_record else 2024
+
+    # 4. Calculate emissions
+    total_tco2    = ts["total_kwh"] * ef_value / 1000
+    monthly_tco2  = [kwh * ef_value / 1000 for kwh in ts["monthly_kwh"]]
+
+    production_vol  = float(getattr(site, "annual_production_volume", 0) or 0)
+    production_unit = getattr(site, "production_unit", "tonnes") or "tonnes"
+    period_days     = (period_end - period_start).days or 1
+    period_fraction = period_days / 365.0
+    period_prod     = production_vol * period_fraction
+    tco2_per_tonne  = total_tco2 / period_prod if period_prod > 0 else 0.0
+
+    free_alloc  = float(getattr(site, "free_allocation_tonnes", None) or 0) or None
+    ets_surplus = ((free_alloc * period_fraction) - total_tco2) if free_alloc else None
+
+    # 5. Build data dict
+    data = {
+        "site_name":          site.name,
+        "site_address":       getattr(site, "address", None),
+        "country_code":       country,
+        "framework":          framework,
+        "sector_code":        getattr(site, "sector_code", "manufacturing"),
+        "installation_id":    site.id,
+        "period_start":       str(period_start),
+        "period_end":         str(period_end),
+        "reporting_year":     period_start.year,
+        "quarter":            quarter,
+        "production_volume":  round(period_prod, 2),
+        "production_unit":    production_unit,
+        "total_kwh":          round(ts["total_kwh"], 2),
+        "electricity_kwh":    round(ts["total_kwh"], 2),
+        "gas_kwh":            0.0,
+        "primary_energy_source": getattr(site, "primary_energy_source", "electricity"),
+        "emission_factor_value":  ef_value,
+        "emission_factor_source": ef_source,
+        "emission_factor_year":   ef_year,
+        "methodology_tier":       "Tier 2 — Calculation-based",
+        "total_tco2":             round(total_tco2, 4),
+        "tco2_per_tonne":         round(tco2_per_tonne, 6),
+        "monthly_labels":         ts["monthly_labels"],
+        "monthly_kwh":            [round(v, 2) for v in ts["monthly_kwh"]],
+        "monthly_tco2":           [round(v, 4) for v in monthly_tco2],
+        "free_allocation_tonnes": round(free_alloc * period_fraction, 2) if free_alloc else None,
+        "ets_surplus_deficit":    round(ets_surplus, 4) if ets_surplus is not None else None,
+        "consultant_name":        consultant_name or current_user.email,
+        "consultant_org":         consultant_org  or getattr(current_user.organization, "name", "CEI Platform"),
+        "consultant_role":        consultant_role,
+        "report_date":            datetime.utcnow().strftime("%d %b %Y"),
+    }
+
+    # 6. Generate and stream PDF
+    from app.services.pdf.mrv_report import generate_mrv_pdf
+    pdf_buf  = generate_mrv_pdf(data, lang=lang)
+    q_suffix = f"Q{quarter}_" if quarter else ""
+    filename = f"CEI_MRV_{site.name.replace(' ', '_')}_{q_suffix}{period_start.year}.pdf"
+
+    return StreamingResponse(
+        pdf_buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+@router.get("/ets-statement/{org_id}", summary="Generate ETS Position Statement PDF")
+async def get_ets_statement(
+    org_id: int,
+    year: int            = Query(..., description="Reporting year, e.g. 2026"),
+    lang: str            = Query("en", description="Language: en or it"),
+    consultant_role: str = Query("Certified Energy Manager"),
+    db: Session          = Depends(get_db),
+    current_user         = Depends(get_current_active_user),
+):
+    from app.services.pdf.ets_statement import generate_ets_pdf, _build_ets_schedule
+
+    # 1. Verify org access
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+
+    is_owner   = org.id == current_user.organization_id
+    is_manager = org.managed_by_org_id == current_user.organization_id
+    if not (is_owner or is_manager):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # 2. Load all sites for this org
+    sites = db.query(Site).filter(Site.org_id == org_id).all()
+    if not sites:
+        raise HTTPException(status_code=422, detail="No sites found for this organisation.")
+
+    # 3. Aggregate timeseries for the full year across all sites
+    period_start = date(year, 1, 1)
+    period_end   = date(year, 12, 31)
+
+    calculator     = EmissionsCalculator(db)
+    total_kwh      = 0.0
+    total_tco2     = 0.0
+    total_alloc    = 0.0
+    monthly_totals: dict = defaultdict(float)
+    sites_summary  = []
+
+    for site in sites:
+        ts = _aggregate_timeseries_for_period(db, site.id, period_start, period_end)
+        if ts["total_kwh"] == 0:
+            continue
+
+        country   = getattr(site, "country_code", "IT")
+        framework = getattr(site, "framework",    "EU_ETS")
+        ef_record = calculator.get_emission_factor(country, "electricity", year, framework)
+        ef_value  = float(ef_record.factor_kg_co2_kwh) if ef_record else 0.280
+
+        site_tco2 = ts["total_kwh"] * ef_value / 1000
+        site_alloc = float(getattr(site, "free_allocation_tonnes", None) or 0)
+
+        total_kwh   += ts["total_kwh"]
+        total_tco2  += site_tco2
+        total_alloc += site_alloc
+
+        for lbl, kwh in zip(ts["monthly_labels"], ts["monthly_kwh"]):
+            monthly_totals[lbl] += kwh * ef_value / 1000
+
+        sites_summary.append({
+            "site_name":  site.name,
+            "total_kwh":  round(ts["total_kwh"], 2),
+            "total_tco2": round(site_tco2, 4),
+            "free_alloc": round(site_alloc, 2) if site_alloc else None,
+        })
+
+    if total_kwh == 0:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No energy data found for {year}. Check that timeseries records exist.",
+        )
+
+    surplus        = total_alloc - total_tco2
+    carbon_price   = ETS_CARBON_PRICE_EUR
+    financial_impact = abs(surplus) * carbon_price
+
+    # 4. Benchmark from org config
+    org_config     = get_or_create_emissions_config(db, org_id)
+    sector_code    = org_config.sector_code or "ceramics"
+    framework      = org_config.framework   or "EU_ETS"
+    production_vol = float(org_config.annual_production_volume or 0)
+    production_unit = org_config.production_unit or "tonne"
+
+    benchmark = calculator.get_sector_benchmark(sector_code, framework, year)
+    bmark_val  = float(benchmark.benchmark_value) if benchmark else None
+    actual_int = total_tco2 / production_vol if production_vol > 0 else None
+    gap_pct    = ((actual_int - bmark_val) / bmark_val * 100) if (bmark_val and actual_int) else None
+
+    # 5. Monthly labels + tco2
+    sorted_months  = sorted(
+        monthly_totals.keys(),
+        key=lambda x: datetime.strptime(x, "%b %Y")
+    )
+    monthly_labels = sorted_months
+    monthly_tco2   = [round(monthly_totals[m], 4) for m in sorted_months]
+
+    # 6. ETS schedule
+    ets_schedule = _build_ets_schedule(
+        free_allocation=total_alloc,
+        reporting_year=year,
+    )
+
+    # 7. Build data dict
+    data = {
+        "org_name":               org.name,
+        "org_id":                 org_id,
+        "country_code":           org_config.country_code or "IT",
+        "framework":              framework,
+        "sector_code":            sector_code,
+        "reporting_year":         year,
+        "sites":                  sites_summary,
+        "total_kwh":              round(total_kwh, 2),
+        "total_tco2":             round(total_tco2, 4),
+        "free_allocation_tonnes": round(total_alloc, 2),
+        "surplus_deficit":        round(surplus, 4),
+        "ets_carbon_price":       carbon_price,
+        "financial_impact_eur":   round(financial_impact, 2),
+        "benchmark_value":        bmark_val,
+        "production_volume":      production_vol,
+        "production_unit":        production_unit,
+        "actual_intensity":       round(actual_int, 6) if actual_int else None,
+        "benchmark_gap_pct":      round(gap_pct, 2) if gap_pct is not None else None,
+        "monthly_labels":         monthly_labels,
+        "monthly_tco2":           monthly_tco2,
+        "ets_schedule":           ets_schedule,
+        "consultant_role":        consultant_role,
+        "report_date":            datetime.utcnow().strftime("%d %b %Y"),
+    }
+
+    # 8. Generate and stream PDF
+    pdf_buf  = generate_ets_pdf(data, lang=lang)
+    filename = f"CEI_ETS_{org.name.replace(' ', '_')}_{year}.pdf"
+
+    return StreamingResponse(
+        pdf_buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+@router.get("/enpi-report/{site_id}", summary="Generate EnPI Baseline Report PDF")
+async def get_enpi_report(
+    site_id: int,
+    baseline_start: date = Query(..., description="Baseline start, e.g. 2025-03-01"),
+    baseline_end:   date = Query(..., description="Baseline end,   e.g. 2026-02-28"),
+    current_start:  date = Query(..., description="Current start,  e.g. 2026-02-20"),
+    current_end:    date = Query(..., description="Current end,    e.g. 2026-05-20"),
+    lang: str            = Query("en"),
+    consultant_role: str = Query("Certified Energy Manager"),
+    db: Session          = Depends(get_db),
+    current_user         = Depends(get_current_active_user),
+):
+    from app.services.pdf.enpi_report import generate_enpi_pdf, compute_r_squared
+
+    site = db.query(Site).filter(Site.id == site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    if site.organization.id != current_user.organization_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    calculator = EmissionsCalculator(db)
+    country    = getattr(site, "country_code", "IT")
+    framework  = getattr(site, "framework",    "EU_ETS")
+    ef_record  = calculator.get_emission_factor(country, "electricity", current_start.year, framework)
+    ef_value   = float(ef_record.factor_kg_co2_kwh) if ef_record else 0.280
+    ef_source  = f"{ef_record.country_code} {ef_record.framework} {ef_record.valid_year}" if ef_record else "ISPRA 2024"
+
+    b_ts = _aggregate_timeseries_for_period(db, site_id, baseline_start, baseline_end)
+    c_ts = _aggregate_timeseries_for_period(db, site_id, current_start,  current_end)
+
+    if b_ts["total_kwh"] == 0 and c_ts["total_kwh"] == 0:
+        raise HTTPException(status_code=422, detail="No energy data found for either period.")
+
+    prod_vol  = float(getattr(site, "annual_production_volume", 0) or 0)
+    prod_unit = getattr(site, "production_unit", "tonne") or "tonne"
+
+    b_days = (baseline_end - baseline_start).days or 1
+    c_days = (current_end  - current_start).days  or 1
+    b_prod = prod_vol * (b_days / 365)
+    c_prod = prod_vol * (c_days / 365)
+
+    b_enpi = b_ts["total_kwh"] / b_prod if b_prod > 0 else 0
+    c_enpi = c_ts["total_kwh"] / c_prod if c_prod > 0 else 0
+    chg    = (c_enpi - b_enpi) / b_enpi * 100 if b_enpi > 0 else 0
+
+    r2, slope, p_value = compute_r_squared(c_ts["monthly_kwh"])
+
+    data = {
+        "site_name":          site.name,
+        "site_address":       getattr(site, "address", None),
+        "country_code":       country,
+        "sector_code":        getattr(site, "sector_code", "manufacturing"),
+        "installation_id":    site.id,
+        "baseline_start":     str(baseline_start),
+        "baseline_end":       str(baseline_end),
+        "current_start":      str(current_start),
+        "current_end":        str(current_end),
+        "production_volume":  prod_vol,
+        "production_unit":    prod_unit,
+        "baseline_kwh":       round(b_ts["total_kwh"], 2),
+        "baseline_tco2":      round(b_ts["total_kwh"] * ef_value / 1000, 4),
+        "baseline_enpi":      round(b_enpi, 3),
+        "baseline_months":    b_ts["monthly_labels"],
+        "baseline_monthly_kwh": [round(v, 2) for v in b_ts["monthly_kwh"]],
+        "current_kwh":        round(c_ts["total_kwh"], 2),
+        "current_tco2":       round(c_ts["total_kwh"] * ef_value / 1000, 4),
+        "current_enpi":       round(c_enpi, 3),
+        "current_months":     c_ts["monthly_labels"],
+        "current_monthly_kwh": [round(v, 2) for v in c_ts["monthly_kwh"]],
+        "enpi_change_pct":    round(chg, 2),
+        "r_squared":          r2,
+        "trend_slope":        slope,
+        "ef_value":           ef_value,
+        "ef_source":          ef_source,
+        "consultant_role":    consultant_role,
+        "report_date":        datetime.utcnow().strftime("%d %b %Y"),
+    }
+
+    pdf_buf  = generate_enpi_pdf(data, lang=lang)
+    filename = f"CEI_EnPI_{site.name.replace(' ', '_')}_{current_end.year}.pdf"
+    return StreamingResponse(
+        pdf_buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

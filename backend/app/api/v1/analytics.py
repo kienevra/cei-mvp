@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from datetime import date, datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -1293,4 +1294,140 @@ def get_production_correlation_endpoint(
         anomaly_count=result.anomaly_count,
         coverage_days=result.coverage_days,
         total_days_requested=result.total_days_requested,
+    )
+
+@router.get("/correlations/{site_id}", summary="Generate Correlation Assessment PDF")
+async def get_correlation_report(
+    site_id: str,
+    period_start: date = Query(..., description="Start date, e.g. 2026-02-20"),
+    period_end:   date = Query(..., description="End date,   e.g. 2026-05-20"),
+    lang: str          = Query("en"),
+    consultant_role: str = Query("Certified Energy Manager"),
+    db: Session        = Depends(get_db),
+    org_ctx: OrgContext = Depends(get_org_context),
+):
+    from app.services.pdf.correlation_report import generate_correlation_pdf
+    from app.services.analytics import compute_site_insights
+    from collections import defaultdict
+
+    org_id, _ = _resolve_org_context_from_ctx(org_ctx)
+    site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
+    site_numeric = _try_parse_site_numeric_id(site_id_canon)
+
+    site = db.query(core_models.Site).filter(core_models.Site.id == site_numeric).first()
+
+    # Load raw hourly records
+    from app.models import TimeseriesRecord
+    from datetime import datetime as dt
+    start_dt = dt.combine(period_start, dt.min.time())
+    end_dt   = dt.combine(period_end,   dt.min.time())
+
+    records = (
+        db.query(TimeseriesRecord)
+        .filter(
+            TimeseriesRecord.site_id.in_([str(site_numeric), f"site-{site_numeric}"]),
+            TimeseriesRecord.timestamp >= start_dt,
+            TimeseriesRecord.timestamp <  end_dt,
+        )
+        .order_by(TimeseriesRecord.timestamp)
+        .all()
+    )
+
+    if not records:
+        raise HTTPException(status_code=422, detail="No energy data found for the requested period.")
+
+    total_kwh  = sum(float(r.value or 0) for r in records)
+    total_hours = len(records)
+
+    # Night ratio (22:00–06:00)
+    night_kwh = sum(float(r.value or 0) for r in records if r.timestamp.hour >= 22 or r.timestamp.hour < 6)
+    night_pct = night_kwh / total_kwh * 100 if total_kwh > 0 else 0
+
+    # Weekend ratio
+    weekend_kwh = sum(float(r.value or 0) for r in records if r.timestamp.weekday() >= 5)
+    weekend_pct = weekend_kwh / total_kwh * 100 if total_kwh > 0 else 0
+
+    # Peak demand hour
+    hourly_totals = defaultdict(list)
+    for r in records:
+        hourly_totals[r.timestamp.hour].append(float(r.value or 0))
+    peak_hour = max(hourly_totals, key=lambda h: sum(hourly_totals[h]) / len(hourly_totals[h]))
+    peak_avg  = sum(hourly_totals[peak_hour]) / len(hourly_totals[peak_hour])
+
+    # Peak day
+    daily_totals = defaultdict(float)
+    for r in records:
+        daily_totals[r.timestamp.date()] += float(r.value or 0)
+    peak_day_date = max(daily_totals, key=daily_totals.get)
+    peak_day_kwh  = daily_totals[peak_day_date]
+
+    # Monthly aggregation
+    monthly = defaultdict(float)
+    for r in records:
+        monthly[r.timestamp.strftime("%Y-%m")] += float(r.value or 0)
+    sorted_months  = sorted(monthly.keys())
+    monthly_labels = [dt.strptime(k, "%Y-%m").strftime("%b %Y") for k in sorted_months]
+    monthly_kwh    = [monthly[k] for k in sorted_months]
+
+    # Trend
+    from app.services.pdf.enpi_report import compute_r_squared
+    r2, slope, p_value = compute_r_squared(monthly_kwh)
+    direction = "improving" if slope < -50 else ("worsening" if slope > 50 else "stable")
+
+    # Spike analysis via insights
+    window_hours = int((period_end - period_start).days * 24)
+    insights = compute_site_insights(
+        db=db, site_id=site_id_canon,
+        window_hours=min(window_hours, 2160),
+        lookback_days=90,
+    )
+    critical_h = insights.get("critical_hours", 0) if insights else 0
+    elevated_h = insights.get("elevated_hours", 0) if insights else 0
+    spike_rate = critical_h / total_hours * 100 if total_hours > 0 else 0
+
+    # Electricity price from site config
+    price = float(getattr(site, "electricity_price_per_kwh", None) or 0.18)
+    idle_cost = (night_kwh + weekend_kwh) * price
+
+    data = {
+        "site_name":        site.name if site else site_id,
+        "site_address":     getattr(site, "address", None),
+        "country_code":     getattr(site, "country_code", "IT"),
+        "sector_code":      getattr(site, "sector_code", "manufacturing"),
+        "installation_id":  site_numeric,
+        "period_start":     str(period_start),
+        "period_end":       str(period_end),
+        "total_hours":      total_hours,
+        "night_kwh":        round(night_kwh, 2),
+        "night_pct":        round(night_pct, 2),
+        "weekend_kwh":      round(weekend_kwh, 2),
+        "weekend_pct":      round(weekend_pct, 2),
+        "total_kwh":        round(total_kwh, 2),
+        "electricity_price": price,
+        "idle_cost_eur":    round(idle_cost, 2),
+        "critical_hours":   critical_h,
+        "elevated_hours":   elevated_h,
+        "spike_rate_pct":   round(spike_rate, 2),
+        "peak_hour":        peak_hour,
+        "peak_avg_kwh":     round(peak_avg, 2),
+        "peak_day":         peak_day_date.strftime("%a %Y-%m-%d"),
+        "peak_day_kwh":     round(peak_day_kwh, 2),
+        "monthly_labels":   monthly_labels,
+        "monthly_kwh":      [round(v, 2) for v in monthly_kwh],
+        "trend_slope":      slope,
+        "trend_r2":         r2,
+        "trend_slope":      slope,
+        "trend_direction":  direction,
+        "trend_p_value":    p_value,
+        "prod_correlation_available": False,
+        "consultant_role":  consultant_role,
+        "report_date":      dt.utcnow().strftime("%d %b %Y"),
+    }
+
+    pdf_buf  = generate_correlation_pdf(data, lang=lang)
+    filename = f"CEI_Correlation_{site.name.replace(' ','_') if site else site_id}_{period_end.year}.pdf"
+    return StreamingResponse(
+        pdf_buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

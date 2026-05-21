@@ -13,6 +13,8 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import { downloadCsv } from "../utils/csv";
 import { useTranslation, Trans } from "react-i18next";
+import { useAuth } from "../hooks/useAuth";
+import ComplianceReports from "../components/ComplianceReports";
 
 type SiteRecord = {
   id: number | string;
@@ -155,6 +157,7 @@ const formatTariffPerKwh = (value: number | null, code: string): string => {
 
 const Reports: React.FC = () => {
   const { t } = useTranslation();
+  const { user } = useAuth();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1533,6 +1536,10 @@ const Reports: React.FC = () => {
           </div>
         </section>
       )}
+      <ComplianceReports
+        sites={sites}
+        userOrgId={user?.organization_id ?? null}
+      />
     </div>
   );
 };
