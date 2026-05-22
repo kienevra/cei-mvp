@@ -6,6 +6,7 @@ from typing import Tuple, Dict, Any, List, Optional, Set
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
+import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -529,6 +530,38 @@ def ingest_timeseries_batch(
                 db.add(record)
                 db.flush()
             except IntegrityError as exc:
+                db.rollback()
+                # Check if this is the site/meter/timestamp unique constraint
+                # → last-write-wins: update the value of the existing record
+                err_str = str(getattr(exc, "orig", exc)).lower()
+                if "uq_timeseries_site_meter_timestamp" in err_str or (
+                    "unique" in err_str and "timeseries" in err_str
+                ):
+                    try:
+                        db.execute(
+                            sa.text(
+                                "UPDATE timeseries_record SET value = :value "
+                                "WHERE site_id = :site_id "
+                                "AND meter_id = :meter_id "
+                                "AND timestamp = :timestamp"
+                            ),
+                            {
+                                "value": float(v),
+                                "site_id": site_id_str,
+                                "meter_id": meter_id_str,
+                                "timestamp": ts,
+                            },
+                        )
+                        db.flush()
+                        skipped_duplicate += 1
+                    except Exception as upd_exc:
+                        failed += 1
+                        errors.append({
+                            "index": idx,
+                            "code": TimeseriesIngestErrorCode.INTERNAL_ERROR.value,
+                            "detail": str(upd_exc),
+                        })
+                    continue
                 if model_has_idem and idem_key and _is_likely_idempotency_integrity_error(exc):
                     skipped_duplicate += 1
                     errors.append(
@@ -539,7 +572,6 @@ def ingest_timeseries_batch(
                         }
                     )
                     continue
-
                 failed += 1
                 errors.append(
                     {

@@ -324,12 +324,12 @@ class TimeseriesRecord(Base):
     __table_args__ = (
         # existing
         Index("ix_timeseries_site_timestamp", "site_id", "timestamp"),
-
         # NEW: fast org-scoped reads for analytics/alerts
         Index("ix_timeseries_org_site_timestamp", "org_id", "site_id", "timestamp"),
-
         # NEW: idempotency guarantee per org
         sa.UniqueConstraint("org_id", "idempotency_key", name="uq_ts_org_idem"),
+        # Deduplication: last-write-wins on same site/meter/timestamp
+        sa.UniqueConstraint("site_id", "meter_id", "timestamp", name="uq_timeseries_site_meter_timestamp"),
     )
 
 
