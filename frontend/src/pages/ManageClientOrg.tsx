@@ -15,13 +15,7 @@ import {
   type ClientOrgUser, type AlertThresholds, type ClientReportOut, type TimeseriesSummary,
 } from "../services/manageApi";
 import ComplianceReports from "../components/ComplianceReports";
-
-function fmtDt(raw: string | null | undefined): string {
-  if (!raw) return "—";
-  const d = new Date(raw);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-}
+import { fmtDate } from "../utils/dateFormat";
 
 function toUiMsg(err: unknown, fallback: string): string {
   const e = err as any;
@@ -58,7 +52,8 @@ const TAB_KEYS = ["overview", "sites", "tokens", "users", "thresholds", "energy"
 type TabKey = typeof TAB_KEYS[number];
 
 function TabBar({ active, onChange }: { active: TabKey; onChange: (t: TabKey) => void }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   return (
     <div style={{ display: "flex", gap: "0.25rem", borderBottom: "1px solid var(--cei-border-subtle)", marginBottom: "1.25rem", overflowX: "auto" }}>
       {TAB_KEYS.map((key) => (
@@ -87,7 +82,8 @@ function KpiChip({ label, value, sub }: { label: string; value: React.ReactNode;
 // Energy tab
 // ---------------------------------------------------------------------------
 function EnergyTab({ orgId }: { orgId: number }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const navigate = useNavigate();
   const [report, setReport] = useState<ClientReportOut | null>(null);
   const [summary24h, setSummary24h] = useState<TimeseriesSummary | null>(null);
@@ -231,7 +227,8 @@ function EnergyTab({ orgId }: { orgId: number }) {
 // Alerts tab
 // ---------------------------------------------------------------------------
 function AlertsTab({ orgId }: { orgId: number }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const [report, setReport] = useState<ClientReportOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -346,7 +343,7 @@ function AlertsTab({ orgId }: { orgId: number }) {
             {plantEvents.slice(0, 8).map((ev) => (
               <div key={ev.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", borderRadius: "0.4rem", background: "rgba(148,163,184,0.04)", border: "1px solid var(--cei-border-subtle)", fontSize: "0.82rem" }}>
                 <span style={{ color: "var(--cei-text-main)" }}>{ev.title}</span>
-                <span style={{ color: "var(--cei-text-muted)", fontSize: "0.76rem", flexShrink: 0, marginLeft: "1rem" }}>{fmtDt(ev.created_at)}</span>
+                <span style={{ color: "var(--cei-text-muted)", fontSize: "0.76rem", flexShrink: 0, marginLeft: "1rem" }}>{fmtDate(ev.created_at, lang)}</span>
               </div>
             ))}
           </div>
@@ -365,7 +362,8 @@ function AlertsTab({ orgId }: { orgId: number }) {
 // Reports tab
 // ---------------------------------------------------------------------------
 function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const [report, setReport] = useState<ClientReportOut | null>(null);
   const [summary7d, setSummary7d] = useState<TimeseriesSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -444,7 +442,7 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
         <div>
           <div style={{ fontWeight: 700, fontSize: "1rem" }}>{t("manage.reports.title", { defaultValue: "Portfolio report" })} — {orgName}</div>
           <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", marginTop: "0.2rem" }}>
-            {t("manage.reports.generated", { defaultValue: "Generated:" })} {fmtDt(report.generated_at)} · {report.total_sites} {t("manage.reports.sites", { defaultValue: "sites" })} · {report.total_timeseries_records.toLocaleString()} {t("manage.reports.totalReadings", { defaultValue: "total readings" })}
+            {t("manage.reports.generated", { defaultValue: "Generated:" })} {fmtDate(report.generated_at, lang)} · {report.total_sites} {t("manage.reports.sites", { defaultValue: "sites" })} · {report.total_timeseries_records.toLocaleString()} {t("manage.reports.totalReadings", { defaultValue: "total readings" })}
             {kwh7d != null && ` · ${Math.round(kwh7d).toLocaleString()} kWh (7d)`}
             {cost7d != null && ` · €${cost7d} ${t("manage.reports.costEst", { defaultValue: "est. cost" })}`}
           </div>
@@ -550,7 +548,8 @@ function ReportsTab({ orgId, orgName }: { orgId: number; orgName: string }) {
 // Overview tab
 // ---------------------------------------------------------------------------
 function OverviewTab({ org, onSaved }: { org: ClientOrg; onSaved: () => void }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -581,7 +580,7 @@ function OverviewTab({ org, onSaved }: { org: ClientOrg; onSaved: () => void }) 
       {row(t("manage.client.overview.name"), <span style={{ fontSize: "0.9rem" }}>{org.name}</span>)}
       {row(t("manage.client.overview.plan"), <span style={{ fontSize: "0.9rem" }}>{org.plan_key ?? "—"}</span>)}
       {row(t("manage.client.overview.status"), <span style={{ fontSize: "0.9rem" }}>{org.subscription_status ?? "—"}</span>)}
-      {row(t("manage.client.overview.created"), <span style={{ fontSize: "0.9rem" }}>{fmtDt(org.created_at)}</span>)}
+      {row(t("manage.client.overview.created"), <span style={{ fontSize: "0.9rem" }}>{fmtDate(org.created_at, lang)}</span>)}
       <div style={{ borderTop: "1px solid var(--cei-border-subtle)", margin: "1.25rem 0" }} />
       <div style={{ fontWeight: 600, marginBottom: "1rem" }}>{t("manage.client.overview.pricingTitle")}</div>
       {error && <div style={{ color: "var(--cei-red, #ef4444)", fontSize: "0.82rem", marginBottom: "0.75rem" }}>{error}</div>}
@@ -603,7 +602,8 @@ function OverviewTab({ org, onSaved }: { org: ClientOrg; onSaved: () => void }) 
 // Sites tab
 // ---------------------------------------------------------------------------
 function SitesTab({ orgId }: { orgId: number }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const navigate = useNavigate();
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
@@ -673,7 +673,7 @@ function SitesTab({ orgId }: { orgId: number }) {
                 </td>
                 <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)" }}>{site.location ?? "—"}</td>
                 <td style={{ padding: "0.5rem 0.6rem" }}><code style={{ fontSize: "0.78rem", background: "rgba(148,163,184,0.1)", padding: "0.1rem 0.4rem", borderRadius: "0.25rem" }}>{site.site_id ?? `site-${site.id}`}</code></td>
-                <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.8rem" }}>{fmtDt(site.created_at)}</td>
+                <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.8rem" }}>{fmtDate(site.created_at, lang)}</td>
                 <td style={{ padding: "0.5rem 0.6rem" }}>
                   <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                     <button style={btnSecondary} onClick={() => navigate(`/manage/client-orgs/${orgId}/sites/${site.id}`)}>View</button>
@@ -725,7 +725,8 @@ function SitesTab({ orgId }: { orgId: number }) {
 // Tokens tab
 // ---------------------------------------------------------------------------
 function TokensTab({ orgId }: { orgId: number }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const [tokens, setTokens] = useState<IntegrationToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -799,8 +800,8 @@ function TokensTab({ orgId }: { orgId: number }) {
                     {tok.is_active ? t("manage.client.tokens.statusActive") : t("manage.client.tokens.statusRevoked")}
                   </span>
                 </td>
-                <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.8rem" }}>{fmtDt(tok.created_at)}</td>
-                <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.8rem" }}>{fmtDt(tok.last_used_at)}</td>
+                <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.8rem" }}>{fmtDate(tok.created_at, lang)}</td>
+                <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.8rem" }}>{fmtDate(tok.last_used_at, lang)}</td>
                 <td style={{ padding: "0.5rem 0.6rem" }}>
                   {tok.is_active && (
                     <button style={btnDanger} onClick={() => setConfirmRevoke(tok)} disabled={revokingId === tok.id}>
@@ -848,7 +849,8 @@ function TokensTab({ orgId }: { orgId: number }) {
 // Users tab
 // ---------------------------------------------------------------------------
 function UsersTab({ orgId }: { orgId: number }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const [users, setUsers] = useState<ClientOrgUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -931,7 +933,7 @@ function UsersTab({ orgId }: { orgId: number }) {
                     {u.is_active ? t("manage.client.users.statusActive") : t("manage.client.users.statusDisabled")}
                   </span>
                 </td>
-                <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.8rem" }}>{fmtDt(u.created_at)}</td>
+                <td style={{ padding: "0.5rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.8rem" }}>{fmtDate(u.created_at, lang)}</td>
               </tr>
             ))}
           </tbody>
@@ -970,7 +972,8 @@ function UsersTab({ orgId }: { orgId: number }) {
 // Thresholds tab
 // ---------------------------------------------------------------------------
 function ThresholdsTab({ orgId }: { orgId: number }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const [thresholds, setThresholds] = useState<AlertThresholds | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1045,7 +1048,8 @@ function ThresholdsTab({ orgId }: { orgId: number }) {
 const ManageClientOrg: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const orgId = parseInt(id ?? "0");
 
   const [org, setOrg] = useState<ClientOrg | null>(null);

@@ -18,13 +18,7 @@ import {
   type ClientOrgKPI,
   type OnboardingStep,
 } from "../services/manageApi";
-
-function fmtDt(raw: string | null | undefined): string {
-  if (!raw) return "—";
-  const d = new Date(raw);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-}
+import { fmtDate, fmtDateTime } from "../utils/dateFormat";
 
 function fmtNum(n: number): string { return n.toLocaleString(); }
 
@@ -63,7 +57,8 @@ function ClientTable({ summary, analytics, onDownload, downloading, onOrgClick }
   downloading: number | null;
   onOrgClick: (id: number) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const kpiMap = new Map<number, ClientOrgKPI>(analytics?.clients.map((c: ClientOrgKPI) => [c.org_id, c]) ?? []);
 
   if (summary.clients.length === 0) {
@@ -126,7 +121,7 @@ function ClientTable({ summary, analytics, onDownload, downloading, onOrgClick }
                 <td style={{ padding: "0.55rem 0.75rem" }}>{fmtNum(client.records_last_24h)}</td>
                 <td style={{ padding: "0.55rem 0.75rem" }}>{fmtNum(client.records_last_7d)}</td>
                 <td style={{ padding: "0.55rem 0.75rem" }}>{fmtNum(client.total_records)}</td>
-                <td style={{ padding: "0.55rem 0.75rem", color: "var(--cei-text-muted)", fontSize: "0.8rem", whiteSpace: "nowrap" }}>{fmtDt(client.last_ingestion_at)}</td>
+                <td style={{ padding: "0.55rem 0.75rem", color: "var(--cei-text-muted)", fontSize: "0.8rem", whiteSpace: "nowrap" }}>{fmtDateTime(client.last_ingestion_at, lang)}</td>
                 <td style={{ padding: "0.55rem 0.75rem" }}>
                   {openAlerts > 0 ? (
                     <span style={{ color: criticalAlerts > 0 ? "var(--cei-red, #ef4444)" : "var(--cei-amber, #f59e0b)", fontWeight: 600 }}>
@@ -152,7 +147,8 @@ function ClientTable({ summary, analytics, onDownload, downloading, onOrgClick }
 }
 
 const ManageDashboard: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const navigate = useNavigate();
 
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
@@ -249,7 +245,7 @@ const ManageDashboard: React.FC = () => {
         {summary && (
           <div style={{ textAlign: "right", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
             <div><strong>{summary.managing_org_name}</strong></div>
-            <div>{t("manage.header.generatedBy")}: {fmtDt(summary.generated_at)}</div>
+            <div>{t("manage.header.generatedBy")}: {fmtDate(summary.generated_at, lang)}</div>
           </div>
         )}
       </section>

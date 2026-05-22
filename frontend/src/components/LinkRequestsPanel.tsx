@@ -11,12 +11,7 @@ import {
   type LinkRequest,
 } from "../services/manageApi";
 import { useTranslation } from "react-i18next";
-
-function fmtDt(raw: string): string {
-  const d = new Date(raw);
-  if (isNaN(d.getTime())) return raw;
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
-}
+import { fmtDate } from "../utils/dateFormat";
 
 function toMsg(err: unknown, fallback: string): string {
   const e = err as any;
@@ -186,7 +181,7 @@ const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => 
               <div>
                 <div style={{ fontWeight: 600, fontSize: "0.88rem" }}>{req.client_org_name}</div>
                 <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", marginTop: "0.2rem" }}>
-                  {t("manage.linkPanel.requestedToJoin", { defaultValue: "Requested to join your portfolio" })} · {fmtDt(req.created_at)}
+                  {t("manage.linkPanel.requestedToJoin", { defaultValue: "Requested to join your portfolio" })} · {fmtDate(req.created_at, lang)}
                 </div>
                 {req.message && (
                   <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", marginTop: "0.25rem", fontStyle: "italic" }}>
@@ -273,7 +268,7 @@ const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => 
                   <div>
                     <span style={{ fontWeight: 500, fontSize: "0.85rem" }}>{req.client_org_name}</span>
                     <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginLeft: "0.5rem" }}>
-                      {t("manage.linkPanel.sent", { defaultValue: "Sent" })} {fmtDt(req.created_at)}
+                      {t("manage.linkPanel.sent", { defaultValue: "Sent" })} {fmtDate(req.created_at, lang)}
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
@@ -296,7 +291,7 @@ const LinkRequestsPanel: React.FC<LinkRequestsPanelProps> = ({ onAccepted }) => 
                 <div key={req.id} style={{ border: "1px solid var(--cei-border-subtle)", borderRadius: "0.5rem", padding: "0.65rem 1rem", marginBottom: "0.4rem", display: "flex", justifyContent: "space-between", alignItems: "center", opacity: 0.65 }}>
                   <div>
                     <span style={{ fontWeight: 500, fontSize: "0.85rem" }}>{req.client_org_name}</span>
-                    <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginLeft: "0.5rem" }}>{fmtDt(req.created_at)}</span>
+                    <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginLeft: "0.5rem" }}>{fmtDate(req.created_at, lang)}</span>
                   </div>
                   {statusBadge(req.status)}
                 </div>

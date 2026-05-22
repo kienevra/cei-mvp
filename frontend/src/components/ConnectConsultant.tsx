@@ -12,12 +12,7 @@ import {
   orgCancelLinkRequest,
   type LinkRequest,
 } from "../services/manageApi";
-
-function fmtDt(raw: string): string {
-  const d = new Date(raw);
-  if (isNaN(d.getTime())) return raw;
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
-}
+import { fmtDate } from "../utils/dateFormat";
 
 function toMsg(err: unknown, fallback: string): string {
   const e = err as any;
@@ -86,7 +81,8 @@ function statusBadge(status: string) {
 }
 
 const ConnectConsultant: React.FC<{ onLinked?: () => void }> = ({ onLinked }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const { refreshUser } = useAuth();
 
   const [requests, setRequests] = useState<LinkRequest[]>([]);
@@ -242,7 +238,7 @@ const ConnectConsultant: React.FC<{ onLinked?: () => void }> = ({ onLinked }) =>
                   <div>
                     <div style={{ fontWeight: 500, fontSize: "0.88rem" }}>{req.managing_org_name}</div>
                     <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", marginTop: "0.2rem" }}>
-                      {req.initiated_by === "consultant" ? "They sent you this request" : "You sent this request"} · {fmtDt(req.created_at)}
+                      {req.initiated_by === "consultant" ? "They sent you this request" : "You sent this request"} · {fmtDate(req.created_at, lang)}
                     </div>
                     {req.message && (
                       <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", marginTop: "0.25rem", fontStyle: "italic" }}>
@@ -280,7 +276,7 @@ const ConnectConsultant: React.FC<{ onLinked?: () => void }> = ({ onLinked }) =>
                 <div key={req.id} style={{ border: "1px solid var(--cei-border-subtle)", borderRadius: "0.5rem", padding: "0.65rem 1rem", marginBottom: "0.4rem", display: "flex", justifyContent: "space-between", alignItems: "center", opacity: 0.7 }}>
                   <div>
                     <span style={{ fontWeight: 500, fontSize: "0.85rem" }}>{req.managing_org_name}</span>
-                    <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginLeft: "0.5rem" }}>{fmtDt(req.created_at)}</span>
+                    <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginLeft: "0.5rem" }}>{fmtDate(req.created_at, lang)}</span>
                   </div>
                   {statusBadge(req.status)}
                 </div>
