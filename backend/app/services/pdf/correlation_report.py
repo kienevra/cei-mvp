@@ -87,7 +87,7 @@ from .base import (
     _FONT_SEMIBOLD,
 )
 from .charts import bar_chart, line_chart
-from .i18n import t, get_lang
+from .i18n import t, get_lang, fmt_date
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ def _s1_installation(story: List, data: Dict, s: Dict, lang: str) -> None:
         (t("country",           lang), data.get("country_code", "—")),
         (t("sector",            lang), _sector_display(data.get("sector_code", "—"), lang)),
         (t("installation_id",   lang), str(data.get("installation_id", "—"))),
-        (t("analysis_window",   lang), f"{data.get('period_start','—')} → {data.get('period_end','—')}"),
+        (t("analysis_window",   lang), f"{fmt_date(data.get('period_start','—'), lang)} → {fmt_date(data.get('period_end','—'), lang)}"),
         (t("total_hours_analysed", lang), f"{data.get('total_hours', 0):,} h"),
     ]
     story.append(kv_table(rows))
@@ -362,7 +362,7 @@ def generate_correlation_pdf(data: Dict[str, Any], lang: str = "en") -> BytesIO:
     """
     lang      = get_lang(lang)
     site_name = data.get("site_name", "Installation")
-    period    = f"{data.get('period_start','—')} → {data.get('period_end','—')}"
+    period    = f"{fmt_date(data.get('period_start','—'), lang)} → {fmt_date(data.get('period_end','—'), lang)}"
 
     buf = BytesIO()
     doc = CEIDocTemplate(

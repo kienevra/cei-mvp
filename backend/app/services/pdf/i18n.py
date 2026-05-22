@@ -688,3 +688,26 @@ TRANSLATIONS["it"].update({
     "energy_intensity_label":   "Intensità energetica",
     "energy_intensity_formula": "kWh ÷ vol. produzione",
 })
+
+# ---------------------------------------------------------------------------
+# Date formatting utility
+# ---------------------------------------------------------------------------
+
+def fmt_date(date_str: str, lang: str = "en") -> str:
+    """
+    Format an ISO date string (YYYY-MM-DD) into locale-appropriate display format.
+    EN (US): MM/DD/YYYY  e.g. 02/21/2026
+    IT (EU): DD/MM/YYYY  e.g. 21/02/2026
+    Falls back to the original string if parsing fails.
+    """
+    if not date_str or date_str == "—":
+        return date_str
+    try:
+        from datetime import datetime as _dt
+        d = _dt.strptime(str(date_str)[:10], "%Y-%m-%d")
+        if lang == "it":
+            return d.strftime("%d/%m/%Y")
+        else:
+            return d.strftime("%m/%d/%Y")
+    except (ValueError, TypeError):
+        return str(date_str)

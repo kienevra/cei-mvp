@@ -78,7 +78,7 @@ from .base import (
     spacer,
 )
 from .charts import bar_chart, dual_bar_chart, line_chart
-from .i18n import t, get_lang
+from .i18n import t, get_lang, fmt_date
 
 
 # ---------------------------------------------------------------------------
@@ -142,10 +142,10 @@ def _s2_config(story: List, data: Dict, s: Dict, lang: str) -> None:
     vol  = data.get("production_volume", 0)
     unit = data.get("production_unit", "tonne")
     rows = [
-        (t("baseline_start",    lang), data.get("baseline_start", "—")),
-        (t("baseline_end",      lang), data.get("baseline_end",   "—")),
-        (t("current_start",     lang), data.get("current_start",  "—")),
-        (t("current_end",       lang), data.get("current_end",    "—")),
+        (t("baseline_start",    lang), fmt_date(data.get("baseline_start", "—"), lang)),
+        (t("baseline_end",      lang), fmt_date(data.get("baseline_end",   "—"), lang)),
+        (t("current_start",     lang), fmt_date(data.get("current_start",  "—"), lang)),
+        (t("current_end",       lang), fmt_date(data.get("current_end",    "—"), lang)),
         (t("production_volume", lang), f"{_fmt(vol)} {unit} / {t('reporting_year', lang).lower()}"),
         (t("production_unit",   lang), unit),
         (t("emission_factor",   lang), f"{data.get('ef_value', 0):.4f} {t('ef_unit', lang)}  ({data.get('ef_source', '—')})"),
@@ -349,7 +349,7 @@ def generate_enpi_pdf(data: Dict[str, Any], lang: str = "en") -> BytesIO:
     """
     lang      = get_lang(lang)
     site_name = data.get("site_name", "Installation")
-    subtitle  = f"{data.get('baseline_start','')} → {data.get('current_end','')}"
+    subtitle  = f"{fmt_date(data.get('baseline_start',''), lang)} → {fmt_date(data.get('current_end',''), lang)}"
 
     buf = BytesIO()
     doc = CEIDocTemplate(

@@ -26,7 +26,7 @@ from .base import (
     spacer,
 )
 from .charts import bar_chart, pie_chart
-from .i18n import t, get_lang
+from .i18n import t, get_lang, fmt_date
 
 
 # ---------------------------------------------------------------------------
@@ -41,9 +41,11 @@ def _fmt(value: float, decimals: int = 2, suffix: str = "") -> str:
 def _period_str(data: Dict, lang: str) -> str:
     q = data.get("quarter")
     y = data.get("reporting_year", "")
+    ps = fmt_date(data.get("period_start", ""), lang)
+    pe = fmt_date(data.get("period_end",   ""), lang)
     if q:
-        return f"Q{q} {y}  ·  {data['period_start']} → {data['period_end']}"
-    return f"{data['period_start']} → {data['period_end']}"
+        return f"Q{q} {y}  ·  {ps} → {pe}"
+    return f"{ps} → {pe}"
 
 
 def _sector_display(code: str, lang: str) -> str:
@@ -114,8 +116,8 @@ def _s2_period(story: List, data: Dict, s: Dict, lang: str) -> None:
     rows = [
         (t("reporting_year", lang), str(data.get("reporting_year", "—"))),
         (t("quarter",        lang), f"Q{data['quarter']}" if data.get("quarter") else t("full_year", lang)),
-        (t("period_start",   lang), data.get("period_start", "—")),
-        (t("period_end",     lang), data.get("period_end",   "—")),
+        (t("period_start",   lang), fmt_date(data.get("period_start", "—"), lang)),
+        (t("period_end",     lang), fmt_date(data.get("period_end",   "—"), lang)),
     ]
     story.append(kv_table(rows))
 
