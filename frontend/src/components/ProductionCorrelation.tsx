@@ -19,11 +19,14 @@ import {
   ProductionCorrelationResponse,
   CorrelationDay,
 } from "../services/productionApi";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import { useTranslation } from "react-i18next";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmt(d: string) {
-  return new Date(d + "T00:00:00").toLocaleDateString("it-IT", {
+function fmt(d: string, locale = "it-IT") {
+  return new Date(d + "T00:00:00").toLocaleDateString(locale, {
     day: "2-digit",
     month: "short",
   });
@@ -244,6 +247,8 @@ interface Props {
 }
 
 export default function ProductionCorrelation({ siteId }: Props) {
+  const { i18n } = useTranslation();
+  const lang = i18n.language?.toLowerCase().startsWith("it") ? "it" : "en";
   const defaults = defaultDateRange();
   const [start, setStart] = useState(defaults.start);
   const [end, setEnd] = useState(defaults.end);
@@ -321,20 +326,28 @@ export default function ProductionCorrelation({ siteId }: Props) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {/* Date inputs */}
           {(["start", "end"] as const).map(key => (
-            <input
+            <DatePicker
               key={key}
-              type="date"
-              value={key === "start" ? start : end}
-              onChange={e => key === "start" ? setStart(e.target.value) : setEnd(e.target.value)}
-              style={{
-                background: "#0f172a",
-                border: "1px solid rgba(148,163,184,0.2)",
-                borderRadius: 8,
-                color: "#e5e7eb",
-                padding: "6px 10px",
-                fontSize: 12,
-                outline: "none",
+              selected={key === "start" ? (start ? new Date(start) : null) : (end ? new Date(end) : null)}
+              onChange={(date: Date | null) => {
+                if (date) {
+                  const iso = date.toISOString().slice(0, 10);
+                  key === "start" ? setStart(iso) : setEnd(iso);
+                }
               }}
+              dateFormat={lang === "it" ? "dd/MM/yyyy" : "MM/dd/yyyy"}
+              placeholderText={lang === "it" ? "gg/mm/aaaa" : "mm/dd/yyyy"}
+              customInput={
+                <input style={{
+                  background: "#0f172a",
+                  border: "1px solid rgba(148,163,184,0.2)",
+                  borderRadius: 8,
+                  color: "#e5e7eb",
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  outline: "none",
+                }} />
+              }
             />
           ))}
 
@@ -458,13 +471,13 @@ export default function ProductionCorrelation({ siteId }: Props) {
             <KpiCard
               label="Best day"
               value={data.best_day ? `${data.best_day.kwh_per_unit.toFixed(3)}` : "—"}
-              sub={data.best_day ? fmt(data.best_day.date) : undefined}
+              sub={data.best_day ? fmt(data.best_day.date, lang === "it" ? "it-IT" : "en-US") : undefined}
               accent="#22c55e"
             />
             <KpiCard
               label="Worst day"
               value={data.worst_day ? `${data.worst_day.kwh_per_unit.toFixed(3)}` : "—"}
-              sub={data.worst_day ? fmt(data.worst_day.date) : undefined}
+              sub={data.worst_day ? fmt(data.worst_day.date, lang === "it" ? "it-IT" : "en-US") : undefined}
               accent="#f87171"
             />
           </div>
@@ -498,7 +511,7 @@ export default function ProductionCorrelation({ siteId }: Props) {
                   />
                   <XAxis
                     dataKey="date"
-                    tickFormatter={fmt}
+                    tickFormatter={(d) => fmt(d, lang === "it" ? "it-IT" : "en-US")}
                     tick={{ fill: "#9ca3af", fontSize: 11 }}
                     axisLine={{ stroke: "rgba(148,163,184,0.12)" }}
                     tickLine={false}
@@ -629,7 +642,7 @@ export default function ProductionCorrelation({ siteId }: Props) {
                       }}
                     >
                       <td style={{ padding: "10px 20px", color: "#fb923c", fontWeight: 600, fontSize: 13 }}>
-                        {fmt(a.date)}
+                        {fmt(a.date, lang === "it" ? "it-IT" : "en-US")}
                       </td>
                       <td style={{ padding: "10px 20px", color: "#e5e7eb", fontSize: 13 }}>
                         {a.kwh.toLocaleString("it-IT", { maximumFractionDigits: 0 })}

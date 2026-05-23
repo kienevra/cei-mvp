@@ -15,6 +15,8 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/useAuth";
 import api from "../services/api";
 import LoadingSpinner from "./LoadingSpinner";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -453,18 +455,26 @@ const ComplianceReports: React.FC<Props> = ({ sites, userOrgId }) => {
     onChange: (v: string) => void;
     min?: string;
     max?: string;
-  }> = ({ label, value, onChange, min, max }) => (
-    <Field label={label}>
-      <input
-        type="date"
-        style={inputStyle}
-        value={value}
-        min={min}
-        max={max}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </Field>
-  );
+  }> = ({ label, value, onChange, min, max }) => {
+    const selected = value ? new Date(value) : null;
+    const minDate  = min ? new Date(min) : undefined;
+    const maxDate  = max ? new Date(max) : undefined;
+    return (
+      <Field label={label}>
+        <DatePicker
+          selected={selected}
+          onChange={(date: Date | null) => {
+            if (date) onChange(date.toISOString().slice(0, 10));
+          }}
+          dateFormat={lang === "it" ? "dd/MM/yyyy" : "MM/dd/yyyy"}
+          minDate={minDate}
+          maxDate={maxDate}
+          customInput={<input style={inputStyle} />}
+          placeholderText={lang === "it" ? "gg/mm/aaaa" : "mm/dd/yyyy"}
+        />
+      </Field>
+    );
+  };
 
   const ModalFooter: React.FC<{
     onDownload: () => void;
