@@ -111,6 +111,25 @@ class Organization(Base):
     # Enforced at the API layer (Phase 3). NULL = unlimited (e.g. enterprise plan).
     client_limit = Column(Integer, nullable=True)
 
+    # -------- Billing policy fields --------
+    billing_cycle_anchor = Column(DateTime(timezone=True), nullable=True)
+    subscription_suspended = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    suspension_effective_date = Column(DateTime(timezone=True), nullable=True)
+    grace_period_until = Column(DateTime(timezone=True), nullable=True)
+    grace_period_started_at = Column(DateTime(timezone=True), nullable=True)
+    last_grace_notification_at = Column(DateTime(timezone=True), nullable=True)
+    soft_locked = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    soft_locked_at = Column(DateTime(timezone=True), nullable=True)
+    transition_period_until = Column(DateTime(timezone=True), nullable=True)
+    client_grace_until = Column(DateTime(timezone=True), nullable=True)
+    contact_email = Column(String(255), nullable=True)
+    stripe_base_price_id = Column(String(255), nullable=True)
+    stripe_site_price_id = Column(String(255), nullable=True)
+    stripe_site_subscription_item_id = Column(String(255), nullable=True)
+    billed_site_count = Column(Integer, nullable=True)
+    next_billing_site_count = Column(Integer, nullable=True)
+    is_ghost_client = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+
     # Self-referential relationships:
     # managed_by  → the managing org (parent), if this org is a client
     # client_orgs → all client orgs under this managing org
