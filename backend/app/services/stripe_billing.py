@@ -115,14 +115,14 @@ class PortalSessionResult:
 # Map CEI logical plan keys -> Stripe Price IDs.
 # You MUST update these values with real Stripe price IDs when you wire Stripe.
 PLAN_TO_STRIPE_PRICE: Dict[str, str] = {
-    # Factory / standalone tiers
-    "cei-starter":        "price_FILL_ME_IN",   # €149/month
-    "cei-professional":   "price_FILL_ME_IN",   # €349/month
-    "cei-enterprise":     "price_FILL_ME_IN",   # €799/month
-    # ESCO / consultant tiers
-    "cei-esco-starter":   "price_FILL_ME_IN",   # €299/month
-    "cei-esco-pro":       "price_FILL_ME_IN",   # €599/month
-    "cei-esco-scale":     "price_FILL_ME_IN",   # €999/month
+    # Standalone org — base fee
+    "standalone_base":     "price_1Tac8L1UT0Q5Ec7jEA7o4aMG",   # EUR 89/month
+    # Standalone org — per site
+    "standalone_per_site": "price_1TacMj1UT0Q5Ec7jPCPMRSu8",   # EUR 59/site/month
+    # Manager — base fee
+    "manager_base":        "price_1TacNy1UT0Q5Ec7jPS7ZEcCh",   # EUR 149/month
+    # Manager — per site
+    "manager_per_site":    "price_1TacPG1UT0Q5Ec7jw04igBJN",   # EUR 39/site/month
 }
 
 

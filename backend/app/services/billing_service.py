@@ -33,11 +33,11 @@ logger = logging.getLogger("cei.billing")
 # ---------------------------------------------------------------------------
 STRIPE_PRICES = {
     # Standalone org
-    "standalone_base":     "price_FILL_ME_IN",   # EUR 89/month flat
-    "standalone_per_site": "price_FILL_ME_IN",   # EUR 59/site/month
+    "standalone_base":     "price_1Tac8L1UT0Q5Ec7jEA7o4aMG",   # EUR 89/month flat
+    "standalone_per_site": "price_1TacMj1UT0Q5Ec7jPCPMRSu8",   # EUR 59/site/month
     # Manager / consultant
-    "manager_base":        "price_FILL_ME_IN",   # EUR 149/month flat
-    "manager_per_site":    "price_FILL_ME_IN",   # EUR 39/site/month
+    "manager_base":        "price_1TacNy1UT0Q5Ec7jPS7ZEcCh",   # EUR 149/month flat
+    "manager_per_site":    "price_1TacPG1UT0Q5Ec7jw04igBJN",   # EUR 39/site/month
 }
 
 # Grace period duration
