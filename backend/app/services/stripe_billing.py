@@ -284,3 +284,121 @@ def create_portal_session_for_org(
     )
 
     return PortalSessionResult(url=url)
+
+# ---------------------------------------------------------------------------
+# Hybrid checkout — base fee + per-site fee in one subscription
+# ---------------------------------------------------------------------------
+
+@dataclass
+class HybridCheckoutParams:
+    org_type: str        # "standalone" or "managing"
+    site_count: int      # current number of billable sites
+    success_url: str
+    cancel_url: str
+
+
+def create_hybrid_checkout_session(
+    db: Session,
+    org: Organization,
+    params: HybridCheckoutParams,
+) -> CheckoutSessionResult:
+    """
+    Create a Stripe Checkout session with two line items:
+      1. Base fee (flat, quantity=1)
+      2. Per-site fee (quantity=site_count)
+
+    Standalone orgs:  EUR 89/month + EUR 59 × sites
+    Manager orgs:     EUR 149/month + EUR 39 × sites
+
+    On success the webhook (checkout.session.completed) fires and we
+    store the subscription ID + set billing_cycle_anchor.
+    """
+    cfg = get_stripe_config()
+    if not cfg.enabled or not cfg.api_key:
+        raise RuntimeError(
+            "Stripe is not configured. Set STRIPE_API_KEY before creating checkout sessions."
+        )
+    _require_stripe_sdk()
+
+    if params.org_type == "managing":
+        base_price_id     = PLAN_TO_STRIPE_PRICE["manager_base"]
+        per_site_price_id = PLAN_TO_STRIPE_PRICE["manager_per_site"]
+        plan_key          = "manager"
+    else:
+        base_price_id     = PLAN_TO_STRIPE_PRICE["standalone_base"]
+        per_site_price_id = PLAN_TO_STRIPE_PRICE["standalone_per_site"]
+        plan_key          = "standalone"
+
+    org_id   = getattr(org, "id", None)
+    org_name = getattr(org, "name", None) or f"Org {org_id}"
+
+    # Ensure Stripe Customer exists
+    customer_id = getattr(org, "stripe_customer_id", None)
+    if not customer_id:
+        email = getattr(org, "billing_email", None) or getattr(org, "contact_email", None)
+        customer = stripe.Customer.create(  # type: ignore[attr-defined]
+            name=org_name,
+            email=email,
+            metadata={"cei_org_id": str(org_id) if org_id is not None else ""},
+        )
+        customer_id = customer["id"]
+        if hasattr(org, "stripe_customer_id"):
+            try:
+                setattr(org, "stripe_customer_id", customer_id)
+                db.add(org)
+                db.commit()
+            except Exception:
+                logger.exception("Failed to persist stripe_customer_id for org %s", org_id)
+
+    # Store price IDs on org for future quantity updates
+    if hasattr(org, "stripe_base_price_id"):
+        org.stripe_base_price_id = base_price_id
+    if hasattr(org, "stripe_site_price_id"):
+        org.stripe_site_price_id = per_site_price_id
+    try:
+        db.add(org)
+        db.commit()
+    except Exception:
+        logger.exception("Failed to persist price IDs for org %s", org_id)
+
+    # Build line items
+    line_items = [
+        {
+            "price":    base_price_id,
+            "quantity": 1,
+        },
+    ]
+    # Only add per-site line item if there are sites
+    # (quantity=0 is not allowed by Stripe)
+    if params.site_count > 0:
+        line_items.append({
+            "price":    per_site_price_id,
+            "quantity": params.site_count,
+        })
+
+    session = stripe.checkout.Session.create(  # type: ignore[attr-defined]
+        mode="subscription",
+        payment_method_types=["card"],
+        customer=customer_id,
+        line_items=line_items,
+        success_url=params.success_url,
+        cancel_url=params.cancel_url,
+        metadata={
+            "cei_org_id":         str(org_id) if org_id is not None else "",
+            "cei_plan_key":       plan_key,
+            "cei_org_type":       params.org_type,
+            "cei_site_count":     str(params.site_count),
+        },
+        subscription_data={
+            "metadata": {
+                "cei_org_id":   str(org_id) if org_id is not None else "",
+                "cei_plan_key": plan_key,
+            }
+        },
+    )
+
+    logger.info(
+        "Created hybrid checkout session for org_id=%s plan=%s sites=%s session=%s",
+        org_id, plan_key, params.site_count, session["id"],
+    )
+    return CheckoutSessionResult(url=session["url"])

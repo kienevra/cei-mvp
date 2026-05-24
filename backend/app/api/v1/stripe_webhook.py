@@ -204,7 +204,39 @@ def _handle_checkout_completed(db: Session, session_obj: Dict[str, Any]) -> None
             stripe_subscription_id=session_obj.get("subscription"),
         ),
     )
-
+    # Set billing_cycle_anchor and store per-site subscription item ID
+    try:
+        import stripe as _stripe
+        from app.services.billing_service import STRIPE_PRICES
+        from datetime import datetime, timezone
+        sub_id = session_obj.get("subscription")
+        if sub_id:
+            sub = _stripe.Subscription.retrieve(sub_id, expand=["items"])
+            period_start = sub.get("current_period_start")
+            if period_start and hasattr(org, "billing_cycle_anchor"):
+                org.billing_cycle_anchor = datetime.fromtimestamp(
+                    period_start, tz=timezone.utc
+                )
+            org_type = metadata.get("cei_org_type", "standalone")
+            site_price = (
+                STRIPE_PRICES["manager_per_site"]
+                if org_type == "managing"
+                else STRIPE_PRICES["standalone_per_site"]
+            )
+            for item in sub.get("items", {}).get("data", []):
+                if item.get("price", {}).get("id") == site_price:
+                    if hasattr(org, "stripe_site_subscription_item_id"):
+                        org.stripe_site_subscription_item_id = item["id"]
+                    break
+            site_count = int(metadata.get("cei_site_count", "0"))
+            if hasattr(org, "billed_site_count"):
+                org.billed_site_count = site_count
+            db.add(org)
+            db.commit()
+    except Exception:
+        logger.exception(
+            "Failed to set billing_cycle_anchor for org_id=%s", org_id
+        )
 
 def _handle_subscription_event(
     db: Session,

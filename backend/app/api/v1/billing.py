@@ -424,3 +424,72 @@ def create_billing_portal_session_v2(
         "provider": "stripe",
         "portal_url": result.url,
     }
+
+# ---------------------------------------------------------------------------
+# Hybrid checkout — base fee + per-site fee
+# ---------------------------------------------------------------------------
+
+class HybridCheckoutIn(BaseModel):
+    success_url: str
+    cancel_url: str
+
+
+@router.post(
+    "/hybrid-checkout-session",
+    status_code=status.HTTP_200_OK,
+    summary="Create hybrid checkout session (base fee + per-site fee)",
+)
+def create_hybrid_checkout(
+    payload: HybridCheckoutIn,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Creates a Stripe Checkout session with two line items:
+      1. Base fee — flat monthly fee (EUR 89 standalone / EUR 149 manager)
+      2. Per-site fee — EUR 59/site (standalone) or EUR 39/site (manager)
+
+    The site count is computed automatically from the org's current sites.
+    Owner-only.
+    """
+    require_owner(user, message="Owner-only. Only an org owner can manage subscriptions.")
+
+    cfg = get_stripe_config()
+    if not cfg.enabled:
+        return {"provider": "stripe", "checkout_url": None}
+
+    org = _get_org_for_user(db, user)
+
+    # Compute current site count
+    from app.services.billing_service import count_billable_sites
+    site_count = count_billable_sites(org, db)
+
+    from app.services.stripe_billing import HybridCheckoutParams, create_hybrid_checkout_session
+    params = HybridCheckoutParams(
+        org_type=org.org_type,
+        site_count=site_count,
+        success_url=payload.success_url,
+        cancel_url=payload.cancel_url,
+    )
+
+    try:
+        result = create_hybrid_checkout_session(db, org, params)
+    except RuntimeError as e:
+        logger.warning("Stripe runtime error during hybrid checkout: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        logger.exception("Unexpected error creating hybrid checkout: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error creating Stripe checkout session.",
+        )
+
+    return {
+        "provider": "stripe",
+        "checkout_url": result.url,
+        "site_count": site_count,
+        "org_type": org.org_type,
+    }
