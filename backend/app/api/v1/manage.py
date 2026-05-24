@@ -1313,6 +1313,10 @@ def _apply_link(db: Session, req: OrgLinkRequest) -> None:
     req.status = "accepted"
     req.updated_at = datetime.utcnow()
     managing_org = db.get(Organization, req.managing_org_id)
+    # Billing: schedule suspension of client org's standalone subscription
+    from app.services.billing_service import schedule_subscription_suspension, queue_site_count_for_next_cycle
+    schedule_subscription_suspension(client_org, db)
+    queue_site_count_for_next_cycle(managing_org, db)
     notify(
         db,
         org_id=req.client_org_id,

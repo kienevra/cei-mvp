@@ -277,20 +277,30 @@ def _handle_invoice_paid(db: Session, invoice_obj: Dict[str, Any]) -> None:
             current_status,
         )
         return
-
+    # Clear billing grace period if active
+    try:
+        from app.services.billing_service import clear_payment_grace_period
+        clear_payment_grace_period(org, db)
+    except Exception:
+        logger.exception("billing_service.clear_payment_grace_period failed for org_id=%s", getattr(org, "id", None))
     # Keep existing plan key — don't overwrite with None
     existing_plan = getattr(org, "subscription_plan_key", None)
-
     _apply_org_plan_update(
         db,
         org,
         OrgPlanUpdate(
             plan_key=existing_plan,
-            status="active",
+            status="past_due",
             stripe_customer_id=customer_id,
             stripe_subscription_id=invoice_obj.get("subscription"),
         ),
     )
+    # Start billing grace period
+    try:
+        from app.services.billing_service import start_payment_grace_period
+        start_payment_grace_period(org, db)
+    except Exception:
+        logger.exception("billing_service.start_payment_grace_period failed for org_id=%s", getattr(org, "id", None))
 
 
 def _handle_invoice_payment_failed(

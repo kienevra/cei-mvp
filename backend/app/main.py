@@ -102,14 +102,21 @@ app = FastAPI(
 @app.on_event("startup")
 async def _start_scheduler():
     from app.services.digest_email import send_daily_digest_job
+    from app.tasks.billing_jobs import run_billing_cycle_checks
     _scheduler.add_job(
         send_daily_digest_job,
         CronTrigger(hour=7, minute=0, timezone="UTC"),
         id="daily_digest",
         replace_existing=True,
     )
+    _scheduler.add_job(
+        run_billing_cycle_checks,
+        CronTrigger(hour=2, minute=0, timezone="UTC"),
+        id="billing_cycle_checks",
+        replace_existing=True,
+    )
     _scheduler.start()
-    logger.info("APScheduler started — daily digest fires at 07:00 UTC")
+    logger.info("APScheduler started — daily digest 07:00 UTC, billing checks 02:00 UTC")
 
 @app.on_event("shutdown")
 async def _stop_scheduler():

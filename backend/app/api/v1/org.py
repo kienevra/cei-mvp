@@ -604,6 +604,10 @@ def org_accept_link_request(
     req.status = "accepted"
     req.updated_at = datetime.utcnow()
     managing_org = db.get(Organization, req.managing_org_id)
+    # Billing: schedule suspension of client org's standalone subscription
+    from app.services.billing_service import schedule_subscription_suspension, queue_site_count_for_next_cycle
+    schedule_subscription_suspension(client_org, db)
+    queue_site_count_for_next_cycle(managing_org, db)
     notify(
         db,
         org_id=req.managing_org_id,
@@ -744,7 +748,15 @@ def unlink_from_consultant(
 
     org.org_type = "standalone"
     org.managed_by_org_id = None
+    org.org_type = "standalone"
     db.add(org)
+    # Billing: reactivate client subscription + start 1-month grace period
+    from app.services.billing_service import reactivate_subscription, queue_site_count_for_next_cycle
+    reactivate_subscription(org, db)
+    if managing_org_id:
+        managing_org_obj = db.get(Organization, managing_org_id)
+        if managing_org_obj:
+            queue_site_count_for_next_cycle(managing_org_obj, db)
     if managing_org_id:
         notify(
             db,
