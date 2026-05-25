@@ -540,7 +540,11 @@ def create_timeseries_batch(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No organization associated with this credential",
         )
-
+    # Soft lock check — block ingestion for locked orgs
+    _org = db.query(__import__("app.models", fromlist=["Organization"]).Organization).filter_by(id=org_id).first()
+    if _org:
+        from app.api.deps import check_soft_lock
+        check_soft_lock(_org, method="POST")
     # Convert Pydantic models to plain dicts before handing off to the service.
     records = [r.to_ingest_dict(request_timezone=payload.timezone) for r in payload.records]
 

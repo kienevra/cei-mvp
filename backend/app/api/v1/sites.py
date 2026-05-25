@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.core.security import get_current_user, get_org_context, OrgContext
-from app.models import Site, User, TimeseriesRecord
+from app.models import Site, User, TimeseriesRecord, Organization
 
 # These are still coming from the shim in your repo. Leaving as-is to avoid regressions.
 from app.db.models import SiteEvent, AlertEvent
@@ -187,7 +187,11 @@ def create_site(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User is not attached to an organization; cannot create site.",
         )
-
+    # Soft lock check — block site creation for locked orgs
+    _org = db.query(Organization).filter(Organization.id == org_id).first()
+    if _org:
+        from app.api.deps import check_soft_lock
+        check_soft_lock(_org, method="POST")
     site = Site(
         org_id=org_id,
         name=payload.name,

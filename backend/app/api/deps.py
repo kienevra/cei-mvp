@@ -146,6 +146,112 @@ def _check_managing_org_subscription(org: Organization) -> None:
             },
         )
 
+# ---------------------------------------------------------------------------
+# Soft lock enforcement
+# ---------------------------------------------------------------------------
+
+SOFT_LOCK_ALLOWED_ROUTES = {
+    # Billing — allow resubscribe
+    "/api/v1/billing",
+    # Auth — allow login/logout
+    "/api/v1/auth",
+    # Notifications — allow reading
+    "/api/v1/notifications",
+    # Account — allow reading own profile
+    "/api/v1/account/me",
+}
+
+WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def check_soft_lock(
+    org: Organization,
+    method: str = "POST",
+    *,
+    allow_reads: bool = True,
+) -> None:
+    """
+    Raises HTTP 403 if the org is soft-locked and the operation is a write.
+
+    Soft-locked orgs have read-only access:
+    - GET requests always allowed (historical data, compliance docs)
+    - POST/PUT/PATCH/DELETE blocked with clear message
+
+    Call this inside any endpoint that writes data:
+        check_soft_lock(org, request.method)
+    """
+    if not getattr(org, "soft_locked", False):
+        return
+
+    if allow_reads and method.upper() not in WRITE_METHODS:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "code": "ACCOUNT_SOFT_LOCKED",
+            "message": (
+                "Your account is in read-only mode due to an unpaid balance. "
+                "Please subscribe or update your payment method to restore full access."
+            ),
+        },
+    )
+
+
+def check_client_grace(org: Organization) -> None:
+    """
+    Warns (but does not block) if the org is in a post-unlink grace period.
+    The frontend can use the grace_until date to show a banner.
+    This does NOT block operations — grace period orgs have full access.
+    """
+    from datetime import datetime, timezone
+    grace_until = getattr(org, "client_grace_until", None)
+    if not grace_until:
+        return
+    now = datetime.now(timezone.utc)
+    if grace_until > now:
+        # Grace period still active — full access, no block
+        return
+    # Grace period expired — this should have been caught by billing_jobs
+    # but as a safety net, block writes
+    check_soft_lock.__wrapped__ = True  # type: ignore
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "code": "CLIENT_GRACE_EXPIRED",
+            "message": (
+                "Your free access period has expired. "
+                "Please subscribe to a CEI plan or link to an energy manager."
+            ),
+        },
+    )
+
+
+def get_current_org_checked(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> Organization:
+    """
+    Resolves current org and enforces soft lock for the current user.
+    Use as a dependency on any endpoint that writes data.
+
+    Usage:
+        org: Organization = Depends(get_current_org_checked)
+    """
+    org_id = getattr(user, "organization_id", None)
+    if not org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not attached to any organization.",
+        )
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization not found.",
+        )
+    check_soft_lock(org, method="POST")
+    return org
 
 # ---------------------------------------------------------------------------
 # Managing org dependency (Phase 2 + Phase 5 hardened)

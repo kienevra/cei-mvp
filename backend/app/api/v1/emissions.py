@@ -528,7 +528,9 @@ async def get_mrv_report(
     is_manager = site_org.managed_by_org_id == current_user.organization_id
     if not (is_owner or is_manager):
         raise HTTPException(status_code=403, detail="Access denied")
-
+    # Soft lock check — compliance docs are read-only for locked orgs
+    from app.api.deps import check_soft_lock
+    check_soft_lock(site_org, method="POST")
     # 2. Aggregate timeseries
     ts = _aggregate_timeseries_for_period(db, site_id, period_start, period_end)
     if ts["total_kwh"] == 0:
@@ -631,7 +633,8 @@ async def get_ets_statement(
     is_manager = org.managed_by_org_id == current_user.organization_id
     if not (is_owner or is_manager):
         raise HTTPException(status_code=403, detail="Access denied")
-
+    from app.api.deps import check_soft_lock
+    check_soft_lock(org, method="POST")
     # 2. Load all sites for this org
     sites = db.query(Site).filter(Site.org_id == org_id).all()
     if not sites:
@@ -770,7 +773,8 @@ async def get_enpi_report(
     is_manager = site_org.managed_by_org_id == current_user.organization_id
     if not (is_owner or is_manager):
         raise HTTPException(status_code=403, detail="Access denied")
-
+    from app.api.deps import check_soft_lock
+    check_soft_lock(site_org, method="POST")
     calculator = EmissionsCalculator(db)
     country    = getattr(site, "country_code", "IT")
     framework  = getattr(site, "framework",    "EU_ETS")

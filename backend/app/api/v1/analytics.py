@@ -1320,8 +1320,13 @@ async def get_correlation_report(
     org_id, _ = _resolve_org_context_from_ctx(org_ctx)
     site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
     site_numeric = _try_parse_site_numeric_id(site_id_canon)
-
     site = db.query(core_models.Site).filter(core_models.Site.id == site_numeric).first()
+    # Soft lock check
+    if site and org_id:
+        _org = db.query(core_models.Organization).filter(core_models.Organization.id == org_id).first()
+        if _org:
+            from app.api.deps import check_soft_lock
+            check_soft_lock(_org, method="POST")
 
     # Load raw hourly records
     from app.models import TimeseriesRecord
