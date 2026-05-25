@@ -168,8 +168,8 @@ class User(Base):
     # NOTE:
     # You already use int flags. Keep them for backwards compatibility.
     # If you later migrate to Boolean, do it in a dedicated migration.
-    is_active = Column(Integer, default=1, nullable=False)
-    is_superuser = Column(Integer, default=0, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, server_default=sa.true())
+    is_superuser = Column(Boolean, default=False, nullable=False, server_default=sa.false())
 
     # ✅ Cross-DB default
     created_at = Column(DateTime(timezone=True), server_default=DB_NOW, nullable=False)
