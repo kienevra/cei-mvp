@@ -54,3 +54,4 @@ postcss.config.js.bak
 .parcel-cache/
 .vite/
 postcss.config.js.bak
+.vercel
