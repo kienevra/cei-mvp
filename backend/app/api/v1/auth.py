@@ -185,20 +185,27 @@ def create_refresh_token(data: Dict[str, Any]) -> str:
 
 def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     max_age = REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
-    secure_flag = settings.is_prod
+
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
         value=refresh_token,
         httponly=True,
-        secure=secure_flag,
-        samesite="lax",
+        secure=True,
+        samesite="none",
         max_age=max_age,
         path="/",
+        domain=".carbonefficiencyintel.com",
     )
 
 
 def _clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie(REFRESH_COOKIE_NAME, path="/")
+    response.delete_cookie(
+        REFRESH_COOKIE_NAME,
+        path="/",
+        domain=".carbonefficiencyintel.com",
+        samesite="none",
+        secure=True,
+    )
 
 
 def _hash_token(raw: str) -> str:
