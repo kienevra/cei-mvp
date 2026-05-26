@@ -11,6 +11,7 @@ import {
   FiUser,
   FiSettings,
   FiUpload,
+  FiCreditCard,
 } from "react-icons/fi";
 import { useAuth } from "../hooks/useAuth";
 
@@ -41,6 +42,7 @@ const Sidebar: React.FC = () => {
       return [
         { label: t("nav.manage"), path: "/manage", icon: <FiBriefcase /> },
         { label: t("nav.account"), path: "/account", icon: <FiUser /> },
+        { label: t("nav.billing"), path: "/billing", icon: <FiCreditCard /> },
         { label: t("nav.settings"), path: "/settings", icon: <FiSettings /> },
       ];
     }
@@ -49,6 +51,7 @@ const Sidebar: React.FC = () => {
       return [
         { label: t("nav.dashboard"), path: "/", icon: <FiHome /> },
         { label: t("nav.account"), path: "/account", icon: <FiUser /> },
+        { label: t("nav.billing"), path: "/billing", icon: <FiCreditCard /> },
         { label: t("nav.settings"), path: "/settings", icon: <FiSettings /> },
       ];
     }
@@ -59,6 +62,7 @@ const Sidebar: React.FC = () => {
       { label: t("nav.alerts"), path: "/alerts", icon: <FiAlertTriangle /> },
       { label: t("nav.uploadCsv"), path: "/upload", icon: <FiUpload /> },
       { label: t("nav.reports"), path: "/reports", icon: <FiFileText /> },
+      { label: t("nav.billing"), path: "/billing", icon: <FiCreditCard /> },
       { label: t("nav.settings"), path: "/settings", icon: <FiSettings /> },
       { label: t("nav.account"), path: "/account", icon: <FiUser /> },
     ];

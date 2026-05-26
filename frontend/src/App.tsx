@@ -23,6 +23,7 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const ManageDashboard = lazy(() => import("./pages/ManageDashboard"));
 const ManageClientOrg = lazy(() => import("./pages/ManageClientOrg"));
 const ManageClientSiteView = lazy(() => import("./pages/ManageClientSiteView"));
+const Billing = lazy(() => import("./pages/Billing"));
 
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -78,6 +79,17 @@ const App: React.FC = () => (
               <Layout>
                 <ProtectedRoute>
                   <Settings />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          <Route
+            path="/billing"
+            element={
+              <Layout>
+                <ProtectedRoute>
+                  <Billing />
                 </ProtectedRoute>
               </Layout>
             }
