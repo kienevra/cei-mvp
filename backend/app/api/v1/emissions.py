@@ -776,8 +776,8 @@ async def get_enpi_report(
     from app.api.deps import check_soft_lock
     check_soft_lock(site_org, method="POST")
     calculator = EmissionsCalculator(db)
-    country    = getattr(site, "country_code", "IT")
-    framework  = getattr(site, "framework",    "EU_ETS")
+    country    = getattr(site, "country_code", None) or "ITA"
+    framework  = getattr(site, "framework",    None) or "EU_ETS"
     ef_record  = calculator.get_emission_factor(country, "electricity", current_start.year, framework)
     ef_value   = float(ef_record.factor_kg_co2_kwh) if ef_record else 0.280
     ef_source  = f"{ef_record.country_code} {ef_record.framework} {ef_record.valid_year}" if ef_record else "ISPRA 2024"
