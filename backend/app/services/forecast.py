@@ -28,6 +28,36 @@ from app.services.analytics import (
     _as_utc,
 )
 
+# ── Forecast cache (in-memory, TTL = 1 hour) ─────────────────────────────────
+# Avoids re-fitting Prophet on every dashboard load.
+# Cache key: (site_id, horizon_hours, lookback_days, org_id)
+# ML model still trains on full history — results are just reused for 1 hour.
+
+import time
+from typing import Tuple
+
+_forecast_cache: dict = {}
+_CACHE_TTL_SECONDS = 3600  # 1 hour
+
+
+def _cache_key(site_id, horizon_hours, lookback_days, org_id) -> Tuple:
+    return (site_id, horizon_hours, lookback_days, org_id)
+
+
+def _cache_get(key: Tuple):
+    entry = _forecast_cache.get(key)
+    if entry is None:
+        return None
+    result, expires_at = entry
+    if time.time() > expires_at:
+        del _forecast_cache[key]
+        return None
+    return result
+
+
+def _cache_set(key: Tuple, result):
+    _forecast_cache[key] = (result, time.time() + _CACHE_TTL_SECONDS)
+
 logger = logging.getLogger("cei")
 
 # Minimum number of hourly data points required to run Prophet
@@ -121,6 +151,13 @@ def compute_site_forecast_prophet(
     """
     now = as_of or _utcnow()
     now_utc = _as_utc(now)
+
+    # ── Check cache ───────────────────────────────────────────────────────────
+    _key = _cache_key(site_id, horizon_hours, lookback_days, organization_id)
+    cached = _cache_get(_key)
+    if cached is not None:
+        logger.info("Prophet: cache hit for site %s", site_id)
+        return cached
 
     # ── Load historical data ──────────────────────────────────────────────────
     raw_series = _load_site_series(
@@ -270,7 +307,7 @@ def compute_site_forecast_prophet(
             len(points), site_id, len(hourly),
         )
 
-        return {
+        result = {
             "site_id": site_id,
             "history_window_hours": history_window_hours,
             "horizon_hours": horizon_hours,
@@ -285,6 +322,8 @@ def compute_site_forecast_prophet(
                 "low" if is_warming_up else "normal"
             ),
         }
+        _cache_set(_key, result)
+        return result
 
     except ImportError:
         logger.warning("Prophet not installed — falling back to stub_baseline_v1")
