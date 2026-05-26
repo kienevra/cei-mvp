@@ -68,7 +68,7 @@ def leave_organization(
             .filter(
                 User.organization_id == org_id,
                 User.role == "owner",
-                User.is_active == 1,
+                User.is_active == True,
             )
             .count()
         )

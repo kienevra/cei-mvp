@@ -379,7 +379,7 @@ def send_daily_digest(db: Session) -> None:
                     .filter(
                         User.organization_id == org.id,
                         User.role == "owner",
-                        User.is_active == 1,
+                        User.is_active == True,
                     )
                     .first()
                 )

@@ -1084,7 +1084,7 @@ def consultant_initiate_link_request(
     from app.models import User as UserModel
     target_user = db.query(UserModel).filter(
         func.lower(UserModel.email) == payload.target_org_email.lower(),
-        UserModel.is_active == 1,
+        UserModel.is_active == True,
     ).first()
 
     if not target_user or not target_user.organization_id:

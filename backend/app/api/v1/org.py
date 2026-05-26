@@ -460,7 +460,7 @@ def org_initiate_link_request(
     from app.models import User as UserModel
     consultant_user = db.query(UserModel).filter(
         func.lower(UserModel.email) == payload.consultant_email.lower(),
-        UserModel.is_active == 1,
+        UserModel.is_active == True,
     ).first()
  
     if not consultant_user or not consultant_user.organization_id:
