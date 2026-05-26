@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -41,6 +41,10 @@ class BillingPlanPublic(BaseModel):
     name: str
     description: Optional[str] = None
     is_default: bool = False
+    price_monthly_eur: float = 0.0
+    per_site_monthly_eur: float = 0.0
+    max_sites: Optional[int] = None
+    features: List[str] = []
 
 
 class BillingOverviewOut(BaseModel):
@@ -133,16 +137,49 @@ def _get_org_for_user(db: Session, user) -> Organization:
     return org
 
 
-def _build_default_plan_for_now() -> BillingPlanPublic:
+def _build_default_plan_for_now(org_type: str = "standalone") -> BillingPlanPublic:
     """
-    Temporary, hard-coded plan so the UI has something to show
-    until we wire real BillingPlan rows.
+    Returns the correct CEI plan based on org type.
+    Pricing per CEI Pricing Policy — May 2026.
     """
+    if org_type == "managing":
+        return BillingPlanPublic(
+            key="cei-manager",
+            name="CEI Energy Manager",
+            description="Manage your full client portfolio from one dashboard.",
+            is_default=True,
+            price_monthly_eur=149.0,
+            per_site_monthly_eur=39.0,
+            max_sites=None,
+            features=[
+                "€149/month base fee",
+                "€39/site/month (wholesale rate)",
+                "Unlimited client portfolio",
+                "Ghost client creation",
+                "Per-client PDF compliance reports",
+                "Prophet AI energy forecasting",
+                "EU ETS / CBAM compliance tools",
+                "1-month grace period on non-payment",
+            ],
+        )
     return BillingPlanPublic(
         key="cei-starter",
         name="CEI Starter",
-        description="Up to 3 sites, 12-month rolling history, CSV ingestion.",
+        description="Full energy monitoring and decarbonisation intelligence for your facility.",
         is_default=True,
+        price_monthly_eur=89.0,
+        per_site_monthly_eur=59.0,
+        max_sites=None,
+        features=[
+            "€89/month base fee",
+            "€59/site/month",
+            "Unlimited historical data",
+            "Prophet AI energy forecasting",
+            "EU ETS / CBAM compliance reports",
+            "CSV & API data ingestion",
+            "Real-time alerts & diagnostics",
+            "1-month grace period on non-payment",
+        ],
     )
 
 
@@ -175,7 +212,9 @@ def get_billing_overview(
     org_snap = snapshot_org_stripe_state(db, org)
 
     # For now, everyone is on a single "CEI Starter" plan in the UI.
-    current_plan = _build_default_plan_for_now()
+    current_plan = _build_default_plan_for_now(
+        org_type=getattr(org, "org_type", "standalone") or "standalone"
+    )
 
     return BillingOverviewOut(
         org_id=getattr(org, "id", None),
