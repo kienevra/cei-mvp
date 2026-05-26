@@ -200,6 +200,9 @@ def compute_site_forecast_prophet(
             organization_id=organization_id,
         )
 
+    # ── Close DB session before fitting — Prophet takes 30s and holds connections ──
+    db.close()
+
     # ── Fit Prophet model ─────────────────────────────────────────────────────
     try:
         import pandas as pd
