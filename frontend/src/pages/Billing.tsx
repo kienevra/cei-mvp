@@ -12,22 +12,6 @@ import {
 } from "../services/billingApi";
 import { useAuth } from "../hooks/useAuth";
 
-// ── Usage examples ────────────────────────────────────────────────────────────
-
-const STANDALONE_EXAMPLES = [
-  { sites: 1, monthly: 148 },
-  { sites: 2, monthly: 207 },
-  { sites: 3, monthly: 266 },
-  { sites: 5, monthly: 384 },
-];
-
-const MANAGER_EXAMPLES = [
-  { sites: 5,  monthly: 344  },
-  { sites: 10, monthly: 539  },
-  { sites: 20, monthly: 929  },
-  { sites: 30, monthly: 1319 },
-];
-
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function FeatureItem({ text }: { text: string }) {
@@ -36,29 +20,6 @@ function FeatureItem({ text }: { text: string }) {
       <FiCheckCircle style={{ color: "var(--cei-green, #22c55e)", flexShrink: 0, marginTop: "2px" }} />
       {text}
     </li>
-  );
-}
-
-function UsageTable({ examples }: { examples: { sites: number; monthly: number }[] }) {
-  return (
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem", marginTop: "0.5rem" }}>
-      <thead>
-        <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.15)" }}>
-          <th style={{ textAlign: "left", padding: "0.3rem 0.5rem", color: "var(--cei-text-muted, #94a3b8)", fontWeight: 500 }}>Sites</th>
-          <th style={{ textAlign: "right", padding: "0.3rem 0.5rem", color: "var(--cei-text-muted, #94a3b8)", fontWeight: 500 }}>Monthly</th>
-          <th style={{ textAlign: "right", padding: "0.3rem 0.5rem", color: "var(--cei-text-muted, #94a3b8)", fontWeight: 500 }}>Annual</th>
-        </tr>
-      </thead>
-      <tbody>
-        {examples.map(({ sites, monthly }) => (
-          <tr key={sites} style={{ borderBottom: "1px solid rgba(148,163,184,0.07)" }}>
-            <td style={{ padding: "0.35rem 0.5rem", color: "var(--cei-text-main, #e2e8f0)" }}>{sites}</td>
-            <td style={{ padding: "0.35rem 0.5rem", textAlign: "right", color: "var(--cei-green, #22c55e)", fontWeight: 600 }}>€{monthly}</td>
-            <td style={{ padding: "0.35rem 0.5rem", textAlign: "right", color: "var(--cei-text-muted, #94a3b8)" }}>€{monthly * 12}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }
 
@@ -143,7 +104,6 @@ const Billing: React.FC = () => {
   const softLocked = overview ? isSoftLocked(overview) : false;
   const hasStripe  = !!overview?.stripe_subscription_id;
   const plan       = overview?.current_plan;
-  const examples   = isManager ? MANAGER_EXAMPLES : STANDALONE_EXAMPLES;
 
   return (
     <div style={{ padding: "1.5rem 2rem", maxWidth: "900px" }}>
@@ -176,7 +136,7 @@ const Billing: React.FC = () => {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "1rem", maxWidth: "480px" }}>
 
         {/* ── Current plan card ── */}
         <div style={{ border: "2px solid rgba(34,197,94,0.4)", borderRadius: "0.65rem", padding: "1.25rem", background: "rgba(15,23,42,0.5)", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
@@ -252,24 +212,6 @@ const Billing: React.FC = () => {
               </p>
             )}
           </div>
-        </div>
-
-        {/* ── Pricing examples card ── */}
-        <div style={{ border: "1px solid var(--cei-border-subtle, rgba(148,163,184,0.2))", borderRadius: "0.65rem", padding: "1.25rem", background: "rgba(15,23,42,0.5)", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-          <div>
-            <span style={{ fontSize: "0.7rem", fontWeight: 600, color: "var(--cei-text-muted, #94a3b8)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              {t("billing.pricingExamples", "Pricing Examples")}
-            </span>
-            <p style={{ fontSize: "0.75rem", color: "var(--cei-text-muted, #94a3b8)", margin: "0.3rem 0 0" }}>
-              {isManager
-                ? "€149/month base + €39 per site across your full portfolio"
-                : "€89/month base + €59 per connected site"}
-            </p>
-          </div>
-          <UsageTable examples={examples} />
-          <p style={{ fontSize: "0.68rem", color: "var(--cei-text-muted, #94a3b8)", margin: 0, borderTop: "1px solid rgba(148,163,184,0.1)", paddingTop: "0.5rem" }}>
-            {t("billing.noAnnualDiscount", "No annual prepayment discount at launch. Billed monthly. Cancel anytime.")}
-          </p>
         </div>
       </div>
 
