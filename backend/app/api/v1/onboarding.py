@@ -110,6 +110,7 @@ class BootstrapIn(BaseModel):
     """
     # Client org
     client_org_name: str = Field(..., min_length=2, max_length=255, description="Name of the client organization (factory / facility).")
+    contact_email: str = Field(..., description="Mandatory contact email for the ghost client. Used for transition notifications if the manager loses privileges.")
     primary_energy_sources: Optional[str] = Field(default=None, description="Comma-separated e.g. 'electricity,gas'")
     electricity_price_per_kwh: Optional[float] = Field(default=None, ge=0)
     gas_price_per_kwh: Optional[float] = Field(default=None, ge=0)
@@ -252,6 +253,10 @@ def bootstrap_esco(
 
     if existing_client:
         client_org = existing_client
+        # Update contact_email if it was missing
+        if not getattr(client_org, "contact_email", None):
+            client_org.contact_email = payload.contact_email
+            db.flush()
     else:
         # Check client limit
         limit = getattr(managing_org, "client_limit", None)
@@ -286,6 +291,8 @@ def bootstrap_esco(
             subscription_status="active",
             enable_alerts=True,
             enable_reports=True,
+            contact_email=payload.contact_email,
+            is_ghost_client=True,
         )
         db.add(client_org)
         try:
