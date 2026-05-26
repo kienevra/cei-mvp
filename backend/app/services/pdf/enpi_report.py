@@ -99,6 +99,8 @@ def _sector_display(code: str, lang: str) -> str:
         "ceramics": "Ceramica", "cement": "Cemento", "steel": "Acciaio",
         "aluminium": "Alluminio", "glass": "Vetro", "chemicals": "Chimica",
     }
+    if not code:
+        return "—"
     return (it if lang == "it" else en).get(code.lower(), code.title())
 
 

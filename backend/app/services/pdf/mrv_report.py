@@ -70,6 +70,8 @@ def _sector_display(code: str, lang: str) -> str:
         "chemicals":   "Chimica",
     }
     mapping = mapping_it if lang == "it" else mapping_en
+    if not code:
+        return "—"
     return mapping.get(code.lower(), code.title())
 
 
@@ -91,6 +93,8 @@ def _framework_display(code: str, lang: str) -> str:
         "IN_PAT": "India PAT Scheme",
     }
     mapping = mapping_it if lang == "it" else mapping_en
+    if not code:
+        return "—"
     return mapping.get(code.upper(), code)
 
 
