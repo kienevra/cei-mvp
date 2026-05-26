@@ -978,6 +978,7 @@
       "status": {
         "notConnected": "Non collegato"
       },
+      "statusLabel": "Stato:",
       "bullets": {
         "starter": "Starter include avvisi, report e analisi multi-sito.",
         "growth": "Growth (più avanti) aggiunge più org, storico più lungo e supporto con SLA."

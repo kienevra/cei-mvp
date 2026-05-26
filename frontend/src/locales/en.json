@@ -975,6 +975,7 @@
       "manage": "Manage subscription",
       "redirecting": "Redirecting…",
       "opening": "Opening…",
+      "statusLabel": "Status:",
       "status": {
         "notConnected": "Not connected"
       },

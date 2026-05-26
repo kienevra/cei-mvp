@@ -962,7 +962,7 @@ const Account: React.FC = () => {
               <strong>{t("account.subscription.currentPlan")}</strong> {planLabel}
             </div>
             <div style={{ marginTop: "0.2rem" }}>
-              <strong>{t("account.subscription.status")}</strong> {subscriptionStatus}
+              <strong>{t("account.subscription.statusLabel", "Status:")}</strong> {subscriptionStatus}
             </div>
           </div>
 
