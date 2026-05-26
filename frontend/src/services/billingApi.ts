@@ -9,8 +9,10 @@ import api from "./api";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface BillingPlan {
-  plan_key: string;
-  display_name: string;
+  key: string;
+  name: string;
+  description: string | null;
+  is_default: boolean;
   price_monthly_eur: number;
   per_site_monthly_eur: number;
   max_sites: number | null;
