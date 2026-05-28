@@ -98,12 +98,30 @@ class EmissionsResult:
     )
 
     @property
+    def cbam_confidence(self) -> str:
+        """
+        Confidence level for CBAM annual extrapolation.
+        CBAM operates on annual periods — more data = more credible projection.
+        Not a regulatory threshold (none exists in EU 2023/956) but a CEI product signal.
+        """
+        if self.total_kwh <= 0 or self.energy_source is None:
+            return "none"
+        if self.data_window_days < 7:
+            return "none"
+        if self.data_window_days < 30:
+            return "low"
+        if self.data_window_days < 90:
+            return "medium"
+        return "high"
+
+    @property
     def is_cbam_ready(self) -> bool:
-        return (
-            self.data_window_days >= 30
-            and self.total_kwh > 0
-            and self.energy_source is not None
-        )
+        """
+        Returns True if there is enough data to support a credible CBAM
+        annual emissions extrapolation (7+ days of data, energy source configured).
+        Full confidence requires 90+ days — see cbam_confidence for nuance.
+        """
+        return self.cbam_confidence in ("low", "medium", "high")
 
     @property
     def ets_position_label(self) -> str:

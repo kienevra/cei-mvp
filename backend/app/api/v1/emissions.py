@@ -111,6 +111,7 @@ class EmissionsResultOut(BaseModel):
     calculation_method:        str
     factor_source:             Optional[str]
     is_cbam_ready:             bool
+    cbam_confidence:           str   # none | low | medium | high
     calculated_at:             str
 
 
@@ -464,6 +465,7 @@ def calculate_site_emissions(
         calculation_method         = result.calculation_method,
         factor_source              = result.factor_source,
         is_cbam_ready              = result.is_cbam_ready,
+        cbam_confidence            = result.cbam_confidence,
         calculated_at              = result.calculated_at.isoformat(),
     )
 

@@ -499,6 +499,7 @@ export type EmissionsResult = {
   calculation_method: string;
   factor_source: string | null;
   is_cbam_ready: boolean;
+  cbam_confidence: "none" | "low" | "medium" | "high";
   calculated_at: string;
 };
 

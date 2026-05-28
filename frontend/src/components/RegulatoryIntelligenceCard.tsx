@@ -237,8 +237,18 @@ const RegulatoryIntelligenceCard: React.FC<Props> = ({ siteId }) => {
         <KpiChip
           label="CBAM ready"
           value={is_cbam_ready ? "Yes" : "No"}
-          sub={is_cbam_ready ? "Documentation sufficient" : "Configure site emissions"}
-          color={is_cbam_ready ? "#22c55e" : "#f59e0b"}
+          sub={
+            data.cbam_confidence === "high" ? "High confidence — 90+ days data" :
+            data.cbam_confidence === "medium" ? "Medium — 30–89 days data" :
+            data.cbam_confidence === "low" ? "Low confidence — 7–29 days data" :
+            "Configure site emissions"
+          }
+          color={
+            data.cbam_confidence === "high" ? "#22c55e" :
+            data.cbam_confidence === "medium" ? "#22c55e" :
+            data.cbam_confidence === "low" ? "#f59e0b" :
+            "#f59e0b"
+          }
           icon={is_cbam_ready ? <FiCheckCircle /> : <FiInfo />}
         />
       </div>
