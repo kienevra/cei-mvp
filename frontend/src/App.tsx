@@ -6,6 +6,10 @@ import TopNav from "./components/TopNav";
 import Sidebar from "./components/Sidebar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import LoadingSpinner from "./components/LoadingSpinner";
+import SoftLockBanner from "./components/SoftLockBanner";
+import { useAuth } from "./hooks/useAuth";
+import { fetchBillingOverview, isSoftLocked, type BillingOverview } from "./services/billingApi";
+import { useEffect, useState } from "react";
 import "./styles/global.css";
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -27,6 +31,18 @@ const Billing = lazy(() => import("./pages/Billing"));
 
 
 function Layout({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const isOwner = (user as any)?.role === "owner";
+  const [billing, setBilling] = useState<BillingOverview | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchBillingOverview().then(setBilling).catch(() => {});
+  }, [user]);
+
+  const showBanner = billing && isSoftLocked(billing) && !dismissed;
+
   return (
     <div className="flex min-h-screen">
       <div className="sidebar-shell">
@@ -34,6 +50,14 @@ function Layout({ children }: { children: React.ReactNode }) {
       </div>
       <div className="flex-1 flex flex-col">
         <TopNav />
+        {showBanner && (
+          <SoftLockBanner
+            overview={billing}
+            isOwner={isOwner}
+            onDismiss={() => setDismissed(true)}
+            onManageBilling={() => window.location.href = "/billing"}
+          />
+        )}
         <main>{children}</main>
       </div>
     </div>
