@@ -29,6 +29,7 @@ import SiteEnergyChart from "../components/SiteEnergyChart";
 import SiteForecastChart from "../components/SiteForecastChart";
 import ProductionCorrelation from "../components/ProductionCorrelation";
 import ProductionIntegrations from "../components/ProductionIntegrations";
+import RegulatoryIntelligenceCard from "../components/RegulatoryIntelligenceCard";
 
 type SiteRecord = {
   id: number | string;
@@ -343,7 +344,7 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
 
     getSiteForecast(siteKey, {
       history_window_hours: 24,
-      horizon_hours: 24,
+      horizon_hours: 48,
       lookback_days: 30,
     })
       .then((data) => {
@@ -1593,7 +1594,12 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
       {numericSiteId && (
         <SiteConfigPanel siteId={numericSiteId} />
       )}
-
+      {/* Regulatory Intelligence Engine */}
+      {numericSiteId > 0 && (
+        <section style={{ marginTop: "0.75rem" }}>
+          <RegulatoryIntelligenceCard siteId={numericSiteId} />
+        </section>
+      )}
       {/* Opportunities + baseline insights */}
       <section>
         <div className="cei-card">
