@@ -103,6 +103,7 @@ app = FastAPI(
 async def _start_scheduler():
     from app.services.digest_email import send_daily_digest_job
     from app.services.forecast_cache import run_forecast_cache_job
+    from app.services.demo_seed import run_demo_data_topup_job
     from app.tasks.billing_jobs import run_billing_cycle_checks
     _scheduler.add_job(
         send_daily_digest_job,
@@ -122,8 +123,14 @@ async def _start_scheduler():
         id="forecast_cache_refresh",
         replace_existing=True,
     )
+    _scheduler.add_job(
+        run_demo_data_topup_job,
+        CronTrigger(hour=3, minute=0, timezone="UTC"),  # runs daily at 03:00 UTC
+        id="demo_data_topup",
+        replace_existing=True,
+    )
     _scheduler.start()
-    logger.info("APScheduler started — daily digest 07:00 UTC, billing checks 02:00 UTC, forecast cache every hour at :05")
+    logger.info("APScheduler started — daily digest 07:00 UTC, billing checks 02:00 UTC, forecast cache every hour at :05, demo topup 03:00 UTC")
 
 @app.on_event("shutdown")
 async def _stop_scheduler():

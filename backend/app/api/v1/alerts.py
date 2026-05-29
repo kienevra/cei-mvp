@@ -895,7 +895,21 @@ def _persist_alert_events(
                                 )
                         except Exception:
                             pass  # notifications are best-effort
-
+                        # Fire critical alert email (best-effort)
+                        if a.severity == "critical":
+                            try:
+                                from app.services.digest_email import send_critical_alert_email
+                                send_critical_alert_email(
+                                    db=db,
+                                    org_id=organization_id,
+                                    severity=a.severity,
+                                    title=a.title,
+                                    message=a.message,
+                                    site_name=a.site_name,
+                                    site_id=a.site_id,
+                                )
+                            except Exception:
+                                pass  # email is best-effort, never blocks alert persistence
                 # -------------------------
                 # (B) SiteEvent dedupe/insert (timeline) — independent from AlertEvent
                 # -------------------------

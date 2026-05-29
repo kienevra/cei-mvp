@@ -441,3 +441,96 @@ def send_daily_digest_job() -> None:
         logger.exception("send_daily_digest_job failed")
     finally:
         db.close()
+
+# ── Critical alert email ──────────────────────────────────────────────────────
+
+def send_critical_alert_email(
+    db: Session,
+    org_id: int,
+    severity: str,
+    title: str,
+    message: str,
+    site_name: Optional[str],
+    site_id: Optional[str],
+) -> None:
+    """
+    Send a real-time email when a critical alert fires.
+    Only sends if enable_notification_emails=True on the org.
+    Recipients: org billing_email, then owner user emails.
+    """
+    from app.models import Organization, User
+    from app.core.config import settings
+
+    try:
+        org = db.query(Organization).filter(Organization.id == org_id).first()
+        if not org:
+            return
+        if not getattr(org, "enable_notification_emails", True):
+            return
+
+        app_url = (settings.frontend_url or "https://app.carbonefficiencyintel.com").rstrip("/")
+
+        # Collect recipient emails
+        recipients = []
+        billing = getattr(org, "billing_email", None)
+        if billing and "@" in billing:
+            recipients.append(billing.strip())
+        if not recipients:
+            owners = (
+                db.query(User)
+                .filter(User.organization_id == org_id, User.role == "owner", User.is_active == True)
+                .all()
+            )
+            recipients = [u.email for u in owners if u.email]
+
+        if not recipients:
+            logger.warning("send_critical_alert_email: no recipients for org %s", org_id)
+            return
+
+        severity_label = severity.upper()
+        severity_color = "#ef4444" if severity == "critical" else "#f59e0b"
+        site_label = site_name or site_id or "Unknown site"
+        alerts_url = f"{app_url}/alerts"
+
+        subject = f"[CEI {severity_label}] {title} — {site_label}"
+
+        html = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#0f172a;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;">
+    <tr><td align="center" style="padding:32px 16px;">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#1e293b;border-radius:12px;overflow:hidden;">
+        <!-- Header -->
+        <tr><td style="background:{severity_color};padding:20px 32px;">
+          <span style="color:#fff;font-size:13px;font-weight:700;letter-spacing:0.05em;">
+            CEI — {severity_label} ALERT
+          </span>
+        </td></tr>
+        <!-- Body -->
+        <tr><td style="padding:32px;">
+          <h2 style="margin:0 0 8px;color:#f1f5f9;font-size:20px;">{title}</h2>
+          <p style="margin:0 0 16px;color:#94a3b8;font-size:14px;">Site: <strong style="color:#e2e8f0;">{site_label}</strong></p>
+          <div style="background:#0f172a;border-radius:8px;padding:16px;margin-bottom:24px;">
+            <p style="margin:0;color:#cbd5e1;font-size:14px;line-height:1.6;">{message}</p>
+          </div>
+          <a href="{alerts_url}" style="display:inline-block;padding:12px 24px;background:#22c55e;color:#0f172a;font-weight:700;font-size:14px;border-radius:8px;text-decoration:none;">
+            View in CEI →
+          </a>
+        </td></tr>
+        <!-- Footer -->
+        <tr><td style="padding:16px 32px;border-top:1px solid rgba(148,163,184,0.1);">
+          <p style="margin:0;color:#475569;font-size:12px;">
+            CEI — Carbon Efficiency Intelligence · 
+            <a href="{app_url}" style="color:#22c55e;text-decoration:none;">app.carbonefficiencyintel.com</a>
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+        for email in recipients:
+            _send(to_email=email, subject=subject, html=html)
+            logger.info("Critical alert email sent to %s for org %s", email, org_id)
+
+    except Exception:
+        logger.exception("send_critical_alert_email failed for org %s", org_id)
