@@ -582,7 +582,8 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
           .join("\n"),
       });
 
-      // Clear note and refresh timeline
+      // Remove actioned opportunity from list + clear note + refresh timeline
+      setOpportunities((prev) => prev.filter((p) => getOppIdKey(p) !== key));
       setActionNoteByKey((prev) => {
         const next = { ...prev };
         delete next[key];
