@@ -16,6 +16,48 @@ from fastapi import (
     status,
 )
 from fastapi.security import OAuth2PasswordRequestForm
+import re
+
+def _validate_password_strength(password: str) -> None:
+    errors = []
+    if len(password) < 8:
+        errors.append("at least 8 characters")
+    if not re.search(r"[A-Z]", password):
+        errors.append("at least one uppercase letter")
+    if not re.search(r"\d", password):
+        errors.append("at least one digit (0-9)")
+    if not re.search(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>\/?`~]", password):
+        errors.append("at least one special character")
+    if errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Password must contain: {', '.join(errors)}.",
+        )
+import re
+
+def _validate_password_strength(password: str) -> None:
+    """
+    Enforce password policy:
+    - Minimum 8 characters
+    - At least one uppercase letter
+    - At least one digit
+    - At least one special character
+    Raises HTTPException 422 if policy is not met.
+    """
+    errors = []
+    if len(password) < 8:
+        errors.append("at least 8 characters")
+    if not re.search(r"[A-Z]", password):
+        errors.append("at least one uppercase letter")
+    if not re.search(r"\d", password):
+        errors.append("at least one digit (0-9)")
+    if not re.search(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>\/?`~]", password):
+        errors.append("at least one special character (!@#$%^&*...)")
+    if errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Password must contain: {', '.join(errors)}.",
+        )
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field, ConfigDict
@@ -299,6 +341,7 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) 
     db.add(org)
     db.flush()
 
+    _validate_password_strength(str(user.password))
     hashed_password = pwd_context.hash(str(user.password))
     db_user = User(
         email=email_norm,
@@ -373,6 +416,7 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) 
     db.add(org)
     db.flush()
 
+    _validate_password_strength(str(user.password))
     hashed_password = pwd_context.hash(str(user.password))
     db_user = User(email=email_norm, hashed_password=hashed_password,
                    organization_id=org.id)

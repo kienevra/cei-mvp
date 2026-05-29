@@ -256,7 +256,12 @@ const Login: React.FC = () => {
 
       // ── Signup ──
       if (!email || !password) throw new Error(t("auth.errors.emailPasswordRequired", { defaultValue: "Email and password are required." }));
-      if (password.length < 6) throw new Error(t("auth.errors.passwordMinLength", { defaultValue: "Password must be at least 6 characters." }));
+      const pwdErrors: string[] = [];
+      if (password.length < 8) pwdErrors.push("at least 8 characters");
+      if (!/[A-Z]/.test(password)) pwdErrors.push("one uppercase letter");
+      if (!/\d/.test(password)) pwdErrors.push("one digit");
+      if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(password)) pwdErrors.push("one special character");
+      if (pwdErrors.length > 0) throw new Error(`Password must contain: ${pwdErrors.join(", ")}.`);
       if (password !== passwordConfirm) throw new Error(t("auth.errors.passwordsNoMatch", { defaultValue: "Passwords do not match." }));
 
       if (regType === "manager" || regType === "organization") {
