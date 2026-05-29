@@ -301,10 +301,13 @@ const SiteForecastChart: React.FC<Props> = ({ points, method, loading = false })
 
           <XAxis
             dataKey="label"
-            tick={{ fill: "#9ca3af", fontSize: 10.5 }}
+            tick={{ fill: "#9ca3af", fontSize: 10 }}
             axisLine={{ stroke: "rgba(148,163,184,0.1)" }}
             tickLine={false}
-            interval={2}
+            interval={5}
+            angle={-35}
+            textAnchor="end"
+            height={36}
           />
 
           <YAxis
