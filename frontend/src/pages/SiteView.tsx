@@ -29,6 +29,7 @@ import SiteEnergyChart from "../components/SiteEnergyChart";
 import SiteForecastChart from "../components/SiteForecastChart";
 import ProductionCorrelation from "../components/ProductionCorrelation";
 import ProductionIntegrations from "../components/ProductionIntegrations";
+import OpportunityCard from "../components/OpportunityCard";
 import RegulatoryIntelligenceCard from "../components/RegulatoryIntelligenceCard";
 
 type SiteRecord = {
@@ -1659,11 +1660,11 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
             )}
 
             {!oppsLoading && opportunities.length > 0 && (
-              <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "var(--cei-text-main)" }}>
-                <div style={{ fontSize: "0.8rem", fontWeight: 500, marginBottom: "0.25rem" }}>
+              <div style={{ marginTop: "0.75rem" }}>
+                <div style={{ fontSize: "0.8rem", fontWeight: 500, marginBottom: "0.5rem" }}>
                   {t("siteView.opps.modelledMeasures", { defaultValue: "Modelled measures for this site" })}
                 </div>
-                <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.8rem", lineHeight: 1.5 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                   {decisionReadyOpps.map((o, idx) => {
                     const roiYears = isFiniteNumber((o as any)?.simple_roi_years) ? (o as any).simple_roi_years : null;
                     const savingsKwhYr = isFiniteNumber((o as any)?.est_annual_kwh_saved)
@@ -1677,101 +1678,21 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
                     const key = getOppIdKey(o);
 
                     return (
-                      <li key={`${(o as any)?.source || "auto"}-${key}-${idx}`} style={{ marginBottom: "0.55rem" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem" }}>
-                          <div style={{ minWidth: 0 }}>
-                            <strong>
-                              {(o as any)?.source === "manual"
-                                ? t("siteView.opps.manualTag", { defaultValue: "[Manual] " })
-                                : ""}
-                              {(o as any)?.name ?? t("siteView.manualOpp.defaultName", { defaultValue: "Opportunity" })}
-                            </strong>
-                            {(o as any)?.description ? ` – ${(o as any).description}` : ""}
-
-                            <span style={{ display: "block", fontSize: "0.78rem", marginTop: "0.15rem" }}>
-                              {eurYr != null && (
-                                <>
-                                  ≈ <strong>{formatCurrency(eurYr, kpiCurrencyCode)}</strong>{" "}
-                                  {t("siteView.opps.perYear", { defaultValue: "/ year" })}
-                                </>
-                              )}
-
-                              {eurYr == null && savingsKwhYr != null && (
-                                <>
-                                  ≈{" "}
-                                  <strong>
-                                    {savingsKwhYr.toLocaleString(undefined, { maximumFractionDigits: 0 })} kWh/yr
-                                  </strong>{" "}
-                                  {t("siteView.opps.saved", { defaultValue: "saved" })}
-                                </>
-                              )}
-
-                              {roiYears != null && (
-                                <>
-                                  {" "}
-                                  · {t("siteView.opps.roi", { defaultValue: "simple ROI" })} ~{" "}
-                                  <strong>{roiYears.toFixed(1)} yrs</strong>
-                                </>
-                              )}
-
-                              {co2 != null && (
-                                <>
-                                  {" "}
-                                  · {t("siteView.opps.co2Cut", { defaultValue: "CO₂ cut" })} ~{" "}
-                                  <strong>{co2.toFixed(2)} tCO₂/yr</strong>
-                                </>
-                              )}
-                            </span>
-
-                            <div style={{ marginTop: "0.35rem", display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                              <input
-                                type="text"
-                                value={actionNoteByKey[key] || ""}
-                                onChange={(e) =>
-                                  setActionNoteByKey((prev) => ({ ...prev, [key]: e.target.value }))
-                                }
-                                placeholder={t("siteView.opps.actionNotePlaceholder", {
-                                  defaultValue: "Optional note (who/when/what changed)…",
-                                })}
-                                style={{
-                                  flex: "1 1 280px",
-                                  minWidth: 220,
-                                  padding: "0.45rem 0.6rem",
-                                  borderRadius: "0.5rem",
-                                  border: "1px solid rgba(148, 163, 184, 0.5)",
-                                  backgroundColor: "rgba(15,23,42,0.9)",
-                                  color: "var(--cei-text-main)",
-                                  fontSize: "0.82rem",
-                                }}
-                              />
-
-                              <button
-                                type="button"
-                                className="cei-btn cei-btn-primary"
-                                onClick={() => handleMarkOpportunityActioned(o)}
-                                disabled={actionSavingKey === key}
-                                style={{ fontSize: "0.78rem", padding: "0.35rem 0.85rem" }}
-                                title={t("siteView.opps.markActionedTooltip", {
-                                  defaultValue: "Logs an action event into the site timeline for auditability.",
-                                })}
-                              >
-                                {actionSavingKey === key
-                                  ? t("common.savingEllipsis", { defaultValue: "Saving…" })
-                                  : t("siteView.opps.markActioned", { defaultValue: "Mark as actioned" })}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div style={{ flex: "0 0 auto", textAlign: "right" }}>
-                            <span className="cei-pill cei-pill-neutral" style={{ fontSize: "0.7rem" }}>
-                              {t("siteView.opps.rank", { defaultValue: "Rank #{{n}}", n: idx + 1 })}
-                            </span>
-                          </div>
-                        </div>
-                      </li>
+                      <OpportunityCard
+                        key={`${(o as any)?.source || "auto"}-${key}-${idx}`}
+                        opp={o}
+                        rank={idx + 1}
+                        eurPerYear={eurYr}
+                        kpiCurrencyCode={kpiCurrencyCode}
+                        actionNote={actionNoteByKey[key] || ""}
+                        actionSaving={actionSavingKey === key}
+                        onActionNoteChange={(val) => setActionNoteByKey((prev) => ({ ...prev, [key]: val }))}
+                        onMarkActioned={() => handleMarkOpportunityActioned(o)}
+                        formatCurrency={formatCurrency}
+                      />
                     );
                   })}
-                </ul>
+                </div>
               </div>
             )}
           </div>
