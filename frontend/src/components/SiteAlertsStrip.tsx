@@ -454,9 +454,9 @@ const SiteAlertsStrip: React.FC<SiteAlertsStripProps> = ({
                             fontSize: "0.72rem",
                             padding: "0.2rem 0.6rem",
                             borderRadius: "999px",
-                            border:
-                              "1px solid rgba(148,163,184,0.7)",
-                            background: "rgba(15,23,42,0.9)",
+                            border: "1px solid #d97706",
+                            background: "rgba(180,83,9,0.3)",
+                            color: "#ffffff",
                             cursor: isUpdating ? "default" : "pointer",
                             opacity: isUpdating ? 0.7 : 1,
                           }}
