@@ -152,11 +152,21 @@ def compute_site_forecast_prophet(
     now = as_of or _utcnow()
     now_utc = _as_utc(now)
 
-    # ── Check cache ───────────────────────────────────────────────────────────
+    # ── Check DB cache first (background job pre-computes hourly) ─────────────
+    if organization_id is not None:
+        try:
+            from app.services.forecast_cache import get_cached_forecast
+            db_cached = get_cached_forecast(db, site_id, organization_id, horizon_hours, lookback_days)
+            if db_cached is not None:
+                return db_cached
+        except Exception as _cache_exc:
+            logger.warning("Forecast DB cache read failed: %s", _cache_exc)
+
+    # ── Check in-memory cache ─────────────────────────────────────────────────
     _key = _cache_key(site_id, horizon_hours, lookback_days, organization_id)
     cached = _cache_get(_key)
     if cached is not None:
-        logger.info("Prophet: cache hit for site %s", site_id)
+        logger.info("Prophet: memory cache hit for site %s", site_id)
         return cached
 
     # ── Load historical data ──────────────────────────────────────────────────
@@ -326,6 +336,13 @@ def compute_site_forecast_prophet(
             ),
         }
         _cache_set(_key, result)
+        # Write to DB cache for background serving
+        if organization_id is not None:
+            try:
+                from app.services.forecast_cache import set_cached_forecast
+                set_cached_forecast(db, site_id, organization_id, horizon_hours, lookback_days, result)
+            except Exception as _write_exc:
+                logger.warning("Forecast DB cache write failed: %s", _write_exc)
         return result
 
     except ImportError:
