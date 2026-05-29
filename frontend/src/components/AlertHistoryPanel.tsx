@@ -222,13 +222,14 @@ export const AlertHistoryPanel: React.FC<{
                       {row.status !== "ack" && (
                         <button
                           type="button"
-                          className="px-2 py-1 rounded-md border border-amber-600 text-amber-200 hover:bg-amber-900/40"
+                          className="px-2 py-1 rounded-md"
+                          style={{ color: "#ffffff", background: "rgba(180,83,9,0.3)", border: "1px solid #d97706" }}
                           disabled={updatingId === row.id}
                           onClick={() =>
                             handleStatusChange(row.id, "ack")
                           }
                         >
-                          Ack
+                          Mark ack
                         </button>
                       )}
                       {row.status !== "resolved" && (
