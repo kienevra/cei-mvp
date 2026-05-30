@@ -15,7 +15,9 @@ from app.models import (
     SiteEvent, AlertEvent, IntegrationToken, OrgInvite, Subscription,
 )
 
+import logging
 router = APIRouter(prefix="/org", tags=["org"])
+logger = logging.getLogger("cei")
 
 
 def _now_utc() -> datetime:
