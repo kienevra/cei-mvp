@@ -132,6 +132,7 @@ const Login: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState<boolean>(false);
   
 
   // Redirect if already authenticated
@@ -237,6 +238,7 @@ const Login: React.FC = () => {
           organization_name: organizationName.trim() || undefined,
           org_type: regType === "manager" ? "managing" : "standalone",
           ui_lang: localStorage.getItem("cei_lang") || undefined,
+          terms_accepted: termsAccepted,
         });
         // Login to get token
         await login({ username: email, password });
@@ -474,7 +476,29 @@ const Login: React.FC = () => {
                 <input id="passwordConfirm" type="password" autoComplete="new-password" placeholder={t("auth.fields.passwordConfirm.placeholder", { defaultValue: "••••••••" })} value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} required style={inputStyle} />
               </div>
 
-              <button type="submit" className="cei-btn cei-btn-primary" disabled={submitting} style={{ width: "100%", marginTop: "0.4rem", opacity: submitting ? 0.85 : 1 }}>
+              {/* Terms acceptance checkbox */}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", margin: "0.5rem 0" }}>
+                <input
+                  id="termsAccepted"
+                  type="checkbox"
+                  checked={termsAccepted}
+                  onChange={(e) => setTermsAccepted(e.target.checked)}
+                  style={{ marginTop: "3px", flexShrink: 0, cursor: "pointer" }}
+                />
+                <label htmlFor="termsAccepted" style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", lineHeight: 1.5, cursor: "pointer" }}>
+                  I have read and agree to the{" "}
+                  <a href="/terms" target="_blank" style={{ color: "var(--cei-text-accent)", textDecoration: "none" }}>Terms of Service</a>
+                  {" "}and{" "}
+                  <a href="/privacy" target="_blank" style={{ color: "var(--cei-text-accent)", textDecoration: "none" }}>Privacy Policy</a>
+                </label>
+              </div>
+
+              <button
+                type="submit"
+                className="cei-btn cei-btn-primary"
+                disabled={submitting || !termsAccepted}
+                style={{ width: "100%", marginTop: "0.4rem", opacity: (submitting || !termsAccepted) ? 0.6 : 1 }}
+              >
                 {submitting
                   ? (regType === "manager" ? t("signup.selfSignup.creatingManagerBtn", { defaultValue: "Creating consultant account…" }) : t("signup.selfSignup.creatingOrgBtn", { defaultValue: "Creating account…" }))
                   : (regType === "manager" ? t("signup.selfSignup.createManagerBtn", { defaultValue: "Create consultant account" }) : t("signup.selfSignup.createOrgBtn", { defaultValue: "Create account" }))}

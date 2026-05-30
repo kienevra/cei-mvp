@@ -287,6 +287,7 @@ class UserCreate(BaseModel):
     organization_name: Optional[str] = None
     org_type: Optional[str] = None  # "managing" or "standalone"
     ui_lang: Optional[str] = None   # "it" or "en" from CEI UI toggle
+    terms_accepted: Optional[bool] = None  # must be True to register
 
 @router.get("/test-email")
 def test_email():
@@ -336,8 +337,15 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
 
     _validate_password_strength(str(user.password))
     hashed_password = pwd_context.hash(str(user.password))
+    from datetime import datetime, timezone
+    if not user.terms_accepted:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "TERMS_NOT_ACCEPTED", "message": "You must accept the Terms of Service and Privacy Policy to register."},
+        )
     db_user = User(email=email_norm, hashed_password=hashed_password,
                    organization_id=org.id)
+    db_user.terms_accepted_at = datetime.now(timezone.utc)
     try:
         db_user.role = "owner"
     except Exception:

@@ -178,6 +178,7 @@ class User(Base):
     # Stored in DB as "owner" | "member". Default is "member".
     role = Column(String, nullable=False, server_default=text("'member'"))
     full_name = Column(String(255), nullable=True)
+    terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
 
     organization = relationship("Organization", back_populates="users")
     subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")

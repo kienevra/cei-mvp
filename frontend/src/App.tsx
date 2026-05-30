@@ -16,6 +16,8 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const SitesList = lazy(() => import("./pages/SitesList"));
 const SiteView = lazy(() => import("./pages/SiteView"));
 const Login = lazy(() => import("./pages/Login"));
+const Privacy = lazy(() => import("./pages/Privacy"));
+const Terms = lazy(() => import("./pages/Terms"));
 const Account = lazy(() => import("./pages/Account"));
 const Settings = lazy(() => import("./pages/Settings"));
 const CSVUpload = lazy(() => import("./pages/CSVUpload"));
@@ -73,6 +75,8 @@ const App: React.FC = () => (
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/terms" element={<Terms />} />
 
           {/* Protected app routes â€” accessible to all org types */}
           <Route
