@@ -12,6 +12,7 @@ from fastapi import (
     Cookie,
     Depends,
     HTTPException,
+    Request,
     Response,
     status,
 )
@@ -380,7 +381,7 @@ class UserCreate(BaseModel):
 
 
 @router.post("/signup", response_model=Token, dependencies=[Depends(login_rate_limit)])
-def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) -> Token:
+def signup(user: UserCreate, response: Response, request: Request, db: Session = Depends(get_db)) -> Token:
     """Self-serve signup. Creates org + owner user."""
     email_norm = (user.email or "").strip().lower()
     if not email_norm:
@@ -435,6 +436,17 @@ def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) 
 
     create_org_audit_event(db, org_id=org.id, user_id=getattr(db_user, "id", None),
                            title="Organization created", description=f"name={org.name}; owner={email_norm}")
+
+    try:
+        from app.services.digest_email import send_welcome_email
+        send_welcome_email(
+            to_email=email_norm,
+            org_name=org.name,
+            org_type=org.org_type or "standalone",
+            accept_language=request.headers.get("accept-language"),
+        )
+    except Exception:
+        pass  # best-effort — never blocks signup
 
     access = create_access_token({"sub": db_user.email})
     refresh = create_refresh_token({"sub": db_user.email})
