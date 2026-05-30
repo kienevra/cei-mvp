@@ -597,18 +597,14 @@ def send_welcome_email(
     org_name: str,
     org_type: str,
     accept_language: Optional[str] = None,
+    full_name: Optional[str] = None,
 ) -> None:
     """
-    Send a welcome email to a new org owner with the appropriate playbook attached.
+    Send a personalised welcome email to a new org owner with the appropriate
+    playbook attached.
 
     Called immediately after successful signup in auth.py.
     Best-effort — never raises, never blocks signup.
-
-    Args:
-        to_email: User's email address
-        org_name: Name of the organization just created
-        org_type: 'managing' (consultant) or 'standalone' (factory)
-        accept_language: Accept-Language header from the signup request
     """
     from app.core.config import settings
 
@@ -616,121 +612,163 @@ def send_welcome_email(
         lang = _detect_lang(accept_language)
         app_url = (settings.frontend_url or "https://app.carbonefficiencyintel.com").rstrip("/")
 
-        is_consultant = org_type == "managing"
+        # ── Personalisation ───────────────────────────────────────────────────
+        # Use first name if available, fall back to org name
+        first_name = None
+        if full_name and full_name.strip():
+            first_name = full_name.strip().split()[0]
 
         if lang == "it":
-            subject = f"Benvenuto in CEI — Carbon Efficiency Intelligence"
-            role_label = "consulente energetico / ESCO" if is_consultant else "organizzazione"
-            cta_label = "Accedi alla piattaforma"
-            playbook_label = "La tua guida CEI completa è allegata a questa email."
-            body_line1 = f"Il tuo account per <strong>{org_name}</strong> è pronto."
-            body_line2 = (
-                "La tua dashboard Gestione portfolio è attiva. Puoi iniziare ad aggiungere organizzazioni clienti e configurare la diagnostica energetica gratuita di 30 giorni."
-                if is_consultant else
-                "La tua dashboard è attiva. Puoi iniziare a caricare dati energetici tramite CSV o token di integrazione e attivare il monitoraggio in tempo reale."
+            greeting_name = first_name or org_name
+            greeting = f"Salve {greeting_name},"
+            subject = "Benvenuto in CEI — Carbon Efficiency Intelligence"
+            body = (
+                "Voglio darle il benvenuto personalmente in CEI. "
+                "La sua dashboard è attiva. "
+                "In allegato trova il manuale completo sulla piattaforma e le sue funzionalità."
             )
-            next_steps_title = "Prossimi passi"
-            next_steps = (
-                [
-                    "Aggiungi la tua prima organizzazione cliente dalla dashboard Gestione",
-                    "Carica i dati energetici del cliente (bollette CSV o token API)",
-                    "Attiva la diagnostica gratuita di 30 giorni",
-                    "Configura il Motore di Intelligenza Normativa (ETS/CBAM)",
-                ]
-                if is_consultant else
-                [
-                    "Crea il tuo primo sito dalla pagina Siti",
-                    "Carica dati energetici tramite CSV o configura un token di integrazione",
-                    "Esplora la dashboard energia e gli avvisi automatici",
-                    "Configura il Motore di Intelligenza Normativa per la tua posizione ETS",
-                ]
-            )
+            contact_line = "Per qualsiasi problema non esiti a contattarci all'indirizzo"
+            regards = "Cordiali saluti,"
+            founder_title = "Fondatore: CEI — Carbon Efficiency Intelligence"
         else:
+            greeting_name = first_name or org_name
+            greeting = f"Hello {greeting_name},"
             subject = "Welcome to CEI — Carbon Efficiency Intelligence"
-            role_label = "energy consultant / ESCO" if is_consultant else "organization"
-            cta_label = "Access the platform"
-            playbook_label = "Your complete CEI guide is attached to this email."
-            body_line1 = f"Your account for <strong>{org_name}</strong> is ready."
-            body_line2 = (
-                "Your portfolio management dashboard is live. You can start adding client organizations and running the free 30-day energy diagnostic."
-                if is_consultant else
-                "Your dashboard is live. You can start uploading energy data via CSV or integration token and activate real-time monitoring."
+            body = (
+                "I want to personally welcome you to CEI. "
+                "Your dashboard is live. "
+                "Attached to this email is a manual on how to use the platform and its various functionalities."
             )
-            next_steps_title = "Next steps"
-            next_steps = (
-                [
-                    "Add your first client organization from the Manage dashboard",
-                    "Upload client energy data (CSV bills or API token)",
-                    "Activate the free 30-day diagnostic",
-                    "Configure the Regulatory Intelligence Engine (ETS/CBAM)",
-                ]
-                if is_consultant else
-                [
-                    "Create your first site from the Sites page",
-                    "Upload energy data via CSV or configure an integration token",
-                    "Explore the energy dashboard and automatic alerts",
-                    "Configure the Regulatory Intelligence Engine for your ETS position",
-                ]
-            )
+            contact_line = "If you ever run into any problems feel free to contact us at"
+            regards = "Kind regards,"
+            founder_title = "Fondatore: CEI — Carbon Efficiency Intelligence"
 
-        steps_html = "".join(
-            f'<li style="margin-bottom:6px;color:#cbd5e1;font-size:14px;">{s}</li>'
-            for s in next_steps
+        support_email = "support@carbonefficiencyintel.com"
+        site_url = "https://carbonefficiencyintel.com"
+
+        # ── Plain-text fallback ───────────────────────────────────────────────
+        text_body = (
+            f"{greeting}\n\n"
+            f"{body}\n\n"
+            f"{contact_line} {support_email}\n\n"
+            f"{regards}\n"
+            f"Leon Miriti\n"
+            f"{founder_title}\n"
+            f"{site_url}\n"
         )
 
-        html = f"""<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#0f172a;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;">
-    <tr><td align="center" style="padding:32px 16px;">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#1e293b;border-radius:12px;overflow:hidden;">
-        <!-- Header -->
-        <tr><td style="background:linear-gradient(135deg,#22c55e,#16a34a);padding:28px 32px;">
-          <div style="color:#0f172a;font-size:22px;font-weight:700;letter-spacing:0.05em;">CEI</div>
-          <div style="color:#0f172a;font-size:12px;margin-top:2px;opacity:0.8;">Carbon Efficiency Intelligence</div>
-        </td></tr>
+        # ── HTML body ─────────────────────────────────────────────────────────
+        html_body = f"""<!DOCTYPE html>
+<html lang="{lang}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background:#f4f6f8;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:40px 0;">
+    <tr><td align="center">
+      <table width="580" cellpadding="0" cellspacing="0"
+             style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);max-width:580px;width:100%;">
+
+        <!-- Header bar -->
+        <tr>
+          <td style="background:#0f4c35;padding:24px 40px;">
+            <span style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:0.02em;">
+              CEI
+            </span>
+            <span style="color:#4ade80;font-size:18px;font-weight:300;"> · </span>
+            <span style="color:#a7f3d0;font-size:13px;">Carbon Efficiency Intelligence</span>
+          </td>
+        </tr>
+
         <!-- Body -->
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 8px;color:#f1f5f9;font-size:20px;">{"Benvenuto" if lang == "it" else "Welcome"} 👋</h2>
-          <p style="margin:0 0 16px;color:#94a3b8;font-size:14px;">{body_line1}</p>
-          <p style="margin:0 0 24px;color:#cbd5e1;font-size:14px;line-height:1.6;">{body_line2}</p>
-          <h3 style="margin:0 0 12px;color:#f1f5f9;font-size:15px;">{next_steps_title}</h3>
-          <ol style="margin:0 0 24px;padding-left:20px;">{steps_html}</ol>
-          <div style="background:#0f172a;border-radius:8px;padding:14px;margin-bottom:24px;border:1px solid rgba(34,197,94,0.3);">
-            <p style="margin:0;color:#86efac;font-size:13px;">📎 {playbook_label}</p>
-          </div>
-          <a href="{app_url}" style="display:inline-block;padding:12px 28px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#0f172a;font-weight:700;font-size:14px;border-radius:8px;text-decoration:none;">
-            {cta_label} →
-          </a>
-        </td></tr>
+        <tr>
+          <td style="padding:40px 40px 32px;">
+
+            <p style="margin:0 0 20px;font-size:16px;color:#111827;font-weight:400;line-height:1.5;">
+              {greeting}
+            </p>
+
+            <p style="margin:0 0 20px;font-size:15px;color:#374151;line-height:1.7;">
+              {body}
+            </p>
+
+            <p style="margin:0 0 32px;font-size:15px;color:#374151;line-height:1.7;">
+              {contact_line}
+              <a href="mailto:{support_email}"
+                 style="color:#0f4c35;font-weight:600;text-decoration:none;">
+                {support_email}
+              </a>.
+            </p>
+
+            <!-- CTA button -->
+            <table cellpadding="0" cellspacing="0" style="margin:0 0 40px;">
+              <tr>
+                <td style="background:#0f4c35;border-radius:6px;">
+                  <a href="{app_url}"
+                     style="display:inline-block;padding:13px 28px;color:#ffffff;
+                            font-size:14px;font-weight:600;text-decoration:none;
+                            letter-spacing:0.01em;">
+                    {"Accedi alla piattaforma" if lang == "it" else "Access your dashboard"} →
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Signature -->
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="border-top:1px solid #e5e7eb;padding-top:24px;">
+                  <p style="margin:0 0 4px;font-size:14px;color:#374151;">{regards}</p>
+                  <p style="margin:0 0 2px;font-size:14px;font-weight:700;color:#111827;">Leon Miriti</p>
+                  <p style="margin:0 0 2px;font-size:13px;color:#6b7280;">{founder_title}</p>
+                  <p style="margin:0;font-size:13px;">
+                    <a href="{site_url}" style="color:#0f4c35;text-decoration:none;">
+                      carbonefficiencyintel.com
+                    </a>
+                  </p>
+                </td>
+              </tr>
+            </table>
+
+          </td>
+        </tr>
+
         <!-- Footer -->
-        <tr><td style="padding:16px 32px;border-top:1px solid rgba(148,163,184,0.1);">
-          <p style="margin:0;color:#475569;font-size:12px;">
-            CEI — Carbon Efficiency Intelligence ·
-            <a href="{app_url}" style="color:#22c55e;text-decoration:none;">app.carbonefficiencyintel.com</a>
-          </p>
-        </td></tr>
+        <tr>
+          <td style="background:#f9fafb;padding:16px 40px;border-top:1px solid #e5e7eb;">
+            <p style="margin:0;font-size:11px;color:#9ca3af;">
+              © 2026 Carbon Efficiency Intelligence ·
+              <a href="{app_url}/account" style="color:#9ca3af;">{"Gestisci notifiche" if lang == "it" else "Manage notifications"}</a>
+            </p>
+          </td>
+        </tr>
+
       </table>
     </td></tr>
   </table>
-</body></html>"""
+</body>
+</html>"""
 
-        text_body = f"Welcome to CEI — {org_name} is ready. Access your dashboard at {app_url}"
-
-        # Load playbook attachment
+        # ── Attachment ────────────────────────────────────────────────────────
         attachment = _get_playbook_attachment(org_type, lang)
         attachments = [attachment] if attachment else None
 
+        # ── Send ──────────────────────────────────────────────────────────────
         from app.core.email import send_email
         send_email(
             to_email=to_email,
             subject=subject,
             text_body=text_body,
-            html_body=html,
+            html_body=html_body,
             attachments=attachments,
         )
 
-        logger.info("Welcome email sent to %s org_type=%s lang=%s attachment=%s",
-                    to_email, org_type, lang, attachment["filename"] if attachment else "none")
+        logger.info(
+            "Welcome email sent to %s org_type=%s lang=%s attachment=%s",
+            to_email, org_type, lang,
+            attachments[0]["filename"] if attachments else "none",
+        )
 
     except Exception:
         logger.exception("send_welcome_email failed for %s", to_email)

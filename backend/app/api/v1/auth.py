@@ -365,8 +365,9 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
         send_welcome_email(
             to_email=email_norm,
             org_name=org.name,
-            org_type=org.org_type or "standalone",
+            org_type=getattr(org, "org_type", None) or (user.org_type if hasattr(user, "org_type") else "standalone"),
             accept_language=request.headers.get("accept-language"),
+            full_name=getattr(db_user, "full_name", None),
         )
     except Exception:
         logger.exception("send_welcome_email failed for %s", email_norm)
