@@ -380,18 +380,18 @@ class UserCreate(BaseModel):
     org_type: Optional[str] = None  # "managing" or "standalone"
 
 @router.get("/test-email")
-def test_email(current_user: User = Depends(get_current_user)):
+def test_email():
     """Temporary debug endpoint — remove after testing."""
     import traceback
     try:
         from app.core.email import send_email
         send_email(
-            to_email=current_user.email,
-            subject="CEI email test",
+            to_email="leonnjiru@gmail.com",
+            subject="CEI email test from Render",
             text_body="Test from Render",
             html_body="<p>Test from Render</p>",
         )
-        return {"status": "sent", "to": current_user.email}
+        return {"status": "sent"}
     except Exception as e:
         return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
 
