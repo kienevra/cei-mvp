@@ -556,7 +556,7 @@ export async function uploadCsv(formData: FormData, opts?: { siteId?: string }) 
 }
 
 export async function deleteAccount() {
-  const r = await api.delete("/account/me");
+  const r = await api.delete("/org/account");
   return r.data;
 }
 

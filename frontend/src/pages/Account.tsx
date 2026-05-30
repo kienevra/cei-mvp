@@ -454,6 +454,8 @@ const Account: React.FC = () => {
     try {
       await deleteAccount();
       setDeleteSuccess(true);
+      localStorage.removeItem("cei_token");
+      window.location.href = "/login?reason=account_deleted";
     } catch (e: any) {
       setError(toUiError(e, t("account.errors.deleteFailed")));
     } finally {
