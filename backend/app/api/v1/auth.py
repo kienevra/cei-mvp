@@ -358,10 +358,8 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
         from app.services.digest_email import send_welcome_email
         # UI language takes priority over browser Accept-Language header
         accept_lang = request.headers.get("accept-language")
-        logger.info("DEBUG signup: ui_lang=%r accept_lang=%r", user.ui_lang, accept_lang)
         if user.ui_lang and user.ui_lang.strip().lower() in ("it", "en"):
             accept_lang = user.ui_lang.strip().lower()
-        logger.info("DEBUG signup: final accept_lang=%r", accept_lang)
         send_welcome_email(
             to_email=email_norm,
             org_name=org.name,

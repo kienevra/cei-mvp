@@ -557,7 +557,6 @@ def _get_playbook_attachment(org_type: str, lang: str) -> Optional[dict]:
     Load the correct playbook file and return a Resend attachment dict.
     Returns None if the file cannot be found.
     """
-    logger.info("DEBUG _get_playbook_attachment: org_type=%r lang=%r", org_type, lang)
     import base64
     import os
 
@@ -770,7 +769,6 @@ def send_welcome_email(
             to_email, org_type, lang,
             attachments[0]["filename"] if attachments else "none",
         )
-        logger.info("DEBUG playbook: org_type=%r lang=%r", org_type, lang)
 
     except Exception:
         logger.exception("send_welcome_email failed for %s", to_email)
