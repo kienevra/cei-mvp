@@ -477,7 +477,7 @@ const Login: React.FC = () => {
               </div>
 
               {/* Terms acceptance checkbox */}
-              <div style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", margin: "0.5rem 0" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", margin: "0.5rem 0", gridColumn: "1 / -1" }}>
                 <input
                   id="termsAccepted"
                   type="checkbox"
