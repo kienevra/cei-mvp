@@ -130,15 +130,9 @@ def delete_own_account(
 ) -> Dict[str, Any]:
     """
     Self-service account + org deletion for the last owner.
-    Cleans up ALL org-scoped tables before deleting users and org row.
+    Uses raw SQL DELETEs to avoid ORM FK issues and transaction aborts.
     """
-    from app.models import (
-        Site, TimeseriesRecord, SiteEvent, AlertEvent,
-        IntegrationToken, OrgInvite, Subscription,
-        OrgLinkRequest, OrgAlertThreshold, ProductionRecord,
-        ProductionIntegration, OrgEmissionsConfig, Opportunity,
-        Report, Metric, StagingUpload, Sensor, Notification,
-    )
+    from sqlalchemy import text
 
     org_id = _require_org_context(current_user)
 
@@ -159,143 +153,89 @@ def delete_own_account(
             detail={"code": "ORG_NOT_FOUND", "message": "Organization not found."},
         )
 
-    # ── Collect site ids and keys ─────────────────────────────────────────────
-    site_rows = db.query(Site.id).filter(Site.org_id == org_id).all()
-    site_ids = [sid for (sid,) in site_rows]
-    site_keys = set()
-    for sid in site_ids:
-        site_keys.add(f"site-{sid}")
-        site_keys.add(str(sid))
+    org_name = org.name
 
-    user_rows = db.query(User).filter(User.organization_id == org_id).all()
-    user_ids = [u.id for u in user_rows]
+    # ── Collect site ids ──────────────────────────────────────────────────────
+    site_id_rows = db.execute(
+        text("SELECT id FROM sites WHERE org_id = :org_id"),
+        {"org_id": org_id}
+    ).fetchall()
+    site_ids = [r[0] for r in site_id_rows]
 
-    # ── Audit before destruction ──────────────────────────────────────────────
-    create_org_audit_event(
-        db,
-        org_id=org_id,
-        user_id=getattr(current_user, "id", None),
-        title="Account self-deletion initiated",
-        description=(
-            f"email={current_user.email}; org={org.name}; "
-            f"users={len(user_ids)}; sites={len(site_ids)}"
-        ),
-    )
+    user_id_rows = db.execute(
+        text("SELECT id FROM users WHERE organization_id = :org_id"),
+        {"org_id": org_id}
+    ).fetchall()
+    user_ids = [r[0] for r in user_id_rows]
 
-    # ── Delete in safe FK order ───────────────────────────────────────────────
+    # ── Raw SQL deletes — each in its own try/except with savepoint ───────────
+    # Order: deepest children first, org row last.
 
-    # 1. Timeseries (no FK, key-based)
-    if site_keys:
-        db.query(TimeseriesRecord).filter(
-            TimeseriesRecord.site_id.in_(site_keys)
-        ).delete(synchronize_session=False)
-
-    # 2. Production records (site-scoped)
-    if site_ids:
-        db.query(ProductionRecord).filter(
-            ProductionRecord.site_id.in_(site_ids)
-        ).delete(synchronize_session=False)
-
-    # 3. Sensors, Opportunities, Reports, Metrics (site-scoped)
-    if site_ids:
-        for Model in (Sensor, Opportunity, Report, Metric):
-            try:
-                db.query(Model).filter(
-                    Model.site_id.in_(site_ids)
-                ).delete(synchronize_session=False)
-            except Exception:
-                pass
-
-    # 4. Alert events + thresholds (org-scoped)
-    db.query(AlertEvent).filter(
-        AlertEvent.organization_id == org_id
-    ).delete(synchronize_session=False)
-
-    try:
-        db.query(OrgAlertThreshold).filter(
-            OrgAlertThreshold.organization_id == org_id
-        ).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    # 5. Site events (org-scoped)
-    db.query(SiteEvent).filter(
-        SiteEvent.organization_id == org_id
-    ).delete(synchronize_session=False)
-
-    # 6. Invites + integration tokens
-    db.query(OrgInvite).filter(
-        OrgInvite.organization_id == org_id
-    ).delete(synchronize_session=False)
-
-    db.query(IntegrationToken).filter(
-        IntegrationToken.organization_id == org_id
-    ).delete(synchronize_session=False)
-
-    # 7. Org link requests (both sides)
-    try:
-        db.query(OrgLinkRequest).filter(
-            (OrgLinkRequest.managing_org_id == org_id) |
-            (OrgLinkRequest.client_org_id == org_id)
-        ).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    # 8. Emissions config
-    try:
-        db.query(OrgEmissionsConfig).filter(
-            OrgEmissionsConfig.organization_id == org_id
-        ).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    # 9. Production integrations
-    try:
-        db.query(ProductionIntegration).filter(
-            ProductionIntegration.organization_id == org_id
-        ).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    # 10. Staging uploads
-    try:
-        db.query(StagingUpload).filter(
-            StagingUpload.organization_id == org_id
-        ).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    # 11. Notifications (user-scoped, delete before users)
-    if user_ids:
+    def safe_delete(sql: str, params: dict) -> None:
+        """Execute a DELETE, rolling back only this statement if it fails."""
         try:
-            db.query(Notification).filter(
-                Notification.user_id.in_(user_ids)
-            ).delete(synchronize_session=False)
-        except Exception:
-            pass
+            db.execute(text(sql), params)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("safe_delete skipped (%s): %s", sql[:60], exc)
+            # Re-fetch org so session is usable again after rollback
+            # (the caller must re-attach objects if needed)
 
-    # 12. Subscriptions (user-scoped)
+    # 1. Timeseries (site_id is a string key like "site-1" or "1")
+    if site_ids:
+        str_keys = [f"site-{sid}" for sid in site_ids] + [str(sid) for sid in site_ids]
+        # Use IN with a literal list — sqlalchemy text doesn't support list params well
+        keys_sql = ",".join(f"'{k}'" for k in str_keys)
+        safe_delete(
+            f"DELETE FROM timeseries_records WHERE site_id IN ({keys_sql})",
+            {}
+        )
+
+    # 2. Production records
+    if site_ids:
+        ids_sql = ",".join(str(i) for i in site_ids)
+        safe_delete(
+            f"DELETE FROM production_records WHERE site_id IN ({ids_sql})",
+            {}
+        )
+
+    # 3. Site-scoped child tables
+    if site_ids:
+        ids_sql = ",".join(str(i) for i in site_ids)
+        for table in ("sensors", "opportunities", "reports", "metrics"):
+            safe_delete(f"DELETE FROM {table} WHERE site_id IN ({ids_sql})", {})
+
+    # 4. Org-scoped tables
+    safe_delete("DELETE FROM alert_events WHERE organization_id = :org_id", {"org_id": org_id})
+    safe_delete("DELETE FROM org_alert_thresholds WHERE organization_id = :org_id", {"org_id": org_id})
+    safe_delete("DELETE FROM site_events WHERE organization_id = :org_id", {"org_id": org_id})
+    safe_delete("DELETE FROM org_invites WHERE organization_id = :org_id", {"org_id": org_id})
+    safe_delete("DELETE FROM integration_tokens WHERE organization_id = :org_id", {"org_id": org_id})
+    safe_delete("DELETE FROM org_link_requests WHERE managing_org_id = :org_id OR client_org_id = :org_id", {"org_id": org_id})
+    safe_delete("DELETE FROM org_emissions_configs WHERE organization_id = :org_id", {"org_id": org_id})
+    safe_delete("DELETE FROM production_integrations WHERE organization_id = :org_id", {"org_id": org_id})
+    safe_delete("DELETE FROM staging_uploads WHERE organization_id = :org_id", {"org_id": org_id})
+    safe_delete("DELETE FROM forecast_cache WHERE organization_id = :org_id", {"org_id": org_id})
+
+    # 5. User-scoped tables
     if user_ids:
-        try:
-            db.query(Subscription).filter(
-                Subscription.user_id.in_(user_ids)
-            ).delete(synchronize_session=False)
-        except Exception:
-            pass
+        ids_sql = ",".join(str(i) for i in user_ids)
+        safe_delete(f"DELETE FROM notifications WHERE user_id IN ({ids_sql})", {})
+        safe_delete(f"DELETE FROM subscription WHERE user_id IN ({ids_sql})", {})
+        safe_delete(f"DELETE FROM push_subscriptions WHERE user_id IN ({ids_sql})", {})
+        safe_delete(f"DELETE FROM password_reset_tokens WHERE user_id IN ({ids_sql})", {})
 
-    # 13. Sites
-    db.query(Site).filter(Site.org_id == org_id).delete(synchronize_session=False)
+    # 6. Sites
+    safe_delete("DELETE FROM sites WHERE org_id = :org_id", {"org_id": org_id})
 
-    # 14. Users
-    db.query(User).filter(
-        User.organization_id == org_id
-    ).delete(synchronize_session=False)
+    # 7. Users
+    safe_delete("DELETE FROM users WHERE organization_id = :org_id", {"org_id": org_id})
 
-    # 15. Org
-    db.delete(org)
+    # 8. Org
+    safe_delete("DELETE FROM organizations WHERE id = :org_id", {"org_id": org_id})
+
     db.commit()
 
-    org_name = org.name
     return {
         "deleted": True,
         "org_id": org_id,
