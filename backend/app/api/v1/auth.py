@@ -20,23 +20,6 @@ from fastapi.security import OAuth2PasswordRequestForm
 import re
 
 def _validate_password_strength(password: str) -> None:
-    errors = []
-    if len(password) < 8:
-        errors.append("at least 8 characters")
-    if not re.search(r"[A-Z]", password):
-        errors.append("at least one uppercase letter")
-    if not re.search(r"\d", password):
-        errors.append("at least one digit (0-9)")
-    if not re.search(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>\/?`~]", password):
-        errors.append("at least one special character")
-    if errors:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Password must contain: {', '.join(errors)}.",
-        )
-import re
-
-def _validate_password_strength(password: str) -> None:
     """
     Enforce password policy:
     - Minimum 8 characters
@@ -295,81 +278,6 @@ def _require_owner(user: User) -> None:
 # Signup
 # ---------------------------------------------------------------------------
 
-class UserCreate(BaseModel):
-    email: str
-    password: str
-    full_name: Optional[str] = None
-    organization_name: Optional[str] = None
-    primary_energy_sources: Optional[str] = None
-    electricity_price_per_kwh: Optional[float] = None
-    gas_price_per_kwh: Optional[float] = None
-    currency_code: Optional[str] = None
-
-
-@router.post(
-    "/signup",
-    response_model=Token,
-    dependencies=[Depends(login_rate_limit)],
-)
-def signup(user: UserCreate, response: Response, db: Session = Depends(get_db)) -> Token:
-    """Self-serve signup — creates org + owner account."""
-    email_norm = (user.email or "").strip().lower()
-    if not email_norm:
-        raise HTTPException(status_code=400, detail="Email is required")
-    if db.query(User).filter(User.email == email_norm).first():
-        raise HTTPException(status_code=400, detail="Email already registered")
-
-    org_name = (user.organization_name or "").strip()
-    if not org_name:
-        org_name = email_norm.split("@")[0] + " Org"
-
-    if db.query(Organization).filter(Organization.name == org_name).first():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "ORG_NAME_TAKEN", "message": "Organization name already exists."},
-        )
-
-    org = Organization(
-        name=org_name,
-        plan_key="cei-starter",
-        subscription_plan_key="cei-starter",
-        subscription_status="active",
-        enable_alerts=True,
-        enable_reports=True,
-    )
-    # Tariff config set later via Account settings
-
-    db.add(org)
-    db.flush()
-
-    _validate_password_strength(str(user.password))
-    hashed_password = pwd_context.hash(str(user.password))
-    db_user = User(
-        email=email_norm,
-        hashed_password=hashed_password,
-        organization_id=org.id,
-        role="owner",
-    )
-    if user.full_name:
-        db_user.full_name = user.full_name
-
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-
-    create_org_audit_event(
-        db,
-        org_id=org.id,
-        user_id=getattr(db_user, "id", None),
-        title="Organization created",
-        description=f"name={org.name}; owner_email={db_user.email}",
-    )
-
-    access = create_access_token({"sub": db_user.email})
-    refresh = create_refresh_token({"sub": db_user.email})
-    _set_refresh_cookie(response, refresh)
-    return Token(access_token=access, token_type="bearer")
-
 
 
 class UserCreate(BaseModel):
@@ -384,12 +292,12 @@ def test_email():
     """Temporary debug endpoint — remove after testing."""
     import traceback
     try:
-        from app.core.email import send_email
-        send_email(
+        from app.services.digest_email import send_welcome_email
+        send_welcome_email(
             to_email="leonnjiru@gmail.com",
-            subject="CEI email test from Render",
-            text_body="Test from Render",
-            html_body="<p>Test from Render</p>",
+            org_name="Test Org",
+            org_type="managing",
+            accept_language="en-US,en;q=0.9",
         )
         return {"status": "sent"}
     except Exception as e:
