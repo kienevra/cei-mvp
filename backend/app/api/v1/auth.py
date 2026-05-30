@@ -323,14 +323,7 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
         )
 
     org = Organization(name=org_name)
-    # Set org_type if provided
-    try:
-        if user.org_type == "managing":
-            org.org_type = "managing"
-        else:
-            org.org_type = "standalone"
-    except Exception:
-        pass
+    org.org_type = "managing" if user.org_type == "managing" else "standalone"
     for k, v in [("plan_key", "cei-starter"), ("subscription_plan_key", "cei-starter"),
                  ("enable_alerts", True), ("enable_reports", True), ("subscription_status", "active")]:
         try:
