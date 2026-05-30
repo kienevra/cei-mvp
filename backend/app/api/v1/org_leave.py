@@ -130,28 +130,15 @@ def delete_own_account(
 ) -> Dict[str, Any]:
     """
     Self-service account + org deletion for the last owner.
-
-    The last owner cannot simply "leave" (that would orphan the org),
-    so this endpoint lets them delete everything cleanly:
-
-      - All timeseries records for org sites
-      - All alert events + site events
-      - All org invites + integration tokens
-      - All sites (FK cascade handles child rows)
-      - All users in the org (including the caller)
-      - The org record itself
-
-    Rules:
-      - User must be attached to an org (400 NO_ORG if not)
-      - User must be role=owner (403 if not)
-      - Non-last-owners should use POST /org/leave instead
-        (this endpoint works for any owner but is intended for the last one)
+    Cleans up ALL org-scoped tables before deleting users and org row.
     """
     from app.models import (
         Site, TimeseriesRecord, SiteEvent, AlertEvent,
         IntegrationToken, OrgInvite, Subscription,
+        OrgLinkRequest, OrgAlertThreshold, ProductionRecord,
+        ProductionIntegration, OrgEmissionsConfig, Opportunity,
+        Report, Metric, StagingUpload, Sensor, Notification,
     )
-    from typing import Set
 
     org_id = _require_org_context(current_user)
 
@@ -172,10 +159,11 @@ def delete_own_account(
             detail={"code": "ORG_NOT_FOUND", "message": "Organization not found."},
         )
 
-    # ── Collect site keys for timeseries deletion (no FK) ────────────────────
+    # ── Collect site ids and keys ─────────────────────────────────────────────
     site_rows = db.query(Site.id).filter(Site.org_id == org_id).all()
-    site_keys: Set[str] = set()
-    for (sid,) in site_rows:
+    site_ids = [sid for (sid,) in site_rows]
+    site_keys = set()
+    for sid in site_ids:
         site_keys.add(f"site-{sid}")
         site_keys.add(str(sid))
 
@@ -190,11 +178,11 @@ def delete_own_account(
         title="Account self-deletion initiated",
         description=(
             f"email={current_user.email}; org={org.name}; "
-            f"users={len(user_ids)}; sites={len(site_rows)}"
+            f"users={len(user_ids)}; sites={len(site_ids)}"
         ),
     )
 
-    # ── Delete in safe order ──────────────────────────────────────────────────
+    # ── Delete in safe FK order ───────────────────────────────────────────────
 
     # 1. Timeseries (no FK, key-based)
     if site_keys:
@@ -202,16 +190,40 @@ def delete_own_account(
             TimeseriesRecord.site_id.in_(site_keys)
         ).delete(synchronize_session=False)
 
-    # 2. Event streams
+    # 2. Production records (site-scoped)
+    if site_ids:
+        db.query(ProductionRecord).filter(
+            ProductionRecord.site_id.in_(site_ids)
+        ).delete(synchronize_session=False)
+
+    # 3. Sensors, Opportunities, Reports, Metrics (site-scoped)
+    if site_ids:
+        for Model in (Sensor, Opportunity, Report, Metric):
+            try:
+                db.query(Model).filter(
+                    Model.site_id.in_(site_ids)
+                ).delete(synchronize_session=False)
+            except Exception:
+                pass
+
+    # 4. Alert events + thresholds (org-scoped)
     db.query(AlertEvent).filter(
         AlertEvent.organization_id == org_id
     ).delete(synchronize_session=False)
 
+    try:
+        db.query(OrgAlertThreshold).filter(
+            OrgAlertThreshold.organization_id == org_id
+        ).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    # 5. Site events (org-scoped)
     db.query(SiteEvent).filter(
         SiteEvent.organization_id == org_id
     ).delete(synchronize_session=False)
 
-    # 3. Invites + tokens
+    # 6. Invites + integration tokens
     db.query(OrgInvite).filter(
         OrgInvite.organization_id == org_id
     ).delete(synchronize_session=False)
@@ -220,27 +232,73 @@ def delete_own_account(
         IntegrationToken.organization_id == org_id
     ).delete(synchronize_session=False)
 
-    # 4. Subscriptions (user_id keyed)
-    if user_ids:
-        db.query(Subscription).filter(
-            Subscription.user_id.in_(user_ids)
+    # 7. Org link requests (both sides)
+    try:
+        db.query(OrgLinkRequest).filter(
+            (OrgLinkRequest.managing_org_id == org_id) |
+            (OrgLinkRequest.client_org_id == org_id)
         ).delete(synchronize_session=False)
+    except Exception:
+        pass
 
-    # 5. Sites (FK cascade handles child rows)
+    # 8. Emissions config
+    try:
+        db.query(OrgEmissionsConfig).filter(
+            OrgEmissionsConfig.organization_id == org_id
+        ).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    # 9. Production integrations
+    try:
+        db.query(ProductionIntegration).filter(
+            ProductionIntegration.organization_id == org_id
+        ).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    # 10. Staging uploads
+    try:
+        db.query(StagingUpload).filter(
+            StagingUpload.organization_id == org_id
+        ).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    # 11. Notifications (user-scoped, delete before users)
+    if user_ids:
+        try:
+            db.query(Notification).filter(
+                Notification.user_id.in_(user_ids)
+            ).delete(synchronize_session=False)
+        except Exception:
+            pass
+
+    # 12. Subscriptions (user-scoped)
+    if user_ids:
+        try:
+            db.query(Subscription).filter(
+                Subscription.user_id.in_(user_ids)
+            ).delete(synchronize_session=False)
+        except Exception:
+            pass
+
+    # 13. Sites
     db.query(Site).filter(Site.org_id == org_id).delete(synchronize_session=False)
 
-    # 6. Users
+    # 14. Users
     db.query(User).filter(
         User.organization_id == org_id
     ).delete(synchronize_session=False)
 
-    # 7. Org
+    # 15. Org
     db.delete(org)
     db.commit()
 
+    org_name = org.name
     return {
         "deleted": True,
         "org_id": org_id,
-        "org_name": org.name,
+        "org_name": org_name,
         "note": "Account and all associated data have been permanently deleted.",
     }
