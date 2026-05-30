@@ -71,6 +71,7 @@ def _send_resend(
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "User-Agent": "curl/7.88.1",
         },
     )
 
