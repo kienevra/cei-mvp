@@ -477,27 +477,29 @@ const Login: React.FC = () => {
               </div>
 
               {/* Terms acceptance checkbox */}
-              <div style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", margin: "0.5rem 0", gridColumn: "1 / -1" }}>
-                <input
-                  id="termsAccepted"
-                  type="checkbox"
-                  checked={termsAccepted}
-                  onChange={(e) => setTermsAccepted(e.target.checked)}
-                  style={{ marginTop: "3px", flexShrink: 0, cursor: "pointer" }}
-                />
-                <label htmlFor="termsAccepted" style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", lineHeight: 1.5, cursor: "pointer" }}>
-                  I have read and agree to the{" "}
-                  <a href="/terms" target="_blank" style={{ color: "var(--cei-text-accent)", textDecoration: "none" }}>Terms of Service</a>
-                  {" "}and{" "}
-                  <a href="/privacy" target="_blank" style={{ color: "var(--cei-text-accent)", textDecoration: "none" }}>Privacy Policy</a>
-                </label>
+              <div style={{ gridColumn: "1 / -1", width: "100%" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", margin: "0.5rem 0" }}>
+                  <input
+                    id="termsAccepted"
+                    type="checkbox"
+                    checked={termsAccepted}
+                    onChange={(e) => setTermsAccepted(e.target.checked)}
+                    style={{ marginTop: "3px", flexShrink: 0, cursor: "pointer" }}
+                  />
+                  <label htmlFor="termsAccepted" style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", lineHeight: 1.5, cursor: "pointer" }}>
+                    I have read and agree to the{" "}
+                    <a href="/terms" target="_blank" style={{ color: "var(--cei-text-accent)", textDecoration: "none" }}>Terms of Service</a>
+                    {" "}and{" "}
+                    <a href="/privacy" target="_blank" style={{ color: "var(--cei-text-accent)", textDecoration: "none" }}>Privacy Policy</a>
+                  </label>
+                </div>
               </div>
 
               <button
                 type="submit"
                 className="cei-btn cei-btn-primary"
                 disabled={submitting || !termsAccepted}
-                style={{ width: "100%", marginTop: "0.4rem", opacity: (submitting || !termsAccepted) ? 0.6 : 1 }}
+                style={{ width: "100%", marginTop: "0.4rem", opacity: (submitting || !termsAccepted) ? 0.6 : 1, gridColumn: "1 / -1" }}
               >
                 {submitting
                   ? (regType === "manager" ? t("signup.selfSignup.creatingManagerBtn", { defaultValue: "Creating consultant account…" }) : t("signup.selfSignup.creatingOrgBtn", { defaultValue: "Creating account…" }))
