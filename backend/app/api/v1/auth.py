@@ -446,7 +446,7 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
             accept_language=request.headers.get("accept-language"),
         )
     except Exception:
-        pass  # best-effort — never blocks signup
+        logger.exception("send_welcome_email failed for %s", email_norm)
 
     access = create_access_token({"sub": db_user.email})
     refresh = create_refresh_token({"sub": db_user.email})
