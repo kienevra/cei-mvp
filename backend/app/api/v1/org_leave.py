@@ -172,7 +172,7 @@ def delete_own_account(
         site_keys.add(str(sid))
 
     user_rows = db.query(User).filter(User.organization_id == org_id).all()
-    user_ids = [r[0] for r in user_rows]
+    user_ids = [u.id for u in user_rows]
 
     def safe_orm_delete(query_fn):
         """Run a delete query using a savepoint so failures don't abort the transaction."""
