@@ -246,7 +246,11 @@ def offboard_organization(
         db.query(IntegrationToken).filter(IntegrationToken.organization_id == target_org_id).delete(synchronize_session=False)
 
         # 4) Delete subscriptions for org users (Subscription is user_id keyed)
-        db.query(Subscription).filter(Subscription.organization_id == target_org_id).delete(synchronize_session=False)
+        from sqlalchemy import text as _text
+        try:
+            db.execute(_text("DELETE FROM subscription WHERE organization_id = :org_id"), {"org_id": target_org_id})
+        except Exception:
+            pass
 
         # 5) Delete sites (FK cascade should handle child rows)
         db.query(Site).filter(Site.org_id == target_org_id).delete(synchronize_session=False)
