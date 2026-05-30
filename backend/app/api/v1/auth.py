@@ -286,6 +286,7 @@ class UserCreate(BaseModel):
     full_name: Optional[str] = None
     organization_name: Optional[str] = None
     org_type: Optional[str] = None  # "managing" or "standalone"
+    ui_lang: Optional[str] = None   # "it" or "en" from CEI UI toggle
 
 @router.get("/test-email")
 def test_email():
@@ -355,11 +356,15 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
 
     try:
         from app.services.digest_email import send_welcome_email
+        # UI language takes priority over browser Accept-Language header
+        accept_lang = request.headers.get("accept-language")
+        if user.ui_lang and user.ui_lang.strip().lower() in ("it", "en"):
+            accept_lang = user.ui_lang.strip().lower()
         send_welcome_email(
             to_email=email_norm,
             org_name=org.name,
             org_type=getattr(org, "org_type", None) or (user.org_type if hasattr(user, "org_type") else "standalone"),
-            accept_language=request.headers.get("accept-language"),
+            accept_language=accept_lang,
             full_name=getattr(db_user, "full_name", None),
         )
     except Exception:

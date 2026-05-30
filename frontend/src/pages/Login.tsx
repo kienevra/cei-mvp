@@ -236,6 +236,7 @@ const Login: React.FC = () => {
           full_name: fullName.trim() || undefined,
           organization_name: organizationName.trim() || undefined,
           org_type: regType === "manager" ? "managing" : "standalone",
+          ui_lang: localStorage.getItem("cei_lang") || undefined,
         });
         // Login to get token
         await login({ username: email, password });
