@@ -272,7 +272,7 @@ def delete_own_account(
         ).delete(synchronize_session=False))
 
         safe_orm_delete(lambda: db.query(Subscription).filter(
-            Subscription.user_id.in_(user_ids)
+            Subscription.organization_id == org_id
         ).delete(synchronize_session=False))
 
     # 13. Sites
