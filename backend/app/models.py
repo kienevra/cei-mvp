@@ -120,6 +120,7 @@ class Organization(Base):
     last_grace_notification_at = Column(DateTime(timezone=True), nullable=True)
     soft_locked = Column(Boolean, nullable=False, default=False, server_default=sa.false())
     soft_locked_at = Column(DateTime(timezone=True), nullable=True)
+    trial_ends_at = Column(DateTime(timezone=True), nullable=True)
     transition_period_until = Column(DateTime(timezone=True), nullable=True)
     client_grace_until = Column(DateTime(timezone=True), nullable=True)
     contact_email = Column(String(255), nullable=True)

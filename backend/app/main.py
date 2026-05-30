@@ -105,6 +105,7 @@ async def _start_scheduler():
     from app.services.forecast_cache import run_forecast_cache_job
     from app.services.demo_seed import run_demo_data_topup_job
     from app.tasks.billing_jobs import run_billing_cycle_checks
+    from app.services.trial_service import run_trial_check_job
     _scheduler.add_job(
         send_daily_digest_job,
         CronTrigger(hour=7, minute=0, timezone="UTC"),
@@ -129,8 +130,14 @@ async def _start_scheduler():
         id="demo_data_topup",
         replace_existing=True,
     )
+    _scheduler.add_job(
+        run_trial_check_job,
+        CronTrigger(hour=8, minute=0, timezone="UTC"),  # runs daily at 08:00 UTC
+        id="trial_check",
+        replace_existing=True,
+    )
     _scheduler.start()
-    logger.info("APScheduler started — daily digest 07:00 UTC, billing checks 02:00 UTC, forecast cache every hour at :05, demo topup 03:00 UTC")
+    logger.info("APScheduler started — daily digest 07:00 UTC, billing checks 02:00 UTC, forecast cache every hour at :05, demo topup 03:00 UTC, trial check 08:00 UTC")
 
 @app.on_event("shutdown")
 async def _stop_scheduler():

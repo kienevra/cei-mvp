@@ -180,14 +180,23 @@ const Billing: React.FC = () => {
                   </button>
                 )}
                 {hasStripe && (
-                  <button
-                    onClick={handlePortal}
-                    disabled={actionLoading}
-                    style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", padding: "0.55rem 1rem", borderRadius: "0.5rem", background: "transparent", color: "var(--cei-text-main, #e2e8f0)", fontSize: "0.82rem", fontWeight: 500, border: "1px solid rgba(148,163,184,0.3)", cursor: actionLoading ? "not-allowed" : "pointer", opacity: actionLoading ? 0.6 : 1 }}
-                  >
-                    <FiExternalLink />
-                    {actionLoading ? t("billing.processing", "Processing…") : t("billing.managePortal", "Manage billing & invoices")}
-                  </button>
+                  <>
+                    <button
+                      onClick={handlePortal}
+                      disabled={actionLoading}
+                      style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", padding: "0.55rem 1rem", borderRadius: "0.5rem", background: "var(--cei-green, #22c55e)", color: "#0f172a", fontSize: "0.82rem", fontWeight: 700, border: "none", cursor: actionLoading ? "not-allowed" : "pointer", opacity: actionLoading ? 0.6 : 1 }}
+                    >
+                      <FiExternalLink />
+                      {actionLoading ? t("billing.processing", "Processing…") : t("billing.managePortal", "Manage billing & invoices")}
+                    </button>
+                    <button
+                      onClick={handlePortal}
+                      disabled={actionLoading}
+                      style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", padding: "0.55rem 1rem", borderRadius: "0.5rem", background: "transparent", color: "#f87171", fontSize: "0.82rem", fontWeight: 500, border: "1px solid rgba(248,113,113,0.3)", cursor: actionLoading ? "not-allowed" : "pointer", opacity: actionLoading ? 0.6 : 1 }}
+                    >
+                      {actionLoading ? t("billing.processing", "Processing…") : "Cancel subscription"}
+                    </button>
+                  </>
                 )}
                 {status === "canceled" && (
                   <button

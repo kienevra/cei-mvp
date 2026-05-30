@@ -324,8 +324,10 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
             detail={"code": "ORG_NAME_TAKEN", "message": "Organization name already exists."},
         )
 
+    from datetime import datetime, timezone, timedelta
     org = Organization(name=org_name)
     org.org_type = "managing" if user.org_type == "managing" else "standalone"
+    org.trial_ends_at = datetime.now(timezone.utc) + timedelta(days=30)
     for k, v in [("plan_key", "cei-starter"), ("subscription_plan_key", "cei-starter"),
                  ("enable_alerts", True), ("enable_reports", True), ("subscription_status", "active")]:
         try:
