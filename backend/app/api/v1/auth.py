@@ -379,6 +379,21 @@ class UserCreate(BaseModel):
     organization_name: Optional[str] = None
     org_type: Optional[str] = None  # "managing" or "standalone"
 
+@router.get("/test-email")
+def test_email(current_user: User = Depends(get_current_user)):
+    """Temporary debug endpoint — remove after testing."""
+    import traceback
+    try:
+        from app.core.email import send_email
+        send_email(
+            to_email=current_user.email,
+            subject="CEI email test",
+            text_body="Test from Render",
+            html_body="<p>Test from Render</p>",
+        )
+        return {"status": "sent", "to": current_user.email}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
 
 @router.post("/signup", response_model=Token, dependencies=[Depends(login_rate_limit)])
 def signup(user: UserCreate, response: Response, request: Request, db: Session = Depends(get_db)) -> Token:
