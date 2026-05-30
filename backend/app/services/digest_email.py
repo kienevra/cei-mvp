@@ -534,3 +534,203 @@ def send_critical_alert_email(
 
     except Exception:
         logger.exception("send_critical_alert_email failed for org %s", org_id)
+
+# ── Welcome email with playbook attachment ────────────────────────────────────
+
+def _detect_lang(accept_language: Optional[str]) -> str:
+    """
+    Detect language from Accept-Language header.
+    Returns 'it' if Italian is preferred, otherwise 'en'.
+    Defaults to 'it' (primary market is Italian manufacturing SMEs).
+    """
+    if not accept_language:
+        return "it"
+    # Parse Accept-Language: "it-IT,it;q=0.9,en;q=0.8"
+    lang = accept_language.lower().split(",")[0].strip().split(";")[0].strip()
+    if lang.startswith("it"):
+        return "it"
+    return "en"
+
+
+def _get_playbook_attachment(org_type: str, lang: str) -> Optional[dict]:
+    """
+    Load the correct playbook file and return a Resend attachment dict.
+    Returns None if the file cannot be found.
+    """
+    import base64
+    import os
+
+    # Map org_type + lang to filename
+    filename_map = {
+        ("managing", "en"): "CEI_Consultant_Playbook_EN_v2.docx",
+        ("managing", "it"): "CEI_Manuale_Consulenti_IT_v2.docx",
+        ("standalone", "en"): "CEI_Organization_Playbook_EN_v2.docx",
+        ("standalone", "it"): "CEI_Manuale_Organizzazioni_IT_v2.docx",
+        ("client", "en"): "CEI_Organization_Playbook_EN_v2.docx",
+        ("client", "it"): "CEI_Manuale_Organizzazioni_IT_v2.docx",
+    }
+
+    filename = filename_map.get((org_type, lang)) or filename_map.get(("standalone", lang), "CEI_Organization_Playbook_EN_v2.docx")
+
+    # Path relative to this file: backend/app/static/playbooks/
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    filepath = os.path.join(base_dir, "static", "playbooks", filename)
+
+    if not os.path.exists(filepath):
+        logger.warning("Welcome email: playbook file not found at %s", filepath)
+        return None
+
+    try:
+        with open(filepath, "rb") as f:
+            content = base64.b64encode(f.read()).decode("utf-8")
+        return {
+            "filename": filename,
+            "content": content,
+        }
+    except Exception as exc:
+        logger.warning("Welcome email: failed to read playbook %s: %s", filepath, exc)
+        return None
+
+
+def send_welcome_email(
+    to_email: str,
+    org_name: str,
+    org_type: str,
+    accept_language: Optional[str] = None,
+) -> None:
+    """
+    Send a welcome email to a new org owner with the appropriate playbook attached.
+
+    Called immediately after successful signup in auth.py.
+    Best-effort — never raises, never blocks signup.
+
+    Args:
+        to_email: User's email address
+        org_name: Name of the organization just created
+        org_type: 'managing' (consultant) or 'standalone' (factory)
+        accept_language: Accept-Language header from the signup request
+    """
+    from app.core.config import settings
+
+    try:
+        lang = _detect_lang(accept_language)
+        app_url = (settings.frontend_url or "https://app.carbonefficiencyintel.com").rstrip("/")
+
+        is_consultant = org_type == "managing"
+
+        if lang == "it":
+            subject = f"Benvenuto in CEI — Carbon Efficiency Intelligence"
+            role_label = "consulente energetico / ESCO" if is_consultant else "organizzazione"
+            cta_label = "Accedi alla piattaforma"
+            playbook_label = "La tua guida CEI completa è allegata a questa email."
+            body_line1 = f"Il tuo account per <strong>{org_name}</strong> è pronto."
+            body_line2 = (
+                "La tua dashboard Gestione portfolio è attiva. Puoi iniziare ad aggiungere organizzazioni clienti e configurare la diagnostica energetica gratuita di 30 giorni."
+                if is_consultant else
+                "La tua dashboard è attiva. Puoi iniziare a caricare dati energetici tramite CSV o token di integrazione e attivare il monitoraggio in tempo reale."
+            )
+            next_steps_title = "Prossimi passi"
+            next_steps = (
+                [
+                    "Aggiungi la tua prima organizzazione cliente dalla dashboard Gestione",
+                    "Carica i dati energetici del cliente (bollette CSV o token API)",
+                    "Attiva la diagnostica gratuita di 30 giorni",
+                    "Configura il Motore di Intelligenza Normativa (ETS/CBAM)",
+                ]
+                if is_consultant else
+                [
+                    "Crea il tuo primo sito dalla pagina Siti",
+                    "Carica dati energetici tramite CSV o configura un token di integrazione",
+                    "Esplora la dashboard energia e gli avvisi automatici",
+                    "Configura il Motore di Intelligenza Normativa per la tua posizione ETS",
+                ]
+            )
+        else:
+            subject = "Welcome to CEI — Carbon Efficiency Intelligence"
+            role_label = "energy consultant / ESCO" if is_consultant else "organization"
+            cta_label = "Access the platform"
+            playbook_label = "Your complete CEI guide is attached to this email."
+            body_line1 = f"Your account for <strong>{org_name}</strong> is ready."
+            body_line2 = (
+                "Your portfolio management dashboard is live. You can start adding client organizations and running the free 30-day energy diagnostic."
+                if is_consultant else
+                "Your dashboard is live. You can start uploading energy data via CSV or integration token and activate real-time monitoring."
+            )
+            next_steps_title = "Next steps"
+            next_steps = (
+                [
+                    "Add your first client organization from the Manage dashboard",
+                    "Upload client energy data (CSV bills or API token)",
+                    "Activate the free 30-day diagnostic",
+                    "Configure the Regulatory Intelligence Engine (ETS/CBAM)",
+                ]
+                if is_consultant else
+                [
+                    "Create your first site from the Sites page",
+                    "Upload energy data via CSV or configure an integration token",
+                    "Explore the energy dashboard and automatic alerts",
+                    "Configure the Regulatory Intelligence Engine for your ETS position",
+                ]
+            )
+
+        steps_html = "".join(
+            f'<li style="margin-bottom:6px;color:#cbd5e1;font-size:14px;">{s}</li>'
+            for s in next_steps
+        )
+
+        html = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#0f172a;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;">
+    <tr><td align="center" style="padding:32px 16px;">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#1e293b;border-radius:12px;overflow:hidden;">
+        <!-- Header -->
+        <tr><td style="background:linear-gradient(135deg,#22c55e,#16a34a);padding:28px 32px;">
+          <div style="color:#0f172a;font-size:22px;font-weight:700;letter-spacing:0.05em;">CEI</div>
+          <div style="color:#0f172a;font-size:12px;margin-top:2px;opacity:0.8;">Carbon Efficiency Intelligence</div>
+        </td></tr>
+        <!-- Body -->
+        <tr><td style="padding:32px;">
+          <h2 style="margin:0 0 8px;color:#f1f5f9;font-size:20px;">{"Benvenuto" if lang == "it" else "Welcome"} 👋</h2>
+          <p style="margin:0 0 16px;color:#94a3b8;font-size:14px;">{body_line1}</p>
+          <p style="margin:0 0 24px;color:#cbd5e1;font-size:14px;line-height:1.6;">{body_line2}</p>
+          <h3 style="margin:0 0 12px;color:#f1f5f9;font-size:15px;">{next_steps_title}</h3>
+          <ol style="margin:0 0 24px;padding-left:20px;">{steps_html}</ol>
+          <div style="background:#0f172a;border-radius:8px;padding:14px;margin-bottom:24px;border:1px solid rgba(34,197,94,0.3);">
+            <p style="margin:0;color:#86efac;font-size:13px;">📎 {playbook_label}</p>
+          </div>
+          <a href="{app_url}" style="display:inline-block;padding:12px 28px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#0f172a;font-weight:700;font-size:14px;border-radius:8px;text-decoration:none;">
+            {cta_label} →
+          </a>
+        </td></tr>
+        <!-- Footer -->
+        <tr><td style="padding:16px 32px;border-top:1px solid rgba(148,163,184,0.1);">
+          <p style="margin:0;color:#475569;font-size:12px;">
+            CEI — Carbon Efficiency Intelligence ·
+            <a href="{app_url}" style="color:#22c55e;text-decoration:none;">app.carbonefficiencyintel.com</a>
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+        text_body = f"Welcome to CEI — {org_name} is ready. Access your dashboard at {app_url}"
+
+        # Load playbook attachment
+        attachment = _get_playbook_attachment(org_type, lang)
+        attachments = [attachment] if attachment else None
+
+        from app.core.email import send_email
+        send_email(
+            to_email=to_email,
+            subject=subject,
+            text_body=text_body,
+            html_body=html,
+            attachments=attachments,
+        )
+
+        logger.info("Welcome email sent to %s org_type=%s lang=%s attachment=%s",
+                    to_email, org_type, lang, attachment["filename"] if attachment else "none")
+
+    except Exception:
+        logger.exception("send_welcome_email failed for %s", to_email)

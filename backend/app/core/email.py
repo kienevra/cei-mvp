@@ -35,6 +35,7 @@ def _send_resend(
     subject: str,
     text_body: str,
     html_body: Optional[str],
+    attachments: Optional[list] = None,
 ) -> None:
     """
     Send email via Resend REST API (no extra deps; uses urllib).
@@ -58,6 +59,8 @@ def _send_resend(
     }
     if html_body:
         payload["html"] = html_body
+    if attachments:
+        payload["attachments"] = attachments
 
     data = json.dumps(payload).encode("utf-8")
 
@@ -152,6 +155,7 @@ def send_email(
     subject: str,
     text_body: str,
     html_body: Optional[str] = None,
+    attachments: Optional[list] = None,
 ) -> None:
     """
     Unified email send.
@@ -179,7 +183,7 @@ def send_email(
         return
 
     if provider == "resend":
-        _send_resend(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
+        _send_resend(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body, attachments=attachments)
         return
 
     if provider == "smtp":
