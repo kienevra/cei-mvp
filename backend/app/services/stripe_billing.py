@@ -116,13 +116,13 @@ class PortalSessionResult:
 # You MUST update these values with real Stripe price IDs when you wire Stripe.
 PLAN_TO_STRIPE_PRICE: Dict[str, str] = {
     # Standalone org — base fee
-    "standalone_base":     "price_1Tac8L1UT0Q5Ec7jEA7o4aMG",   # EUR 89/month
+    "standalone_base":     "price_1TcqRC05MuVMGfdL0Pvocth6",   # EUR 89/month
     # Standalone org — per site
-    "standalone_per_site": "price_1TacMj1UT0Q5Ec7jPCPMRSu8",   # EUR 59/site/month
+    "standalone_per_site": "price_1TcqRC05MuVMGfdLTC5ILxSd",   # EUR 59/site/month
     # Manager — base fee
-    "manager_base":        "price_1TacNy1UT0Q5Ec7jPS7ZEcCh",   # EUR 149/month
+    "manager_base":        "price_1TcqRH05MuVMGfdLo9esedoH",   # EUR 149/month
     # Manager — per site
-    "manager_per_site":    "price_1TacPG1UT0Q5Ec7jw04igBJN",   # EUR 39/site/month
+    "manager_per_site":    "price_1TcqRF05MuVMGfdL0tiZGdEb",   # EUR 39/site/month
 }
 
 
@@ -221,6 +221,9 @@ def create_checkout_session_for_org(
                 "quantity": 1,
             }
         ],
+        subscription_data={
+            "trial_period_days": 30,
+        },
         success_url=params.success_url,
         cancel_url=params.cancel_url,
         metadata={
@@ -381,6 +384,9 @@ def create_hybrid_checkout_session(
         payment_method_types=["card"],
         customer=customer_id,
         line_items=line_items,
+        subscription_data={
+            "trial_period_days": 30,
+        },
         success_url=params.success_url,
         cancel_url=params.cancel_url,
         metadata={
