@@ -386,6 +386,10 @@ def create_hybrid_checkout_session(
         line_items=line_items,
         subscription_data={
             "trial_period_days": 30,
+            "metadata": {
+                "cei_org_id":   str(org_id) if org_id is not None else "",
+                "cei_plan_key": plan_key,
+            },
         },
         success_url=params.success_url,
         cancel_url=params.cancel_url,
@@ -394,12 +398,6 @@ def create_hybrid_checkout_session(
             "cei_plan_key":       plan_key,
             "cei_org_type":       params.org_type,
             "cei_site_count":     str(params.site_count),
-        },
-        subscription_data={
-            "metadata": {
-                "cei_org_id":   str(org_id) if org_id is not None else "",
-                "cei_plan_key": plan_key,
-            }
         },
     )
 
