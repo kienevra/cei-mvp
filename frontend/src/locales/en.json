@@ -54,7 +54,7 @@
     "logout": "Log out",
     "signedIn": "Signed in",
     "hero": {
-      "title": "We use A.I to reduce production energy costs.",
+      "title": "Decarbonization Intelligence.",
       "subtitle": "CEI ingests your meter and SCADA data, builds statistical baselines for each site, and turns night, weekend, and process inefficiencies into actionable alerts and reports – without installing new hardware."
     },
     "actions": {

@@ -319,7 +319,7 @@ const Login: React.FC = () => {
               style={{ height: "320px", width: "auto", display: "block", marginBottom: "0.05rem" }}
             />
             <div className="auth-title">
-              {t("auth.hero.title", { defaultValue: "We use A.I to reduce your factory's energy costs." })}
+              {t("auth.hero.title", { defaultValue: "Decarbonization Intelligence." })}
             </div>
             <div className="auth-subtitle">
               {t("auth.hero.subtitle", { defaultValue: "CEI ingests your meter and SCADA data, builds statistical baselines for each site, and turns night, weekend, and process inefficiencies into actionable alerts and reports – without installing new hardware." })}
