@@ -30,6 +30,7 @@ const ManageDashboard = lazy(() => import("./pages/ManageDashboard"));
 const ManageClientOrg = lazy(() => import("./pages/ManageClientOrg"));
 const ManageClientSiteView = lazy(() => import("./pages/ManageClientSiteView"));
 const Billing = lazy(() => import("./pages/Billing"));
+const Support = lazy(() => import("./pages/Support"));
 
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -208,6 +209,17 @@ const App: React.FC = () => (
               <Layout>
                 <ProtectedRoute allowedOrgTypes={["standalone"]}>
                   <CSVUpload />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
+
+          <Route
+            path="/support"
+            element={
+              <Layout>
+                <ProtectedRoute>
+                  <Support />
                 </ProtectedRoute>
               </Layout>
             }

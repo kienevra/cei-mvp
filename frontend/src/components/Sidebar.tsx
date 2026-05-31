@@ -12,6 +12,7 @@ import {
   FiSettings,
   FiUpload,
   FiCreditCard,
+  FiLifeBuoy,
 } from "react-icons/fi";
 import { useAuth } from "../hooks/useAuth";
 
@@ -44,6 +45,7 @@ const Sidebar: React.FC = () => {
         { label: t("nav.account"), path: "/account", icon: <FiUser /> },
         { label: t("nav.billing"), path: "/billing", icon: <FiCreditCard /> },
         { label: t("nav.settings"), path: "/settings", icon: <FiSettings /> },
+        { label: t("nav.support", { defaultValue: "Support" }), path: "/support", icon: <FiLifeBuoy /> },
       ];
     }
 
@@ -53,6 +55,7 @@ const Sidebar: React.FC = () => {
         { label: t("nav.account"), path: "/account", icon: <FiUser /> },
         { label: t("nav.billing"), path: "/billing", icon: <FiCreditCard /> },
         { label: t("nav.settings"), path: "/settings", icon: <FiSettings /> },
+        { label: t("nav.support", { defaultValue: "Support" }), path: "/support", icon: <FiLifeBuoy /> },
       ];
     }
 
@@ -65,6 +68,7 @@ const Sidebar: React.FC = () => {
       { label: t("nav.billing"), path: "/billing", icon: <FiCreditCard /> },
       { label: t("nav.settings"), path: "/settings", icon: <FiSettings /> },
       { label: t("nav.account"), path: "/account", icon: <FiUser /> },
+      { label: t("nav.support", { defaultValue: "Support" }), path: "/support", icon: <FiLifeBuoy /> },
     ];
   }, [t, isManagingOrg, isClientOrg]);
 

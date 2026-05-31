@@ -404,6 +404,7 @@ from app.api.v1 import (  # noqa: E402
     manage,                 # Phase 3: managing org CRUD API
     push,                   # Web push notification subscriptions
     production_integrations,
+    support,
 )
 
 app.include_router(auth.router, prefix="/api/v1")
@@ -430,6 +431,7 @@ app.include_router(onboarding_router, prefix="/api/v1")
 app.include_router(production_integrations.router, prefix="/api/v1")
 app.include_router(notifications_router, prefix="/api/v1")
 app.include_router(emissions_router, prefix="/api/v1")
+app.include_router(support.router, prefix="/api/v1")
 
 
 @app.post("/auth/signup", include_in_schema=False)

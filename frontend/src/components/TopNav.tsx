@@ -28,6 +28,7 @@ const TopNav: React.FC = () => {
         { label: t("nav.account", { defaultValue: "Account" }), path: "/account" },
         { label: t("nav.billing", { defaultValue: "Billing" }), path: "/billing" },
         { label: t("nav.settings", { defaultValue: "Settings" }), path: "/settings" },
+        { label: t("nav.support", { defaultValue: "Support" }), path: "/support" },
       ];
     }
 
@@ -37,6 +38,7 @@ const TopNav: React.FC = () => {
         { label: t("nav.account", { defaultValue: "Account" }), path: "/account" },
         { label: t("nav.billing", { defaultValue: "Billing" }), path: "/billing" },
         { label: t("nav.settings", { defaultValue: "Settings" }), path: "/settings" },
+        { label: t("nav.support", { defaultValue: "Support" }), path: "/support" },
       ];
     }
 
@@ -50,6 +52,7 @@ const TopNav: React.FC = () => {
       { label: t("nav.billing", { defaultValue: "Billing" }), path: "/billing" },
       { label: t("nav.settings", { defaultValue: "Settings" }), path: "/settings" },
       { label: t("nav.account", { defaultValue: "Account" }), path: "/account" },
+      { label: t("nav.support", { defaultValue: "Support" }), path: "/support" },
     ];
   }, [t, isManagingOrg, isClientOrg]);
 
