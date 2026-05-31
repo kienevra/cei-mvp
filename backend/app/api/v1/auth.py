@@ -289,21 +289,6 @@ class UserCreate(BaseModel):
     ui_lang: Optional[str] = None   # "it" or "en" from CEI UI toggle
     terms_accepted: Optional[bool] = None  # must be True to register
 
-@router.get("/test-email")
-def test_email():
-    """Temporary debug endpoint — remove after testing."""
-    import traceback
-    try:
-        from app.services.digest_email import send_welcome_email
-        send_welcome_email(
-            to_email="leonnjiru@gmail.com",
-            org_name="Test Org",
-            org_type="managing",
-            accept_language="en-US,en;q=0.9",
-        )
-        return {"status": "sent"}
-    except Exception as e:
-        return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
 
 @router.post("/signup", response_model=Token, dependencies=[Depends(login_rate_limit)])
 def signup(user: UserCreate, response: Response, request: Request, db: Session = Depends(get_db)) -> Token:
