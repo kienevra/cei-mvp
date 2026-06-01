@@ -1,6 +1,6 @@
 // frontend/src/pages/SiteView.tsx
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -31,6 +31,8 @@ import ProductionCorrelation from "../components/ProductionCorrelation";
 import ProductionIntegrations from "../components/ProductionIntegrations";
 import OpportunityCard from "../components/OpportunityCard";
 import RegulatoryIntelligenceCard from "../components/RegulatoryIntelligenceCard";
+import { useSiteSocket } from "../hooks/useSiteSocket";
+import LiveIndicator from "../components/LiveIndicator";
 
 type SiteRecord = {
   id: number | string;
@@ -235,6 +237,24 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
   const [actionNoteByKey, setActionNoteByKey] = useState<Record<string, string>>({});
 
   const siteKey = id ? `site-${id}` : undefined;
+  const reloadSiteData = useCallback(() => {
+    if (!id || !siteKey) return;
+    setSummaryLoading(true);
+    getTimeseriesSummary({ site_id: siteKey, window_hours: 24 })
+      .then((data) => setSummary(data as SummaryResponse))
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
+    getSiteKpi(siteKey).then(setKpi).catch(() => {});
+    getSiteInsights(siteKey, 24)
+      .then((d) => setInsights(d as SiteInsights))
+      .catch(() => {});
+  }, [id, siteKey]);
+
+  const { status: wsStatus, lastUpdate: wsLastUpdate, rowsIngested: wsRowsIngested } =
+    useSiteSocket(id, {
+      onDataUpdated: reloadSiteData,
+      enabled: !!id,
+    });
 
   useEffect(() => {
     if (!id) return;
@@ -1059,6 +1079,11 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
               ? t("common.loadingEllipsis", { defaultValue: "Loading…" })
               : site?.name || t("siteView.title.fallback", { defaultValue: "Site" })}
           </h1>
+          <LiveIndicator
+            status={wsStatus}
+            lastUpdate={wsLastUpdate}
+            rowsIngested={wsRowsIngested}
+          />
           {hybrid?.headline && (
             <p style={{ marginTop: "0.25rem", fontSize: "0.88rem", color: "var(--cei-text-accent)", fontWeight: 500 }}>
               {hybrid.headline}

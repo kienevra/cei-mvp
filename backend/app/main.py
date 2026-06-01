@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.api.v1 import sites as sites_api
 from app.api.v1.onboarding import router as onboarding_router
+from app.api.v1 import ws as ws_router
 
 # --- request context / db metrics (tolerant to module drift) ---
 from app.core.request_context import (
@@ -432,7 +433,7 @@ app.include_router(production_integrations.router, prefix="/api/v1")
 app.include_router(notifications_router, prefix="/api/v1")
 app.include_router(emissions_router, prefix="/api/v1")
 app.include_router(support.router, prefix="/api/v1")
-
+app.include_router(ws_router.router, prefix="/api/v1")
 
 @app.post("/auth/signup", include_in_schema=False)
 def legacy_auth_signup_for_tests(payload: dict):

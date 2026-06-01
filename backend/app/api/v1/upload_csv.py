@@ -616,6 +616,25 @@ async def upload_csv(
             errors.append(str(e))
             remaining_slots -= 1
 
+    # ── WebSocket broadcast ──────────────────────────────────────────────────
+    if ingested > 0:
+        from app.core.ws_manager import manager as _ws_manager
+        import asyncio as _asyncio
+        for _sid in site_ids:
+            try:
+                loop = _asyncio.get_event_loop()
+                if loop.is_running():
+                    _asyncio.ensure_future(
+                        _ws_manager.broadcast(
+                            site_id=str(_sid),
+                            event="data_updated",
+                            payload={"rows_ingested": ingested, "source": "csv"},
+                        )
+                    )
+            except Exception as _ws_err:
+                logger.warning("ws_broadcast_failed site_id=%s err=%s", _sid, _ws_err)
+    # ────────────────────────────────────────────────────────────────────────
+
     return CsvUploadResult(
         rows_received=rows_received,
         rows_ingested=ingested,
