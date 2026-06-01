@@ -526,6 +526,7 @@ export default function ProductionCorrelation({ siteId }: Props) {
                     tickLine={false}
                     tickFormatter={v => `${(v / 1000).toFixed(0)}k`}
                     width={36}
+                    domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.15 / 1000) * 1000]}
                   />
                   {/* Right axis — kWh/unit */}
                   <YAxis
@@ -534,8 +535,12 @@ export default function ProductionCorrelation({ siteId }: Props) {
                     tick={{ fill: "#9ca3af", fontSize: 10 }}
                     axisLine={false}
                     tickLine={false}
-                    tickFormatter={v => v.toFixed(1)}
-                    width={32}
+                    tickFormatter={v => v.toFixed(2)}
+                    width={36}
+                    domain={[
+                      (dataMin: number) => Math.max(0, parseFloat((dataMin * 0.85).toFixed(2))),
+                      (dataMax: number) => parseFloat((dataMax * 1.15).toFixed(2)),
+                    ]}
                   />
 
                   <Tooltip content={<CorrelationTooltip />} />
