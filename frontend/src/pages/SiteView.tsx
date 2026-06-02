@@ -190,6 +190,7 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
   const [site, setSite] = useState<SiteRecord | null>(null);
   const [siteLoading, setSiteLoading] = useState(false);
   const [siteError, setSiteError] = useState<string | null>(null);
+  const [wsRefreshKey, setWsRefreshKey] = useState(0);
 
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -248,6 +249,7 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
     getSiteInsights(siteKey, 24)
       .then((d) => setInsights(d as SiteInsights))
       .catch(() => {});
+    setWsRefreshKey(k => k + 1);
   }, [id, siteKey]);
 
   const { status: wsStatus, lastUpdate: wsLastUpdate, rowsIngested: wsRowsIngested } =
@@ -1606,13 +1608,13 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
       )}
 
       {/* Forecast card */}
-      <section style={{ marginTop: "0.75rem" }}>{renderForecastCard()}</section>
+      <section key={`fc-${wsRefreshKey}`} style={{ marginTop: "0.75rem" }}>{renderForecastCard()}</section>
 
       {/* Production correlation — kWh per unit produced (ISO 50001) */}
       {id && (
         <section style={{ marginTop: "0.75rem" }}>
           <div className="cei-card">
-            <ProductionCorrelation siteId={id} />
+            <ProductionCorrelation key={`pc-${wsRefreshKey}`} siteId={id} />
             <ProductionIntegrations siteId={numericSiteId} />
           </div>
         </section>
