@@ -571,15 +571,19 @@ def create_timeseries_batch(
     # ── WebSocket broadcast ──────────────────────────────────────────────────
     rows_in = result_dict.get("ingested", 0)
     rows_skipped = result_dict.get("skipped_duplicate", 0)
+    logger.info("ws_debug rows_in=%s rows_skipped=%s", rows_in, rows_skipped)
     if (rows_in and rows_in > 0) or (rows_skipped and rows_skipped > 0):
         site_ids_in_batch = {
             r.get("site_id") for r in records if r.get("site_id")
         }
+        logger.info("ws_debug site_ids_in_batch=%s", site_ids_in_batch)
         from app.core.ws_manager import manager as _ws_manager
         import asyncio as _asyncio
+        logger.info("ws_debug connections=%s", dict(_ws_manager._connections))
         for _sid in site_ids_in_batch:
             try:
                 loop = _asyncio.get_event_loop()
+                logger.info("ws_debug loop_running=%s sid=%s", loop.is_running(), _sid)
                 if loop.is_running():
                     _asyncio.ensure_future(
                         _ws_manager.broadcast(
