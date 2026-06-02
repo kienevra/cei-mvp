@@ -582,16 +582,28 @@ def create_timeseries_batch(
         logger.info("ws_debug connections=%s", dict(_ws_manager._connections))
         for _sid in site_ids_in_batch:
             try:
-                loop = _asyncio.get_event_loop()
-                logger.info("ws_debug loop_running=%s sid=%s", loop.is_running(), _sid)
-                if loop.is_running():
-                    _asyncio.ensure_future(
+                loop = _asyncio.get_running_loop()
+                loop.create_task(
+                    _ws_manager.broadcast(
+                        site_id=str(_sid),
+                        event="data_updated",
+                        payload={"rows_ingested": rows_in, "source": source},
+                    )
+                )
+            except RuntimeError:
+                # No running loop — schedule via thread-safe call_soon_threadsafe
+                try:
+                    loop = _asyncio.get_event_loop_policy().get_event_loop()
+                    loop.call_soon_threadsafe(
+                        loop.create_task,
                         _ws_manager.broadcast(
                             site_id=str(_sid),
                             event="data_updated",
                             payload={"rows_ingested": rows_in, "source": source},
                         )
                     )
+                except Exception as _ws_err2:
+                    logger.warning("ws_broadcast_failed site_id=%s err=%s", _sid, _ws_err2)
             except Exception as _ws_err:
                 logger.warning("ws_broadcast_failed site_id=%s err=%s", _sid, _ws_err)
     # ────────────────────────────────────────────────────────────────────────
