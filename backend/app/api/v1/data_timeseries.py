@@ -570,7 +570,8 @@ def create_timeseries_batch(
 
     # ── WebSocket broadcast ──────────────────────────────────────────────────
     rows_in = result_dict.get("ingested", 0)
-    if rows_in and rows_in > 0:
+    rows_skipped = result_dict.get("skipped_duplicate", 0)
+    if (rows_in and rows_in > 0) or (rows_skipped and rows_skipped > 0):
         site_ids_in_batch = {
             r.get("site_id") for r in records if r.get("site_id")
         }
