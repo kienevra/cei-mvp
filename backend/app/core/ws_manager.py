@@ -12,7 +12,7 @@ from fastapi import WebSocket
 
 logger = logging.getLogger("cei")
 
-HEARTBEAT_INTERVAL = 25  # seconds — just under Render's 30s idle timeout
+HEARTBEAT_INTERVAL = 15 # seconds — just under Render's 30s idle timeout
 
 
 class ConnectionManager:
