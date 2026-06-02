@@ -2,7 +2,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
 const WS_BASE =
-  (import.meta.env.VITE_API_URL || "https://api.carbonefficiencyintel.com")
+  (import.meta.env.VITE_WS_URL ||
+   import.meta.env.VITE_API_URL ||
+   "https://cei-mvp.onrender.com")
     .replace(/^https/, "wss")
     .replace(/^http/, "ws");
 
