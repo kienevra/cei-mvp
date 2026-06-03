@@ -161,6 +161,12 @@ class IntegrationTokenWithSecret(IntegrationTokenOut):
     token: str
 
 
+class DelegatedTokenCreate(BaseModel):
+    """Create an integration token pre-scoped to a client org."""
+    name: str = Field(default="Delegated integration token", min_length=1)
+    target_org_id: int = Field(..., description="Client org ID this token will act on behalf of")
+
+
 # Phase 5: schema for role assignment endpoint
 class AssignRoleIn(BaseModel):
     user_id: int
@@ -586,6 +592,107 @@ def list_integration_tokens(
         .filter(IntegrationToken.organization_id == current_user.organization_id)
         .order_by(IntegrationToken.created_at.desc())
         .all()
+    )
+
+
+@router.post("/integration-tokens/delegated", response_model=IntegrationTokenWithSecret)
+def create_delegated_integration_token(
+    payload: DelegatedTokenCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> IntegrationTokenWithSecret:
+    """
+    Create an integration token pre-scoped to a client org.
+
+    Only managing org owners can call this. The token automatically scopes
+    all requests to target_org_id without needing X-CEI-ORG-ID on every call.
+
+    Rules:
+    - Caller must be owner of a managing org.
+    - target_org_id must be a client org managed by the caller's org.
+    """
+    _ensure_user_active_or_403(current_user)
+
+    if not current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not attached to an organization.",
+        )
+
+    require_owner(current_user, message="Only the organization owner can create delegated tokens.")
+
+    # Caller's org must be managing type
+    caller_org = db.query(Organization).filter(
+        Organization.id == current_user.organization_id
+    ).first()
+    if not caller_org or getattr(caller_org, "org_type", "standalone") != "managing":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "NOT_A_MANAGING_ORG",
+                "message": "Delegated tokens can only be created by managing organizations.",
+            },
+        )
+
+    # Target org must exist and be managed by caller's org
+    target_org = db.query(Organization).filter(
+        Organization.id == payload.target_org_id
+    ).first()
+    if not target_org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "CLIENT_ORG_NOT_FOUND",
+                "message": f"Organization id={payload.target_org_id} not found.",
+            },
+        )
+    if getattr(target_org, "managed_by_org_id", None) != current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "NOT_YOUR_CLIENT_ORG",
+                "message": f"Organization id={payload.target_org_id} is not managed by your organization.",
+            },
+        )
+
+    raw_token = _generate_integration_token_string()
+    token_hash = _hash_token(raw_token)
+    name = (payload.name or "").strip() or "Delegated integration token"
+
+    db_token = IntegrationToken(
+        organization_id=current_user.organization_id,
+        name=name,
+        token_hash=token_hash,
+        is_active=True,
+    )
+    # Store target_org_id if column exists (added by migration e61d34e92155)
+    try:
+        db_token.target_org_id = payload.target_org_id
+    except Exception:
+        pass
+
+    db.add(db_token)
+    db.commit()
+    db.refresh(db_token)
+
+    create_org_audit_event(
+        db,
+        org_id=current_user.organization_id,
+        user_id=getattr(current_user, "id", None),
+        title="Delegated integration token created",
+        description=(
+            f"name={db_token.name}; token_id={db_token.id}; "
+            f"target_org_id={payload.target_org_id}; target_org_name={target_org.name}"
+        ),
+    )
+
+    return IntegrationTokenWithSecret(
+        id=db_token.id,
+        name=db_token.name,
+        is_active=db_token.is_active,
+        created_at=db_token.created_at,
+        last_used_at=db_token.last_used_at,
+        token=raw_token,
     )
 
 
