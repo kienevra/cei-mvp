@@ -211,6 +211,7 @@ const Settings: React.FC = () => {
   const { t } = useTranslation();
 
   const [emailAlerts, setEmailAlerts] = useState(true);
+  const [savingEmailAlerts, setSavingEmailAlerts] = useState(false);
   const [unitSystem, setUnitSystem] = useState<"metric" | "imperial">("metric");
 
   const [account, setAccount] = useState<AccountMe | null>(null);
@@ -304,6 +305,11 @@ const Settings: React.FC = () => {
       setCurrencyCodeInput("");
       return;
     }
+     setEmailAlerts(
+      typeof (orgFromData as any).enable_notification_emails === "boolean"
+        ? (orgFromData as any).enable_notification_emails
+        : true
+    );
     setPrimaryEnergySources(parsePrimaryEnergySources(orgFromData as any, anyData));
     setElectricityPriceInput(
       parseNumberToInput((orgFromData as any)?.electricity_price_per_kwh) ||
@@ -485,8 +491,23 @@ const Settings: React.FC = () => {
             <input
               type="checkbox"
               checked={emailAlerts}
-              onChange={(e) => setEmailAlerts(e.target.checked)}
-              style={{ width: "auto" }}
+              disabled={savingEmailAlerts}
+              onChange={async (e) => {
+                const newVal = e.target.checked;
+                setEmailAlerts(newVal);
+                setSavingEmailAlerts(true);
+                try {
+                  await updateOrgSettings({
+                    enable_notification_emails: newVal,
+                  } as any);
+                } catch {
+                  // revert on failure
+                  setEmailAlerts(!newVal);
+                } finally {
+                  setSavingEmailAlerts(false);
+                }
+              }}
+              style={{ width: "auto", opacity: savingEmailAlerts ? 0.6 : 1 }}
             />
             <span style={{ fontSize: "0.85rem" }}>
               {t("settings.notifications.emailAlertsLabel")}
