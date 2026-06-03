@@ -29,7 +29,12 @@ logger = logging.getLogger("cei.digest")
 def _send(to_email: str, subject: str, html: str) -> bool:
     try:
         from app.core.email import send_email  # type: ignore
-        send_email(to=to_email, subject=subject, html=html)
+        send_email(
+            to_email=to_email,
+            subject=subject,
+            text_body=subject,  # plain text fallback
+            html_body=html,
+        )
         return True
     except Exception:
         logger.exception("Failed to send digest to %s", to_email)
