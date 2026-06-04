@@ -1350,7 +1350,7 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
                   fontSize: "0.8rem",
                 }}
               >
-                <div>
+                <div style={{ minWidth: 0, overflow: "hidden" }}>
                   <div
                     style={{
                       fontSize: "0.75rem",
@@ -1372,13 +1372,16 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
                     </span>
                   </div>
                   <div style={{ marginTop: "0.25rem" }}>
-                    <span className={`cei-pill ${kpiDeltaBadgeClass(kpi.deviation_pct_24h)}`}>
+                    <span
+                      className={`cei-pill ${kpiDeltaBadgeClass(kpi.deviation_pct_24h)}`}
+                      style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}
+                    >
                       {formatPct(kpi.deviation_pct_24h)} {t("siteView.snapshot.vsBaseline", { defaultValue: "vs baseline" })}
                     </span>
                   </div>
                 </div>
 
-                <div>
+                <div style={{ minWidth: 0, overflow: "hidden" }}>
                   <div
                     style={{
                       fontSize: "0.75rem",
@@ -1400,13 +1403,16 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
                     </span>
                   </div>
                   <div style={{ marginTop: "0.25rem" }}>
-                    <span className={`cei-pill ${kpiDeltaBadgeClass(kpi.deviation_pct_7d)}`}>
+                    <span
+                      className={`cei-pill ${kpiDeltaBadgeClass(kpi.deviation_pct_7d)}`}
+                      style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}
+                    >
                       {formatPct(kpi.deviation_pct_7d)} {t("siteView.snapshot.vsPrev7d", { defaultValue: "vs previous 7d" })}
                     </span>
                   </div>
                 </div>
 
-                <div>
+                <div style={{ minWidth: 0, overflow: "hidden" }}>
                   <div
                     style={{
                       fontSize: "0.75rem",
