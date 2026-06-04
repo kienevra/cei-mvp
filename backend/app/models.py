@@ -614,6 +614,10 @@ class IntegrationToken(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=DB_NOW)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Phase 2: cross-org delegation — if set, this token automatically scopes
+    # all requests to the target client org without needing X-CEI-ORG-ID header.
+    target_org_id = Column(Integer, nullable=True, index=True)
+
 
 class OrgInvite(Base):
     """
