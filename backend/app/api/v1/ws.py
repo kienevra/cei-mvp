@@ -11,7 +11,33 @@ from app.core.ws_manager import manager
 logger = logging.getLogger("cei")
 
 router = APIRouter(tags=["websocket"])
+@router.websocket("/ws/org/{org_id}")
+async def org_websocket(
+    websocket: WebSocket,
+    org_id: int,
+    token: str = Query(default=""),
+):
+    """
+    Org-level WebSocket. Receives data_updated events whenever any site
+    in this org ingests new data. Used by NotificationBell to update
+    in real time without polling.
 
+    Connect: wss://api.carbonefficiencyintel.com/api/v1/ws/org/{org_id}
+    """
+    key = f"org-{org_id}"
+    await manager.connect(websocket, key)
+    try:
+        while True:
+            try:
+                data = await websocket.receive_text()
+                if data == "pong":
+                    continue
+            except WebSocketDisconnect:
+                break
+            except Exception:
+                break
+    finally:
+        manager.disconnect(websocket, key)
 
 @router.websocket("/ws/sites/{site_id}")
 async def site_websocket(

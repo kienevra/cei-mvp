@@ -58,6 +58,13 @@ class ConnectionManager:
 
     # ── Broadcast ─────────────────────────────────────────────────────────────
 
+    async def broadcast_to_org(self, org_id: int, event: str, payload: dict) -> None:
+        """
+        Send a JSON message to all clients watching org_id.
+        Uses the key pattern "org-{org_id}" internally.
+        """
+        await self.broadcast(f"org-{org_id}", event, payload)
+
     async def broadcast(self, site_id: str, event: str, payload: dict) -> None:
         """
         Send a JSON message to all clients watching site_id.

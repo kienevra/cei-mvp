@@ -10,6 +10,7 @@ import SoftLockBanner from "./components/SoftLockBanner";
 import { useAuth } from "./hooks/useAuth";
 import { fetchBillingOverview, isSoftLocked, type BillingOverview } from "./services/billingApi";
 import { useEffect, useState } from "react";
+import { useOrgSocket } from "./hooks/useOrgSocket";
 import "./styles/global.css";
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -38,6 +39,9 @@ function Layout({ children }: { children: React.ReactNode }) {
   const isOwner = (user as any)?.role === "owner";
   const [billing, setBilling] = useState<BillingOverview | null>(null);
   const [dismissed, setDismissed] = useState(false);
+
+  // Org-level WebSocket — keeps NotificationBell live on all pages
+  useOrgSocket((user as any)?.organization_id ?? null);
 
   useEffect(() => {
     if (!user) return;

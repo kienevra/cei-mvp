@@ -18,6 +18,8 @@ export function useSocketEvent(
   event: SocketEventName,
   callback: () => void
 ): void {
+  const cbRef = useRef(callback);
+  cbRef.current = callback;
 
   useEffect(() => {
     const stable = () => cbRef.current();

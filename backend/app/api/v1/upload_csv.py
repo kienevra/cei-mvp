@@ -628,6 +628,15 @@ async def upload_csv(
                 )
             except Exception as _ws_err:
                 logger.warning("ws_broadcast_failed site_id=%s err=%s", _sid, _ws_err)
+        # Also broadcast to org-level channel for NotificationBell
+        try:
+            await _ws_manager.broadcast_to_org(
+                org_id=org_id,
+                event="data_updated",
+                payload={"rows_ingested": ingested, "source": "csv"},
+            )
+        except Exception as _ws_err:
+            logger.warning("ws_org_broadcast_failed org_id=%s err=%s", org_id, _ws_err)
     # ────────────────────────────────────────────────────────────────────────
 
     return CsvUploadResult(
