@@ -4,6 +4,7 @@
  * Components call emitSocketEvent("data_updated") when a WS event arrives.
  * Subscribers call useSocketEvent("data_updated", callback) to react.
  */
+import { useEffect, useRef } from "react";
 
 type SocketEventName = "data_updated";
 
@@ -17,11 +18,6 @@ export function useSocketEvent(
   event: SocketEventName,
   callback: () => void
 ): void {
-  // We use a module-level map so this works across component trees
-  // without needing a Provider.
-  const { useEffect, useRef } = require("react");
-  const cbRef = useRef(callback);
-  cbRef.current = callback;
 
   useEffect(() => {
     const stable = () => cbRef.current();
