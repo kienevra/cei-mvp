@@ -10,6 +10,7 @@ import {
 } from "../services/notificationApi";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useSocketEvent } from "../hooks/useSocketEvent";
 
 // ── Type metadata ─────────────────────────────────────────────────────────────
 
@@ -149,6 +150,9 @@ const NotificationBell: React.FC = () => {
     const id = setInterval(pollCount, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, [pollCount]);
+
+  // Re-poll immediately whenever a WebSocket data_updated event fires
+  useSocketEvent("data_updated", pollCount);
 
   // ── Load full list when panel opens ────────────────────────────────────
 

@@ -99,6 +99,10 @@ export function useSiteSocket(
           setLastUpdate(new Date());
           setRowsIngested(typeof msg.rows_ingested === "number" ? msg.rows_ingested : null);
           onDataUpdatedRef.current();
+          // Broadcast to any global subscribers (e.g. NotificationBell)
+          import("./useSocketEvent").then(({ emitSocketEvent }) => {
+            emitSocketEvent("data_updated");
+          });
         }
       } catch {
         // Non-JSON message — ignore
