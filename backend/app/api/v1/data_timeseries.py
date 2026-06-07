@@ -594,8 +594,63 @@ async def create_timeseries_batch(
             )
         except Exception as _ws_err:
             logger.warning("ws_org_broadcast_failed org_id=%s err=%s", org_id, _ws_err)
-    # ────────────────────────────────────────────────────────────────────────
 
+        # ── Alert-triggered notifications ────────────────────────────────────
+        # Run alert engine after ingestion and persist critical/warning alerts
+        # as Notification rows so the bell updates in real time.
+        try:
+            from app.api.v1.alerts import _generate_alerts_for_window
+            from app.services.notification_service import notify, NotifType
+            from app.api.deps import get_org_allowed_site_ids
+            from app.models import Notification as _Notif
+            from datetime import timedelta as _td
+
+            _allowed = get_org_allowed_site_ids(db, org_id)
+            _alerts = _generate_alerts_for_window(
+                db=db,
+                window_hours=168,
+                allowed_site_ids=_allowed,
+                organization_id=org_id,
+                locale="en",
+            )
+            _dedup_window = datetime.utcnow() - _td(hours=6)
+            for _alert in _alerts:
+                if _alert.severity in ("critical", "warning"):
+                    _notif_type = (
+                        NotifType.ALERT_CRITICAL
+                        if _alert.severity == "critical"
+                        else NotifType.ALERT_WARNING
+                    )
+                    # Skip if same alert type already notified in last 6h
+                    _existing = db.query(_Notif).filter(
+                        _Notif.org_id == org_id,
+                        _Notif.type == _notif_type,
+                        _Notif.created_at >= _dedup_window,
+                    ).first()
+                    if _existing:
+                        continue
+                    notify(
+                        db,
+                        org_id=org_id,
+                        type=_notif_type,
+                        title=_alert.title,
+                        body=_alert.message,
+                        extra={
+                            "site_id": str(_alert.site_id or ""),
+                            "metric": _alert.metric,
+                            "severity": _alert.severity,
+                            "window_hours": _alert.window_hours,
+                        },
+                    )
+            db.commit()
+        except Exception as _alert_err:
+            logger.warning("alert_notify_failed org_id=%s err=%s", org_id, _alert_err)
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
+    # ────────────────────────────────────────────────────────────────────────────
     errors = [
         TimeseriesBatchError(
             index=err.get("index", -1),
