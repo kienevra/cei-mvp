@@ -143,6 +143,29 @@ def get_opportunities(
             }
         )
 
+    # Fetch production data for normalization (kWh/unit, tCO2/tonne)
+    production_volume: Optional[float] = None
+    production_unit: Optional[str] = None
+    try:
+        from app.models import ProductionRecord
+        from datetime import datetime, timezone, timedelta
+        _window_start = datetime.now(timezone.utc) - timedelta(hours=168)
+        _prod_rows = (
+            db.query(ProductionRecord)
+            .filter(
+                ProductionRecord.site_id == site_id,
+                ProductionRecord.date >= _window_start.date(),
+            )
+            .all()
+        )
+        if _prod_rows:
+            production_volume = sum(
+                float(r.units_produced or 0) for r in _prod_rows
+            )
+            production_unit = _prod_rows[0].unit_label or "units"
+    except Exception:
+        pass
+
     engine = OpportunityEngine()
     auto_opps = engine.suggest_measures(kpis, insights=insights)
 
@@ -151,6 +174,28 @@ def get_opportunities(
     for opp in auto_opps:
         data = dict(opp)
         data.setdefault("source", "auto")
+
+        # Production-normalized fields
+        data["production_volume"] = production_volume
+        data["production_unit"] = production_unit
+
+        kwh_saved = data.get("est_annual_kwh_saved")
+        co2_saved = data.get("est_co2_tons_saved_per_year")
+
+        if production_volume and production_volume > 0 and kwh_saved:
+            data["est_kwh_saved_per_unit"] = round(
+                float(kwh_saved) / production_volume, 4
+            )
+        else:
+            data["est_kwh_saved_per_unit"] = None
+
+        if production_volume and production_volume > 0 and co2_saved:
+            data["est_co2_saved_per_tonne"] = round(
+                float(co2_saved) / production_volume, 6
+            )
+        else:
+            data["est_co2_saved_per_tonne"] = None
+
         normalized_auto.append(data)
 
     # 2) Manual, persisted opportunities for this site (numeric site FK)
