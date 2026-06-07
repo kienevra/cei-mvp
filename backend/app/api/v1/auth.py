@@ -294,6 +294,7 @@ class UserCreate(BaseModel):
     org_type: Optional[str] = None  # "managing" or "standalone"
     ui_lang: Optional[str] = None   # "it" or "en" from CEI UI toggle
     terms_accepted: Optional[bool] = None  # must be True to register
+    aggregate_data_consent: Optional[bool] = None  # optional GDPR consent for anonymised benchmarking
 
 
 @router.post("/signup", response_model=Token, dependencies=[Depends(login_rate_limit)])
@@ -339,6 +340,12 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
     db_user = User(email=email_norm, hashed_password=hashed_password,
                    organization_id=org.id)
     db_user.terms_accepted_at = datetime.now(timezone.utc)
+    if user.aggregate_data_consent:
+        try:
+            db_user.aggregate_data_consent = True
+            db_user.aggregate_data_consent_at = datetime.now(timezone.utc)
+        except Exception:
+            pass
     try:
         db_user.role = "owner"
     except Exception:

@@ -65,7 +65,16 @@ const Terms: React.FC = () => {
           <p>You retain full ownership of all energy data, production data, and operational data you upload to CEI.</p>
           <p>By uploading data, you grant us a limited, non-exclusive licence to process that data solely for the purpose of providing the service to you.</p>
           <p>We will not sell, license, or share your identifiable data with third parties except as described in our <Link to="/privacy" style={{ color: "#22c55e" }}>Privacy Policy</Link>.</p>
-          <p>We may use anonymised, aggregated, non-identifiable data derived from the platform for benchmarking, research, and product improvement purposes.</p>
+          <p><strong style={{ color: "#e2e8f0" }}>5a. Anonymised Aggregate Data (optional consent)</strong></p>
+          <p>With your explicit consent, we may derive anonymised, aggregated, non-identifiable statistics from your energy data for the following purposes:</p>
+          <ul>
+            <li><strong>Sector benchmarking</strong> — computing average kWh/tonne, tCO₂/site, and energy intensity ratios by industry sector and region, used to show how your facility compares to peers</li>
+            <li><strong>Industry indices</strong> — publishing sector-level energy and carbon intensity indices for Italian and EU manufacturing (no facility-level data is ever published)</li>
+            <li><strong>Product improvement</strong> — improving CEI's alert thresholds, baseline models, and opportunity detection algorithms</li>
+            <li><strong>Research</strong> — contributing to academic or regulatory research on industrial decarbonisation</li>
+          </ul>
+          <p>Your identifiable data (organization name, site location, specific consumption figures) is never included in any aggregated output. Aggregation always involves data from a minimum of 10 facilities before any statistic is published or shared.</p>
+          <p>This consent is optional. You can withdraw it at any time via Settings without affecting your access to the platform. If you do not consent, your data is used only to provide the service to you.</p>
         </Section>
 
         <Section title="6. Subscription and Payment">

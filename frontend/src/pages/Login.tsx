@@ -133,6 +133,7 @@ const Login: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [termsAccepted, setTermsAccepted] = useState<boolean>(false);
+  const [aggregateConsent, setAggregateConsent] = useState<boolean>(false);
   
 
   // Redirect if already authenticated
@@ -239,6 +240,7 @@ const Login: React.FC = () => {
           org_type: regType === "manager" ? "managing" : "standalone",
           ui_lang: localStorage.getItem("cei_lang") || undefined,
           terms_accepted: termsAccepted,
+          aggregate_data_consent: aggregateConsent,
         });
         // Login to get token
         await login({ username: email, password });
@@ -490,6 +492,21 @@ const Login: React.FC = () => {
                   <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: "var(--cei-text-accent)", textDecoration: "none" }}>Terms of Service</a>
                   {" "}and{" "}
                   <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: "var(--cei-text-accent)", textDecoration: "none" }}>Privacy Policy</a>
+                </label>
+              </div>
+
+              {/* Aggregate data consent checkbox — optional, separate GDPR basis */}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", padding: "0.25rem 0", borderTop: "1px solid rgba(148,163,184,0.1)", marginTop: "0.25rem", paddingTop: "0.6rem" }}>
+                <input
+                  id="aggregateConsent"
+                  type="checkbox"
+                  checked={aggregateConsent}
+                  onChange={(e) => setAggregateConsent(e.target.checked)}
+                  style={{ marginTop: "2px", flexShrink: 0, cursor: "pointer", width: "16px", height: "16px" }}
+                />
+                <label htmlFor="aggregateConsent" style={{ flex: 1, fontSize: "0.78rem", color: "var(--cei-text-muted)", lineHeight: 1.5, cursor: "pointer" }}>
+                  <span style={{ color: "#94a3b8" }}>(Optional)</span> I consent to CEI using anonymised, aggregated statistics derived from my energy data for sector benchmarking, industry indices, and product improvement. My identifiable data is never shared. I can withdraw this consent at any time via Settings.{" "}
+                  <a href="/terms#aggregate-data" target="_blank" rel="noopener noreferrer" style={{ color: "var(--cei-text-accent)", textDecoration: "none" }}>Learn more</a>
                 </label>
               </div>
 

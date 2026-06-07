@@ -180,6 +180,8 @@ class User(Base):
     role = Column(String, nullable=False, server_default=text("'member'"))
     full_name = Column(String(255), nullable=True)
     terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    aggregate_data_consent = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    aggregate_data_consent_at = Column(DateTime(timezone=True), nullable=True)
 
     organization = relationship("Organization", back_populates="users")
     subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")
