@@ -13,6 +13,210 @@ import ErrorBanner from "../components/ErrorBanner";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import PortfolioTrendChart from "../components/PortfolioTrendChart";
+import { getAlerts } from "../services/api";
+
+// ── Daily Focus Card ──────────────────────────────────────────────────────
+type FocusItem = {
+  color: string;
+  icon: string;
+  text: string;
+  action?: { label: string; href: string };
+};
+
+function DailyFocusCard({
+  trendValues,
+  trendPoints,
+  ingestHealth,
+  missingMeters,
+}: {
+  trendValues: number[];
+  trendPoints: TrendPoint[];
+  ingestHealth: IngestHealthResponse | null;
+  missingMeters: number;
+}) {
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+  const [alertCount, setAlertCount] = useState<{ critical: number; warning: number } | null>(null);
+
+  useEffect(() => {
+    getAlerts({ window_hours: 168 })
+      .then((data: any[]) => {
+        const critical = data.filter((a: any) => a.severity === "critical").length;
+        const warning = data.filter((a: any) => a.severity === "warning").length;
+        setAlertCount({ critical, warning });
+      })
+      .catch(() => setAlertCount({ critical: 0, warning: 0 }));
+  }, []);
+
+  const items: FocusItem[] = [];
+
+  // ── 1. Night baseline analysis ─────────────────────────────────────────
+  if (trendValues.length >= 24) {
+    const nightIndices = trendPoints
+      .map((p, i) => {
+        const h = new Date(0);
+        const parts = p.label.split(":");
+        const hour = parseInt(parts[0], 10);
+        return { i, hour };
+      })
+      .filter(({ hour }) => hour >= 22 || hour < 6)
+      .map(({ i }) => i);
+
+    const dayIndices = trendPoints
+      .map((_, i) => i)
+      .filter(i => !nightIndices.includes(i));
+
+    if (nightIndices.length > 0 && dayIndices.length > 0) {
+      const nightAvg = nightIndices.reduce((s, i) => s + (trendValues[i] || 0), 0) / nightIndices.length;
+      const dayAvg = dayIndices.reduce((s, i) => s + (trendValues[i] || 0), 0) / dayIndices.length;
+      const ratio = dayAvg > 0 ? nightAvg / dayAvg : 0;
+
+      if (ratio >= 0.7) {
+        items.push({
+          color: "#ef4444",
+          icon: "🚨",
+          text: `Night baseline is ${Math.round(ratio * 100)}% of daytime average — significant idle losses likely. Check compressors, HVAC, and furnace standby.`,
+          action: { label: "View Alerts", href: "/alerts" },
+        });
+      } else if (ratio >= 0.4) {
+        items.push({
+          color: "#f59e0b",
+          icon: "⚠️",
+          text: `Night baseline is ${Math.round(ratio * 100)}% of daytime average — some off-shift consumption worth investigating.`,
+          action: { label: "View Alerts", href: "/alerts" },
+        });
+      } else if (ratio > 0) {
+        items.push({
+          color: "#22c55e",
+          icon: "✅",
+          text: `Night baseline looks healthy at ${Math.round(ratio * 100)}% of daytime average.`,
+        });
+      }
+    }
+  }
+
+  // ── 2. Peak spike analysis ─────────────────────────────────────────────
+  if (trendValues.length > 0) {
+    const avg = trendValues.reduce((s, v) => s + v, 0) / trendValues.length;
+    const max = Math.max(...trendValues);
+    const peakIdx = trendValues.indexOf(max);
+    const peakLabel = trendPoints[peakIdx]?.label ?? "—";
+    const ratio = avg > 0 ? max / avg : 0;
+
+    if (ratio >= 3) {
+      items.push({
+        color: "#ef4444",
+        icon: "📈",
+        text: `Extreme peak at ${peakLabel} — ${max.toFixed(0)} kWh, ${ratio.toFixed(1)}× the 24h average. Investigate overlapping batches or unscheduled equipment starts.`,
+      });
+    } else if (ratio >= 2) {
+      items.push({
+        color: "#f59e0b",
+        icon: "📈",
+        text: `Notable peak at ${peakLabel} — ${max.toFixed(0)} kWh, ${ratio.toFixed(1)}× the 24h average.`,
+      });
+    }
+  }
+
+  // ── 3. Critical / warning alerts ──────────────────────────────────────
+  if (alertCount !== null) {
+    if (alertCount.critical > 0) {
+      items.push({
+        color: "#ef4444",
+        icon: "🔴",
+        text: `${alertCount.critical} critical alert${alertCount.critical > 1 ? "s" : ""} active across the fleet.`,
+        action: { label: "View Alerts", href: "/alerts" },
+      });
+    } else if (alertCount.warning > 0) {
+      items.push({
+        color: "#f59e0b",
+        icon: "🟡",
+        text: `${alertCount.warning} warning${alertCount.warning > 1 ? "s" : ""} active — no critical issues.`,
+        action: { label: "View Alerts", href: "/alerts" },
+      });
+    } else {
+      items.push({
+        color: "#22c55e",
+        icon: "✅",
+        text: "No active alerts across the fleet.",
+      });
+    }
+  }
+
+  // ── 4. Ingest health ───────────────────────────────────────────────────
+  if (missingMeters > 0) {
+    items.push({
+      color: "#f59e0b",
+      icon: "📡",
+      text: `${missingMeters} meter${missingMeters > 1 ? "s" : ""} below 90% completeness — check your data pipeline.`,
+    });
+  }
+
+  // ── 5. Fallback ────────────────────────────────────────────────────────
+  if (items.length === 0) {
+    items.push({
+      color: "#94a3b8",
+      icon: "⏳",
+      text: "Upload data or connect a source to generate insights.",
+    });
+  }
+
+  return (
+    <div className="cei-card">
+      <div style={{ marginBottom: "0.75rem" }}>
+        <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
+          {t("dashboard.focus.title", { defaultValue: "What to pay attention to today" })}
+        </div>
+        <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
+          Generated from your last 24 hours of data.
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+        {items.map((item, idx) => (
+          <div key={idx} style={{
+            display: "flex",
+            gap: "0.6rem",
+            alignItems: "flex-start",
+            padding: "0.6rem 0.75rem",
+            borderRadius: "0.5rem",
+            background: "rgba(15,23,42,0.5)",
+            border: `1px solid ${item.color}22`,
+          }}>
+            <span style={{ fontSize: "1rem", flexShrink: 0, marginTop: "0.05rem" }}>{item.icon}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: "0.83rem", color: "var(--cei-text-main)", lineHeight: 1.5 }}>
+                {item.text}
+              </div>
+              {item.action && (
+                <button
+                  type="button"
+                  onClick={() => navigate(item.action!.href)}
+                  style={{
+                    marginTop: "0.35rem",
+                    fontSize: "0.75rem",
+                    color: item.color,
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                    textDecoration: "underline",
+                  }}
+                >
+                  {item.action.label} →
+                </button>
+              )}
+            </div>
+            <span style={{
+              width: "6px", height: "6px", borderRadius: "50%",
+              background: item.color, flexShrink: 0, marginTop: "0.35rem",
+            }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 type SummaryResponse = {
   site_id: string | null;
@@ -732,50 +936,13 @@ const Dashboard: React.FC = () => {
           )}
         </div>
 
-        {/* Right-hand commentary */}
-        <div className="cei-card">
-          <div style={{ marginBottom: "0.6rem" }}>
-            <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-              {t("dashboard.focus.title", { defaultValue: "What to pay attention to today" })}
-            </div>
-            <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              {t("dashboard.focus.subtitle", {
-                defaultValue:
-                  "A lightweight, qualitative layer on top of the raw charts. This is where you turn charts into an action list for operations.",
-              })}
-            </div>
-          </div>
-
-          <ul
-            style={{
-              margin: 0,
-              paddingLeft: "1.1rem",
-              fontSize: "0.84rem",
-              color: "var(--cei-text-main)",
-              lineHeight: 1.6,
-            }}
-          >
-            <li>
-              {t("dashboard.focus.item1", {
-                defaultValue:
-                  "Check whether the overnight baseline looks flat and low. A rising baseline over time usually hides idle losses.",
-              })}
-            </li>
-            <li>
-              {t("dashboard.focus.item2", {
-                defaultValue:
-                  "Compare this 24-hour profile with a known \"good\" day. Look for new peaks or extended high-load zones.",
-              })}
-            </li>
-            <li>
-              {t("dashboard.focus.item3.prefix", { defaultValue: "Use the" })}{" "}
-              <strong>{t("nav.alerts", { defaultValue: "Alerts" })}</strong>{" "}
-              {t("dashboard.focus.item3.suffix", {
-                defaultValue: "page to see which sites are driving any abnormal consumption.",
-              })}
-            </li>
-          </ul>
-        </div>
+        {/* Right-hand commentary — data-driven */}
+        <DailyFocusCard
+          trendValues={trendValues}
+          trendPoints={trendPoints}
+          ingestHealth={ingestHealth}
+          missingMeters={missingMeters}
+        />
       </section>
     </div>
   );
