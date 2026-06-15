@@ -343,22 +343,21 @@ const Reports: React.FC = () => {
             // (We support multiple possible naming conventions to avoid brittle coupling.)
             const backendTotalCost =
               pickNumber(insights, [
+                "actual_cost",
                 "total_actual_cost",
                 "actual_cost_total",
                 "cost_7d_actual",
                 "total_cost",
                 "total_cost_7d",
               ]) ?? null;
-
             const backendExpectedCost =
               pickNumber(insights, [
+                "expected_cost",
                 "total_expected_cost",
                 "expected_cost_total",
                 "cost_7d_baseline",
-                "expected_cost",
                 "expected_cost_7d",
               ]) ?? null;
-
             const backendCostDelta =
               pickNumber(insights, [
                 "cost_delta",
@@ -580,25 +579,39 @@ const Reports: React.FC = () => {
   const sitesWithDataCount = siteRows.filter((r) => r.points7d > 0).length;
 
   const hasTariff =
-    typeof electricityPricePerKwh === "number" &&
-    Number.isFinite(electricityPricePerKwh) &&
-    electricityPricePerKwh > 0;
-
-  // Portfolio-level cost metrics (simple fallback tariff*kWh)
-  const portfolioCost7d =
-    hasTariff && electricityPricePerKwh !== null
-      ? totalKwh7d * electricityPricePerKwh
-      : null;
-
+    // True if ANY site has backend-computed cost data (site-level tariffs)
+    siteRows.some((r) => r.totalCost7d !== null && Number.isFinite(r.totalCost7d)) ||
+    // OR org-level tariff still configured as fallback
+    (typeof electricityPricePerKwh === "number" &&
+      Number.isFinite(electricityPricePerKwh) &&
+      electricityPricePerKwh > 0);
+  // Portfolio-level cost: sum of per-site backend-computed costs
+  const portfolioCost7d = (() => {
+    const siteCosts = siteRows
+      .map((r) => r.totalCost7d)
+      .filter((c): c is number => c !== null && Number.isFinite(c));
+    if (siteCosts.length > 0) return siteCosts.reduce((a, b) => a + b, 0);
+    // fallback: org-level tariff * total kWh
+    if (typeof electricityPricePerKwh === "number" && Number.isFinite(electricityPricePerKwh) && electricityPricePerKwh > 0) {
+      return totalKwh7d * electricityPricePerKwh;
+    }
+    return null;
+  })();
   const avgCostPerActiveSite =
-    hasTariff && portfolioCost7d !== null && sitesWithDataCount > 0
+    portfolioCost7d !== null && sitesWithDataCount > 0
       ? portfolioCost7d / sitesWithDataCount
       : null;
-
-  const pricePerMwh =
-    hasTariff && electricityPricePerKwh !== null
-      ? electricityPricePerKwh * 1000
-      : null;
+  // Price per MWh anchor — use first site with a configured tariff, fall back to org
+  const pricePerMwh = (() => {
+    const firstSiteWithCost = siteRows.find((r) => r.totalCost7d !== null && r.totalKwh7d > 0);
+    if (firstSiteWithCost && firstSiteWithCost.totalCost7d !== null) {
+      return (firstSiteWithCost.totalCost7d / firstSiteWithCost.totalKwh7d) * 1000;
+    }
+    if (typeof electricityPricePerKwh === "number" && Number.isFinite(electricityPricePerKwh) && electricityPricePerKwh > 0) {
+      return electricityPricePerKwh * 1000;
+    }
+    return null;
+  })();
 
   // Max site kWh for bar scaling (mini chart)
   const maxSiteTotalKwh = useMemo(() => {
@@ -1055,7 +1068,7 @@ const Reports: React.FC = () => {
                   })
                 : t("reports.kpis.cost.subtitleNoTariff", {
                     defaultValue:
-                      "Set your electricity tariff in Account & Settings to unlock portfolio cost analytics.",
+                      "Set your electricity tariff in the site configuration panel (⚙️ on each site page) to unlock portfolio cost analytics.",
                   })}
             </div>
           </div>
@@ -1134,7 +1147,7 @@ const Reports: React.FC = () => {
                 <>
                   {t("reports.kpis.tariff.subtitleNoTariff", {
                     defaultValue:
-                      "Configure your electricity price per kWh (and currency) in Account & Settings to get €/MWh anchors.",
+                      "Configure your electricity price per kWh in the site configuration panel on each site page to get €/MWh anchors."
                   })}
                 </>
               )}
