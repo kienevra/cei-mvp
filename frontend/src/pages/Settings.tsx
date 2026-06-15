@@ -16,41 +16,6 @@ import type {
 } from "../types/auth";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 
-// ─── Static country tariff hints ─────────────────────────────────────────────
-// Source: Eurostat / IEA / local utility data (2025 industrial averages).
-// These are ESTIMATES only — users should update with their actual contract rate.
-
-const COUNTRY_TARIFF_HINTS: Record<
-  string,
-  { label: string; electricity: string; gas: string; currency: string; source: string }
-> = {
-  IT: { label: "🇮🇹 Italy",           electricity: "0.2400", gas: "0.0820", currency: "EUR", source: "Eurostat 2025" },
-  DE: { label: "🇩🇪 Germany",         electricity: "0.2100", gas: "0.0750", currency: "EUR", source: "Eurostat 2025" },
-  FR: { label: "🇫🇷 France",          electricity: "0.1650", gas: "0.0680", currency: "EUR", source: "Eurostat 2025" },
-  ES: { label: "🇪🇸 Spain",           electricity: "0.1800", gas: "0.0700", currency: "EUR", source: "Eurostat 2025" },
-  PL: { label: "🇵🇱 Poland",          electricity: "0.1450", gas: "0.0500", currency: "PLN", source: "Eurostat 2025" },
-  NL: { label: "🇳🇱 Netherlands",     electricity: "0.1950", gas: "0.0720", currency: "EUR", source: "Eurostat 2025" },
-  BE: { label: "🇧🇪 Belgium",         electricity: "0.2050", gas: "0.0780", currency: "EUR", source: "Eurostat 2025" },
-  SE: { label: "🇸🇪 Sweden",          electricity: "0.0900", gas: "0.0350", currency: "SEK", source: "Eurostat 2025" },
-  NO: { label: "🇳🇴 Norway",          electricity: "0.0580", gas: "0.0000", currency: "NOK", source: "NVE 2025" },
-  CH: { label: "🇨🇭 Switzerland",     electricity: "0.1900", gas: "0.0700", currency: "CHF", source: "SFOE 2025" },
-  GB: { label: "🇬🇧 United Kingdom",  electricity: "0.2250", gas: "0.0900", currency: "GBP", source: "Ofgem 2025" },
-  US: { label: "🇺🇸 United States",   electricity: "0.0780", gas: "0.0350", currency: "USD", source: "EIA 2025" },
-  CA: { label: "🇨🇦 Canada",          electricity: "0.0850", gas: "0.0380", currency: "CAD", source: "NEB 2025" },
-  AU: { label: "🇦🇺 Australia",       electricity: "0.1100", gas: "0.0480", currency: "AUD", source: "AER 2025" },
-  JP: { label: "🇯🇵 Japan",           electricity: "0.1650", gas: "0.0600", currency: "JPY", source: "METI 2025" },
-  CN: { label: "🇨🇳 China",           electricity: "0.0680", gas: "0.0280", currency: "CNY", source: "NEA 2025" },
-  IN: { label: "🇮🇳 India",           electricity: "0.0750", gas: "0.0300", currency: "INR", source: "CERC 2025" },
-  KE: { label: "🇰🇪 Kenya",           electricity: "0.1750", gas: "0.0000", currency: "KES", source: "KPLC 2025" },
-  NG: { label: "🇳🇬 Nigeria",         electricity: "0.0520", gas: "0.0200", currency: "NGN", source: "NERC 2025" },
-  ZA: { label: "🇿🇦 South Africa",    electricity: "0.0980", gas: "0.0380", currency: "ZAR", source: "Eskom 2025" },
-  GH: { label: "🇬🇭 Ghana",           electricity: "0.0650", gas: "0.0000", currency: "GHS", source: "ECG 2025" },
-  BR: { label: "🇧🇷 Brazil",          electricity: "0.0920", gas: "0.0420", currency: "BRL", source: "ANEEL 2025" },
-  MX: { label: "🇲🇽 Mexico",          electricity: "0.0850", gas: "0.0380", currency: "MXN", source: "CFE 2025" },
-  AE: { label: "🇦🇪 UAE",             electricity: "0.0820", gas: "0.0000", currency: "AED", source: "DEWA 2025" },
-  SA: { label: "🇸🇦 Saudi Arabia",    electricity: "0.0480", gas: "0.0000", currency: "SAR", source: "SEC 2025" },
-};
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type IntegrationToken = {
@@ -212,7 +177,14 @@ const Settings: React.FC = () => {
 
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [savingEmailAlerts, setSavingEmailAlerts] = useState(false);
-  const [unitSystem, setUnitSystem] = useState<"metric" | "imperial">("metric");
+  const [unitSystem, setUnitSystem] = useState<"metric" | "imperial">(() => {
+    try {
+      const saved = localStorage.getItem("cei_unit_system");
+      return saved === "imperial" ? "imperial" : "metric";
+    } catch {
+      return "metric";
+    }
+  });
 
   const [account, setAccount] = useState<AccountMe | null>(null);
   const [accountLoading, setAccountLoading] = useState(false);
@@ -530,7 +502,10 @@ const Settings: React.FC = () => {
                 borderColor: unitSystem === "metric" ? "rgba(34,197,94,0.5)" : "rgba(156,163,175,0.4)",
                 background: unitSystem === "metric" ? "rgba(22,163,74,0.25)" : "transparent",
               }}
-              onClick={() => setUnitSystem("metric")}
+              onClick={() => {
+                setUnitSystem("metric");
+                try { localStorage.setItem("cei_unit_system", "metric"); } catch {}
+              }}
             >
               {t("settings.units.metric")}
             </button>
@@ -541,7 +516,10 @@ const Settings: React.FC = () => {
                 borderColor: unitSystem === "imperial" ? "rgba(34,197,94,0.5)" : "rgba(156,163,175,0.4)",
                 background: unitSystem === "imperial" ? "rgba(22,163,74,0.25)" : "transparent",
               }}
-              onClick={() => setUnitSystem("imperial")}
+              onClick={() => {
+                setUnitSystem("imperial");
+                try { localStorage.setItem("cei_unit_system", "imperial"); } catch {}
+              }}
             >
               {t("settings.units.imperial")}
             </button>
@@ -557,319 +535,6 @@ const Settings: React.FC = () => {
           </div>
         </section>
       )}
-
-      {/* ── Energy & tariffs ── */}
-      <section className="dashboard-row">
-        <div className="cei-card" style={{ width: "100%" }}>
-          <div
-            style={{
-              fontSize: "0.9rem",
-              fontWeight: 600,
-              marginBottom: "0.5rem",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: "0.75rem",
-              flexWrap: "wrap",
-            }}
-          >
-            <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <span>{t("settings.energyTariffs.title")}</span>
-
-              {!canManageOrgSensitiveSettings && account && org && (
-                <span className="cei-pill-muted" style={{ fontSize: "0.75rem" }}>
-                  {t("settings.energyTariffs.ownerOnly")}
-                </span>
-              )}
-
-              {account && org && !pricingConfigured && (
-                <span
-                  style={{
-                    fontSize: "0.72rem",
-                    padding: "0.2rem 0.6rem",
-                    borderRadius: 999,
-                    background: "rgba(251,146,60,0.15)",
-                    border: "1px solid rgba(251,146,60,0.35)",
-                    color: "#fb923c",
-                    fontWeight: 600,
-                  }}
-                >
-                  ⚡ Not configured — cost KPIs inactive
-                </span>
-              )}
-
-              {pricingConfigured && (
-                <span
-                  style={{
-                    fontSize: "0.72rem",
-                    padding: "0.2rem 0.6rem",
-                    borderRadius: 999,
-                    background: "rgba(34,197,94,0.12)",
-                    border: "1px solid rgba(34,197,94,0.3)",
-                    color: "#22c55e",
-                    fontWeight: 600,
-                  }}
-                >
-                  ✓ Cost KPIs active
-                </span>
-              )}
-            </span>
-
-            <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-              {t("settings.energyTariffs.help")}
-            </span>
-          </div>
-
-          {!canManageOrgSensitiveSettings && account && org && (
-            <div className="cei-pill-muted" style={{ marginBottom: "0.6rem", fontSize: "0.8rem" }}>
-              {t("settings.energyTariffs.readOnlyNotice")}
-            </div>
-          )}
-
-          {accountLoading ? (
-            <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              {t("settings.energyTariffs.loading")}
-            </div>
-          ) : accountError ? (
-            <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>{accountError}</div>
-          ) : !account ? (
-            <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              {t("settings.energyTariffs.accountNotReady")}
-            </div>
-          ) : !org ? (
-            <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
-              {t("settings.energyTariffs.noOrg")}
-            </div>
-          ) : (
-            <form
-              onSubmit={handleOrgSettingsSubmit}
-              style={{
-                marginTop: "0.75rem",
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: "0.75rem",
-                fontSize: "0.8rem",
-              }}
-            >
-
-              {/* ── Country selector ── */}
-              <div style={{ gridColumn: "1 / -1" }}>
-                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 500, marginBottom: "0.2rem" }}>
-                  Country <span style={{ color: "var(--cei-text-muted)", fontWeight: 400 }}>(pre-fills estimated rates — update with your actual contract tariff)</span>
-                </label>
-                <select
-                  value={countryHintKey}
-                  onChange={(e) => handleCountryHintChange(e.target.value)}
-                  disabled={!canManageOrgSensitiveSettings}
-                  style={{
-                    width: "100%",
-                    padding: "0.4rem 0.6rem",
-                    borderRadius: "0.375rem",
-                    border: "1px solid rgba(156,163,175,0.4)",
-                    backgroundColor: "rgba(15,23,42,0.8)",
-                    color: "var(--cei-text)",
-                    fontSize: "0.85rem",
-                    ...(canManageOrgSensitiveSettings ? {} : disabledFieldStyle),
-                  }}
-                >
-                  <option value="">— Select your country for rate guidance —</option>
-                  {Object.entries(COUNTRY_TARIFF_HINTS).map(([code, { label }]) => (
-                    <option key={code} value={code}>{label}</option>
-                  ))}
-                </select>
-
-                {/* Hint badge — shown when a country is selected */}
-                {activeHint && (
-                  <div
-                    style={{
-                      marginTop: "0.5rem",
-                      padding: "10px 14px",
-                      borderRadius: 8,
-                      background: hintApplied
-                        ? "rgba(56,189,248,0.08)"
-                        : "rgba(148,163,184,0.06)",
-                      border: `1px solid ${hintApplied ? "rgba(56,189,248,0.25)" : "rgba(148,163,184,0.15)"}`,
-                      fontSize: "0.78rem",
-                      color: "var(--cei-text-muted)",
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: 10,
-                      transition: "all 0.3s",
-                    }}
-                  >
-                    <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0 }}>💡</span>
-                    <div>
-                      <span style={{ color: hintApplied ? "#38bdf8" : "var(--cei-text-muted)", fontWeight: 600 }}>
-                        {hintApplied ? "Rates pre-filled from estimate — " : ""}
-                        {activeHint.label} industrial average ({activeHint.source}):
-                      </span>
-                      {" "}
-                      electricity <strong style={{ color: "var(--cei-text-main)" }}>{activeHint.currency} {activeHint.electricity}/kWh</strong>
-                      {activeHint.gas !== "0.0000" && (
-                        <>, gas <strong style={{ color: "var(--cei-text-main)" }}>{activeHint.currency} {activeHint.gas}/kWh</strong></>
-                      )}.
-                      {" "}
-                      <span style={{ color: "#fb923c" }}>
-                        Update with your actual contract rate for precise savings calculations.
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Primary energy sources */}
-              <div style={{ gridColumn: "1 / -1" }}>
-                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 500, marginBottom: "0.2rem" }}>
-                  {t("settings.energyTariffs.fields.primaryEnergySources.label")}
-                </label>
-                <input
-                  type="text"
-                  placeholder={t("settings.energyTariffs.fields.primaryEnergySources.placeholder")}
-                  value={primaryEnergySources}
-                  onChange={(e) => setPrimaryEnergySources(e.target.value)}
-                  disabled={!canManageOrgSensitiveSettings}
-                  style={{
-                    width: "100%",
-                    padding: "0.4rem 0.6rem",
-                    borderRadius: "0.375rem",
-                    border: "1px solid rgba(156,163,175,0.4)",
-                    backgroundColor: "rgba(15,23,42,0.8)",
-                    color: "var(--cei-text)",
-                    ...(canManageOrgSensitiveSettings ? {} : disabledFieldStyle),
-                  }}
-                />
-                <div style={{ marginTop: "0.2rem", fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-                  {t("settings.energyTariffs.fields.primaryEnergySources.help")}
-                </div>
-              </div>
-
-              {/* Electricity price */}
-              <div>
-                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 500, marginBottom: "0.2rem" }}>
-                  {t("settings.energyTariffs.fields.electricityPrice.label")}
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.0001"
-                  placeholder={t("settings.energyTariffs.fields.electricityPrice.placeholder")}
-                  value={electricityPriceInput}
-                  onChange={(e) => setElectricityPriceInput(e.target.value)}
-                  disabled={!canManageOrgSensitiveSettings}
-                  style={{
-                    width: "100%",
-                    padding: "0.4rem 0.6rem",
-                    borderRadius: "0.375rem",
-                    border: `1px solid ${elecReady ? "rgba(34,197,94,0.4)" : "rgba(156,163,175,0.4)"}`,
-                    backgroundColor: "rgba(15,23,42,0.8)",
-                    color: "var(--cei-text)",
-                    ...(canManageOrgSensitiveSettings ? {} : disabledFieldStyle),
-                  }}
-                />
-                {elecReady && (
-                  <div style={{ marginTop: "0.2rem", fontSize: "0.72rem", color: "#22c55e" }}>
-                    ✓ {Number(electricityPriceInput).toFixed(4)} {normalizeCurrencyCode(currencyCodeInput) || "—"}/kWh
-                    {" "}≈ {(Number(electricityPriceInput) * 1000).toFixed(2)} /MWh
-                  </div>
-                )}
-              </div>
-
-              {/* Gas price */}
-              <div>
-                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 500, marginBottom: "0.2rem" }}>
-                  {t("settings.energyTariffs.fields.gasPrice.label")}
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.0001"
-                  placeholder={t("settings.energyTariffs.fields.gasPrice.placeholder")}
-                  value={gasPriceInput}
-                  onChange={(e) => setGasPriceInput(e.target.value)}
-                  disabled={!canManageOrgSensitiveSettings}
-                  style={{
-                    width: "100%",
-                    padding: "0.4rem 0.6rem",
-                    borderRadius: "0.375rem",
-                    border: `1px solid ${gasReady ? "rgba(34,197,94,0.4)" : "rgba(156,163,175,0.4)"}`,
-                    backgroundColor: "rgba(15,23,42,0.8)",
-                    color: "var(--cei-text)",
-                    ...(canManageOrgSensitiveSettings ? {} : disabledFieldStyle),
-                  }}
-                />
-              </div>
-
-              {/* Currency code */}
-              <div>
-                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 500, marginBottom: "0.2rem" }}>
-                  {t("settings.energyTariffs.fields.currencyCode.label")}
-                </label>
-                <input
-                  type="text"
-                  maxLength={3}
-                  placeholder={t("settings.energyTariffs.fields.currencyCode.placeholder")}
-                  value={currencyCodeInput}
-                  onChange={(e) => setCurrencyCodeInput(normalizeCurrencyCode(e.target.value))}
-                  disabled={!canManageOrgSensitiveSettings}
-                  style={{
-                    width: "100%",
-                    padding: "0.4rem 0.6rem",
-                    borderRadius: "0.375rem",
-                    border: `1px solid ${currencyReady ? "rgba(34,197,94,0.4)" : "rgba(156,163,175,0.4)"}`,
-                    backgroundColor: "rgba(15,23,42,0.8)",
-                    color: "var(--cei-text)",
-                    ...(canManageOrgSensitiveSettings ? {} : disabledFieldStyle),
-                  }}
-                />
-              </div>
-
-              {/* Footer row */}
-              <div
-                style={{
-                  gridColumn: "1 / -1",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginTop: "0.4rem",
-                  gap: "0.5rem",
-                  flexWrap: "wrap",
-                }}
-              >
-                <div style={{ minHeight: "1.1rem" }}>
-                  {orgSettingsError && (
-                    <div style={{ fontSize: "0.75rem", color: "#f87171" }}>{orgSettingsError}</div>
-                  )}
-                  {orgSettingsSaved && !orgSettingsError && (
-                    <div style={{ fontSize: "0.75rem", color: "#4ade80" }}>
-                      ✓ {t("settings.energyTariffs.messages.saved")} — cost KPIs are now active across all sites.
-                    </div>
-                  )}
-                  {!hasTariffConfig && !orgSettingsError && !orgSettingsSaved && (
-                    <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-                      {t("settings.energyTariffs.messages.fallbackKwhOnly")}
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  type="submit"
-                  className="cei-btn"
-                  disabled={!canManageOrgSensitiveSettings || savingOrgSettings}
-                  style={{
-                    whiteSpace: "nowrap",
-                    opacity: !canManageOrgSensitiveSettings || savingOrgSettings ? 0.7 : 1,
-                  }}
-                  title={!canManageOrgSensitiveSettings ? t("settings.energyTariffs.validation.ownerOnlyEdit") : undefined}
-                >
-                  {savingOrgSettings
-                    ? t("settings.energyTariffs.actions.saving")
-                    : t("settings.energyTariffs.actions.saveEnergySettings")}
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
-      </section>
 
       {/* ── Integration tokens ── */}
       {account && org && (

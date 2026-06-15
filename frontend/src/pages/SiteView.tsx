@@ -34,6 +34,36 @@ import RegulatoryIntelligenceCard from "../components/RegulatoryIntelligenceCard
 import { useSiteSocket } from "../hooks/useSiteSocket";
 import LiveIndicator from "../components/LiveIndicator";
 
+// ── Country tariff hints (moved from Settings) ────────────────────────────
+const COUNTRY_TARIFF_HINTS: Record<string, { label: string; electricity: string; gas: string; currency: string; source: string }> = {
+  IT: { label: "🇮🇹 Italy",          electricity: "0.2400", gas: "0.0820", currency: "EUR", source: "Eurostat 2025" },
+  DE: { label: "🇩🇪 Germany",        electricity: "0.2100", gas: "0.0750", currency: "EUR", source: "Eurostat 2025" },
+  FR: { label: "🇫🇷 France",         electricity: "0.1650", gas: "0.0680", currency: "EUR", source: "Eurostat 2025" },
+  ES: { label: "🇪🇸 Spain",          electricity: "0.1800", gas: "0.0700", currency: "EUR", source: "Eurostat 2025" },
+  PL: { label: "🇵🇱 Poland",         electricity: "0.1450", gas: "0.0500", currency: "PLN", source: "Eurostat 2025" },
+  NL: { label: "🇳🇱 Netherlands",    electricity: "0.1950", gas: "0.0720", currency: "EUR", source: "Eurostat 2025" },
+  BE: { label: "🇧🇪 Belgium",        electricity: "0.2050", gas: "0.0780", currency: "EUR", source: "Eurostat 2025" },
+  SE: { label: "🇸🇪 Sweden",         electricity: "0.0900", gas: "0.0350", currency: "SEK", source: "Eurostat 2025" },
+  NO: { label: "🇳🇴 Norway",         electricity: "0.0580", gas: "0.0000", currency: "NOK", source: "NVE 2025" },
+  CH: { label: "🇨🇭 Switzerland",    electricity: "0.1900", gas: "0.0700", currency: "CHF", source: "SFOE 2025" },
+  GB: { label: "🇬🇧 United Kingdom", electricity: "0.2250", gas: "0.0900", currency: "GBP", source: "Ofgem 2025" },
+  US: { label: "🇺🇸 United States",  electricity: "0.0780", gas: "0.0350", currency: "USD", source: "EIA 2025" },
+  CA: { label: "🇨🇦 Canada",         electricity: "0.0850", gas: "0.0380", currency: "CAD", source: "NEB 2025" },
+  AU: { label: "🇦🇺 Australia",      electricity: "0.1100", gas: "0.0480", currency: "AUD", source: "AER 2025" },
+  JP: { label: "🇯🇵 Japan",          electricity: "0.1650", gas: "0.0600", currency: "JPY", source: "METI 2025" },
+  CN: { label: "🇨🇳 China",          electricity: "0.0680", gas: "0.0280", currency: "CNY", source: "NEA 2025" },
+  IN: { label: "🇮🇳 India",          electricity: "0.0750", gas: "0.0300", currency: "INR", source: "CERC 2025" },
+  KE: { label: "🇰🇪 Kenya",          electricity: "0.1750", gas: "0.0000", currency: "KES", source: "KPLC 2025" },
+  NG: { label: "🇳🇬 Nigeria",        electricity: "0.0520", gas: "0.0200", currency: "NGN", source: "NERC 2025" },
+  ZA: { label: "🇿🇦 South Africa",   electricity: "0.0980", gas: "0.0380", currency: "ZAR", source: "Eskom 2025" },
+  GH: { label: "🇬🇭 Ghana",          electricity: "0.0650", gas: "0.0000", currency: "GHS", source: "ECG 2025" },
+  BR: { label: "🇧🇷 Brazil",         electricity: "0.0920", gas: "0.0420", currency: "BRL", source: "ANEEL 2025" },
+  MX: { label: "🇲🇽 Mexico",         electricity: "0.0850", gas: "0.0380", currency: "MXN", source: "CFE 2025" },
+  AE: { label: "🇦🇪 UAE",            electricity: "0.0820", gas: "0.0000", currency: "AED", source: "DEWA 2025" },
+  SA: { label: "🇸🇦 Saudi Arabia",   electricity: "0.0480", gas: "0.0000", currency: "SAR", source: "SEC 2025" },
+  ET: { label: "🇪🇹 Ethiopia",       electricity: "0.0600", gas: "0.0000", currency: "ETB", source: "EEU 2025" },
+};
+
 type SiteRecord = {
   id: number | string;
   name: string;
@@ -1316,7 +1346,7 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
                 <span
                   className="cei-pill cei-pill-neutral"
                   title={t("siteView.snapshot.noTariffsTooltip", {
-                    defaultValue: "Configure tariffs under Settings to enable € KPIs.",
+                    defaultValue: "Configure tariffs in the site configuration panel below to enable € KPIs.",
                   })}
                 >
                   {t("siteView.snapshot.noTariffs", { defaultValue: "No tariffs configured – showing kWh only" })}
@@ -1534,7 +1564,7 @@ const SiteView: React.FC<{ backTo?: string }> = ({ backTo }) => {
                   <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
                     {t("siteView.cost.disabled", {
                       defaultValue:
-                        "Cost analytics for this site will light up once tariffs are configured for your organization. You can review these under Account & Settings.",
+                        "Cost analytics for this site will light up once tariffs are configured. Use the site configuration panel (⚙️ Configurazione impianto) below to set electricity price, gas price, and currency.",
                     })}
                   </div>
                 )}
@@ -1999,6 +2029,21 @@ function SiteConfigPanel({ siteId }: { siteId: number }) {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<SiteConfig>>({});
+  const [countryHintKey, setCountryHintKey] = useState("");
+  const { t } = useTranslation();
+
+  const handleCountryHintChange = (code: string) => {
+    setCountryHintKey(code);
+    if (!code) return;
+    const hint = COUNTRY_TARIFF_HINTS[code];
+    if (!hint) return;
+    setForm(f => ({
+      ...f,
+      electricity_price_per_kwh: parseFloat(hint.electricity),
+      gas_price_per_kwh: hint.gas && hint.gas !== "0.0000" ? parseFloat(hint.gas) : f.gas_price_per_kwh,
+      currency_code: hint.currency,
+    }));
+  };
 
   useEffect(() => {
     getSiteConfig(siteId).then(c => { setConfig(c); setForm(c); }).catch(() => {});
@@ -2023,11 +2068,11 @@ function SiteConfigPanel({ siteId }: { siteId: number }) {
       });
       setConfig(updated);
       setForm(updated);
-      setSaveMsg("✓ Salvato");
+      setSaveMsg(t("siteConfig.panel.saved", { defaultValue: "✓ Saved" }));
       // Refresh emissions with new config
       calculateSiteEmissions(siteId, 168).then(setEmissions).catch(() => {});
       setTimeout(() => setSaveMsg(null), 2500);
-    } catch { setSaveMsg("Errore nel salvataggio"); }
+    } catch { setSaveMsg(t("siteConfig.panel.saveError", { defaultValue: "Save error" })); }
     finally { setSaving(false); }
   };
 
@@ -2131,9 +2176,9 @@ function SiteConfigPanel({ siteId }: { siteId: number }) {
         }}
       >
         <span style={{ fontWeight: 600, color: "var(--cei-text-main)" }}>
-          ⚙️ Configurazione impianto (energia & emissioni)
+          ⚙️ {t("siteConfig.panel.title", { defaultValue: "Plant Configuration (energy & emissions)" })}
         </span>
-        <span style={{ fontSize: "0.75rem" }}>{open ? "▲ Chiudi" : "▼ Configura"}</span>
+        <span style={{ fontSize: "0.75rem" }}>{open ? `▲ ${t("siteConfig.panel.close", { defaultValue: "Close" })}` : `▼ ${t("siteConfig.panel.configure", { defaultValue: "Configure" })}`}</span>
       </button>
 
       {open && (
@@ -2144,13 +2189,44 @@ function SiteConfigPanel({ siteId }: { siteId: number }) {
         }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 2rem" }}>
             <div>
-              <div style={{ fontWeight: 600, fontSize: "0.82rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "0.75rem" }}>Tariffe energetiche</div>
-              {row("Elettricità (€/kWh)", <input style={inp} type="number" step="0.0001" min="0" value={form.electricity_price_per_kwh ?? ""} onChange={e => setForm(f => ({ ...f, electricity_price_per_kwh: e.target.value ? parseFloat(e.target.value) : null as any }))} placeholder="es. 0.23" />)}
-              {row("Gas (€/kWh)", <input style={inp} type="number" step="0.0001" min="0" value={form.gas_price_per_kwh ?? ""} onChange={e => setForm(f => ({ ...f, gas_price_per_kwh: e.target.value ? parseFloat(e.target.value) : null as any }))} placeholder="es. 0.08" />)}
-              {row("Valuta", <input style={{ ...inp, maxWidth: "80px" }} value={form.currency_code ?? ""} onChange={e => setForm(f => ({ ...f, currency_code: e.target.value }))} placeholder="EUR" maxLength={3} />)}
+              <div style={{ fontWeight: 600, fontSize: "0.82rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "0.75rem" }}>
+                {t("siteConfig.tariffs.title", { defaultValue: "Energy Tariffs" })}
+              </div>
+              {row(
+                t("siteConfig.tariffs.country", { defaultValue: "Country (pre-fills estimated rates)" }),
+                <select
+                  style={inp}
+                  value={countryHintKey}
+                  onChange={e => handleCountryHintChange(e.target.value)}
+                >
+                  <option value="">{t("siteConfig.tariffs.selectCountry", { defaultValue: "— Select country for rate guidance —" })}</option>
+                  {Object.entries(COUNTRY_TARIFF_HINTS).map(([code, { label }]) => (
+                    <option key={code} value={code}>{label}</option>
+                  ))}
+                </select>
+              )}
+              {countryHintKey && COUNTRY_TARIFF_HINTS[countryHintKey] && (
+                <div style={{ fontSize: "0.72rem", color: "var(--cei-text-muted)", marginBottom: "0.5rem", paddingLeft: "0.25rem" }}>
+                  {t("siteConfig.tariffs.estimatedRates", { defaultValue: "Estimated rates from" })} {COUNTRY_TARIFF_HINTS[countryHintKey].source} — {t("siteConfig.tariffs.updateWithActual", { defaultValue: "update with your actual contract tariff" })}
+                </div>
+              )}
+              {row(
+                t("siteConfig.tariffs.electricity", { defaultValue: "Electricity (per kWh)" }),
+                <input style={inp} type="number" step="0.0001" min="0" value={form.electricity_price_per_kwh ?? ""} onChange={e => setForm(f => ({ ...f, electricity_price_per_kwh: e.target.value ? parseFloat(e.target.value) : null as any }))} placeholder="e.g. 0.23" />
+              )}
+              {row(
+                t("siteConfig.tariffs.gas", { defaultValue: "Gas (per kWh)" }),
+                <input style={inp} type="number" step="0.0001" min="0" value={form.gas_price_per_kwh ?? ""} onChange={e => setForm(f => ({ ...f, gas_price_per_kwh: e.target.value ? parseFloat(e.target.value) : null as any }))} placeholder="e.g. 0.08" />
+              )}
+              {row(
+                t("siteConfig.tariffs.currency", { defaultValue: "Currency" }),
+                <input style={{ ...inp, maxWidth: "80px" }} value={form.currency_code ?? ""} onChange={e => setForm(f => ({ ...f, currency_code: e.target.value }))} placeholder="EUR" maxLength={3} />
+              )}
             </div>
             <div>
-              <div style={{ fontWeight: 600, fontSize: "0.82rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "0.75rem" }}>Configurazione emissioni</div>
+              <div style={{ fontWeight: 600, fontSize: "0.82rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "0.75rem" }}>
+                {t("siteConfig.emissions.title", { defaultValue: "Emissions Configuration" })}
+              </div>
               {row("Paese", <input style={{ ...inp, maxWidth: "80px" }} value={form.country_code ?? ""} onChange={e => setForm(f => ({ ...f, country_code: e.target.value.toUpperCase() }))} placeholder="ITA" maxLength={3} />)}
               {row("Framework", (
                 <select style={inp} value={form.framework ?? ""} onChange={e => setForm(f => ({ ...f, framework: e.target.value }))}>
