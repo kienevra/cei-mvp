@@ -12,7 +12,6 @@ import {
 import type {
   AccountMe,
   OrganizationSummary,
-  OrgSettingsUpdateRequest,
 } from "../types/auth";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 
@@ -60,15 +59,6 @@ function fmtIsoOrRaw(val: string | null | undefined): string {
   return d.toLocaleString();
 }
 
-function normalizeCurrencyCode(code: string): string {
-  return (code || "").trim().toUpperCase().slice(0, 3);
-}
-
-function isValidNonNegNumberString(s: string): boolean {
-  if (s.trim() === "") return true;
-  const n = Number(s);
-  return Number.isFinite(n) && n >= 0;
-}
 
 function getOrgFromAccount(acc: any): OrganizationSummary | null {
   if (!acc) return null;
@@ -83,22 +73,6 @@ function canManageSensitiveSettings(roleRaw: string): boolean {
   return roleRaw === "owner" || roleRaw === "admin";
 }
 
-function parsePrimaryEnergySources(org: any, accAny: any): string {
-  const p = org?.primary_energy_sources;
-  if (Array.isArray(p)) return p.join(", ");
-  if (typeof p === "string") return p;
-  if (Array.isArray(accAny?.primary_energy_sources)) return accAny.primary_energy_sources.join(", ");
-  if (typeof accAny?.primary_energy_sources === "string") return accAny.primary_energy_sources;
-  return "";
-}
-
-function parseNumberToInput(val: unknown): string {
-  return typeof val === "number" ? String(val) : "";
-}
-
-function parseStringToInput(val: unknown): string {
-  return typeof val === "string" ? val : "";
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 function PushNotificationCard() {
@@ -190,23 +164,6 @@ const Settings: React.FC = () => {
   const [accountLoading, setAccountLoading] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
 
-  const [savingOrgSettings, setSavingOrgSettings] = useState(false);
-  const [orgSettingsError, setOrgSettingsError] = useState<string | null>(null);
-  const [orgSettingsSaved, setOrgSettingsSaved] = useState(false);
-
-  const [primaryEnergySources, setPrimaryEnergySources] = useState("");
-  const [electricityPriceInput, setElectricityPriceInput] = useState("");
-  const [gasPriceInput, setGasPriceInput] = useState("");
-  const [currencyCodeInput, setCurrencyCodeInput] = useState("");
-
-  // Country hint — frontend-only, persisted to localStorage
-  const [countryHintKey, setCountryHintKey] = useState<string>(
-    () => {
-      try { return localStorage.getItem("cei_country_hint") || ""; } catch { return ""; }
-    }
-  );
-  const [hintApplied, setHintApplied] = useState(false);
-
   const [tokens, setTokens] = useState<IntegrationToken[]>([]);
   const [tokensLoading, setTokensLoading] = useState(false);
   const [tokensError, setTokensError] = useState<string | null>(null);
@@ -230,70 +187,17 @@ const Settings: React.FC = () => {
     cursor: "not-allowed",
   };
 
-  const currencyReady = normalizeCurrencyCode(currencyCodeInput).length === 3;
-  const elecReady = electricityPriceInput.trim() !== "" && Number(electricityPriceInput) > 0;
-  const gasReady = gasPriceInput.trim() !== "" && Number(gasPriceInput) > 0;
-  const pricingConfigured = currencyReady && (elecReady || gasReady);
-
-  const hasTariffConfig =
-    primaryEnergySources.trim().length > 0 ||
-    electricityPriceInput.trim().length > 0 ||
-    gasPriceInput.trim().length > 0 ||
-    currencyCodeInput.trim().length > 0;
-
-  const activeHint = countryHintKey ? COUNTRY_TARIFF_HINTS[countryHintKey] : null;
-
-  // ── Country hint handler ──────────────────────────────────────────────────
-  const handleCountryHintChange = (code: string) => {
-    setCountryHintKey(code);
-    setHintApplied(false);
-    try { localStorage.setItem("cei_country_hint", code); } catch {}
-
-    if (!code) return;
-    const hint = COUNTRY_TARIFF_HINTS[code];
-    if (!hint) return;
-
-    // Pre-fill all tariff fields with estimated values
-    setElectricityPriceInput(hint.electricity);
-    if (hint.gas !== "0.0000") setGasPriceInput(hint.gas);
-    setCurrencyCodeInput(hint.currency);
-    setHintApplied(true);
-    setOrgSettingsSaved(false);
-
-    // Clear the "applied" badge after 4 seconds
-    setTimeout(() => setHintApplied(false), 4000);
-  };
-
   useEffect(() => {
     loadAccount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const applyOrgToFormState = (orgFromData: OrganizationSummary | null, anyData: any) => {
-    if (!orgFromData) {
-      setPrimaryEnergySources("");
-      setElectricityPriceInput("");
-      setGasPriceInput("");
-      setCurrencyCodeInput("");
-      return;
-    }
-     setEmailAlerts(
+    if (!orgFromData) return;
+    setEmailAlerts(
       typeof (orgFromData as any).enable_notification_emails === "boolean"
         ? (orgFromData as any).enable_notification_emails
         : true
-    );
-    setPrimaryEnergySources(parsePrimaryEnergySources(orgFromData as any, anyData));
-    setElectricityPriceInput(
-      parseNumberToInput((orgFromData as any)?.electricity_price_per_kwh) ||
-        parseNumberToInput(anyData?.electricity_price_per_kwh)
-    );
-    setGasPriceInput(
-      parseNumberToInput((orgFromData as any)?.gas_price_per_kwh) ||
-        parseNumberToInput(anyData?.gas_price_per_kwh)
-    );
-    setCurrencyCodeInput(
-      parseStringToInput((orgFromData as any)?.currency_code) ||
-        parseStringToInput(anyData?.currency_code)
     );
   };
 
@@ -313,8 +217,6 @@ const Settings: React.FC = () => {
   const loadAccount = async () => {
     setAccountLoading(true);
     setAccountError(null);
-    setOrgSettingsError(null);
-    setOrgSettingsSaved(false);
     try {
       const data = await getAccountMe();
       setAccount(data);
@@ -381,65 +283,6 @@ const Settings: React.FC = () => {
       setCopiedTokenSecret(true);
       window.setTimeout(() => setCopiedTokenSecret(false), 1500);
     } catch {}
-  };
-
-  const handleOrgSettingsSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!account) {
-      setOrgSettingsError(t("settings.energyTariffs.validation.accountNotLoaded"));
-      return;
-    }
-    if (!canManageOrgSensitiveSettings) {
-      setOrgSettingsError(t("settings.energyTariffs.validation.ownerOnlyEdit"));
-      return;
-    }
-    const anyAcc: any = account;
-    const orgFromAccount = getOrgFromAccount(anyAcc);
-    if (!orgFromAccount) {
-      setOrgSettingsError(t("settings.energyTariffs.validation.noOrg"));
-      return;
-    }
-    const cc = normalizeCurrencyCode(currencyCodeInput);
-    if (currencyCodeInput.trim() !== "" && cc.length !== 3) {
-      setOrgSettingsError(t("settings.energyTariffs.validation.currencyCodeInvalid"));
-      return;
-    }
-    if (!isValidNonNegNumberString(electricityPriceInput)) {
-      setOrgSettingsError(t("settings.energyTariffs.validation.electricityNonNegative"));
-      return;
-    }
-    if (!isValidNonNegNumberString(gasPriceInput)) {
-      setOrgSettingsError(t("settings.energyTariffs.validation.gasNonNegative"));
-      return;
-    }
-
-    setOrgSettingsError(null);
-    setOrgSettingsSaved(false);
-    setSavingOrgSettings(true);
-
-    const payload: OrgSettingsUpdateRequest = {
-      primary_energy_sources:
-        primaryEnergySources.trim() === "" ? null : primaryEnergySources.trim(),
-      electricity_price_per_kwh:
-        electricityPriceInput.trim() === "" ? null : Number(electricityPriceInput.trim()),
-      gas_price_per_kwh:
-        gasPriceInput.trim() === "" ? null : Number(gasPriceInput.trim()),
-      currency_code:
-        currencyCodeInput.trim() === "" ? null : cc,
-    };
-
-    try {
-      const updated = await updateOrgSettings(payload);
-      setAccount(updated);
-      const updatedAny: any = updated || {};
-      const updatedOrg = getOrgFromAccount(updatedAny);
-      applyOrgToFormState(updatedOrg, updatedAny);
-      setOrgSettingsSaved(true);
-    } catch (err: any) {
-      setOrgSettingsError(toUiMessage(err, t("errors.generic")));
-    } finally {
-      setSavingOrgSettings(false);
-    }
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
