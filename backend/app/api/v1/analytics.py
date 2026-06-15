@@ -454,28 +454,49 @@ def _get_org_for_org_id(
         .first()
     )
 
+def _get_site_for_site_id(
+    db: Session,
+    site_id_canon: Optional[str],
+) -> Optional[core_models.Site]:
+    if not site_id_canon:
+        return None
+    n = _try_parse_site_numeric_id(site_id_canon)
+    if n is None:
+        return None
+    return (
+        db.query(core_models.Site)
+        .filter(core_models.Site.id == n)
+        .first()
+    )
+
 
 def _compute_cost_from_kwh(
     *,
     actual_kwh: float,
     expected_kwh: Optional[float],
     org: Optional[core_models.Organization],
+    site: Optional[core_models.Site] = None,
 ) -> Dict[str, Optional[float]]:
-    if org is None:
+    if org is None and site is None:
         return {
             "actual_cost": None,
             "expected_cost": None,
             "cost_delta": None,
             "currency_code": None,
         }
-
-    price = getattr(org, "electricity_price_per_kwh", None)
+    # Prefer site-level tariffs, fall back to org-level
+    price = getattr(site, "electricity_price_per_kwh", None) if site else None
+    currency = getattr(site, "currency_code", None) if site else None
+    if price is None:
+        price = getattr(org, "electricity_price_per_kwh", None) if org else None
+    if currency is None:
+        currency = getattr(org, "currency_code", None) if org else None
     if price is None:
         return {
             "actual_cost": None,
             "expected_cost": None,
             "cost_delta": None,
-            "currency_code": getattr(org, "currency_code", None),
+            "currency_code": currency,
         }
 
     try:
@@ -500,7 +521,7 @@ def _compute_cost_from_kwh(
         "actual_cost": actual_cost,
         "expected_cost": expected_cost,
         "cost_delta": cost_delta,
-        "currency_code": getattr(org, "currency_code", None),
+        "currency_code": currency,
     }
 
 
@@ -669,10 +690,9 @@ def get_site_insights(
 ) -> SiteInsightsOut:
     org_id, user_id = _resolve_org_context_from_ctx(org_ctx)
     org = _get_org_for_org_id(db, org_id)
-
     site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
+    site = _get_site_for_site_id(db, site_id_canon)
     allowed_site_ids = _get_allowed_site_ids(db, org_id)
-
     baseline = compute_baseline_profile(
         db=db,
         site_id=site_id_canon,
@@ -765,6 +785,7 @@ def get_site_insights(
         actual_kwh=total_actual_kwh,
         expected_kwh=total_expected_kwh if total_expected_raw is not None else None,
         org=org,
+        site=site,
     )
 
     try:
@@ -850,6 +871,7 @@ def get_site_kpi(
     org = _get_org_for_org_id(db, org_id)
 
     site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
+    site = _get_site_for_site_id(db, site_id_canon)
     allowed_site_ids = _get_allowed_site_ids(db, org_id)
 
     try:
@@ -901,6 +923,7 @@ def get_site_kpi(
         actual_kwh=last_24h_kwh,
         expected_kwh=baseline_24h_kwh,
         org=org,
+        site=site,
     )
     last_24h_cost = cost_24h["actual_cost"]
     expected_24h_cost = cost_24h["expected_cost"] if coverage_ok_24h else None
