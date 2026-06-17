@@ -50,7 +50,7 @@ class HourBandOut(BaseModel):
 
 
 class BaselineBucketOut(BaseModel):
-    hour_of_day: int  # 0–23
+    hour_of_day: int  # 0â€“23
     is_weekend: bool  # True = Saturday/Sunday
     mean_kwh: float
     std_kwh: float  # 0 if only one point in bucket
@@ -1044,7 +1044,7 @@ def get_baseline_drift(
     """
     Detect persistent baseline drift for a site.
 
-    Compares the last 7 days against the prior 8–30 day reference period.
+    Compares the last 7 days against the prior 8â€“30 day reference period.
     Flags hours where recent consumption is consistently above or below
     the reference baseline, with cost and CO2 impact estimates.
 
@@ -1055,11 +1055,18 @@ def get_baseline_drift(
     site_id_canon = _enforce_site_access(db=db, org_id=org_id, site_id_raw=site_id)
     allowed_site_ids = _get_allowed_site_ids(db, org_id)
 
-    # Fetch org tariff for cost impact
+    # Fetch tariff for cost impact - site-level preferred, org-level fallback
     electricity_price: Optional[float] = None
     currency_code: str = "EUR"
-    if org_id is not None:
-        try:
+    try:
+        site = _get_site_for_site_id(db, site_id_canon)
+        if site:
+            v = getattr(site, "electricity_price_per_kwh", None)
+            electricity_price = float(v) if v is not None else None
+            cc = getattr(site, "currency_code", None)
+            currency_code = str(cc) if cc else "EUR"
+        # Fall back to org-level if site has no tariff configured
+        if electricity_price is None and org_id is not None:
             org = db.query(core_models.Organization).filter(
                 core_models.Organization.id == org_id
             ).first()
@@ -1068,8 +1075,8 @@ def get_baseline_drift(
                 electricity_price = float(v) if v is not None else None
                 cc = getattr(org, "currency_code", None)
                 currency_code = str(cc) if cc else "EUR"
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     report = compute_baseline_drift(
         db=db,
@@ -1222,12 +1229,12 @@ async def upload_production_csv(
     Upload a CSV of daily production output (units produced per day) for a site.
 
     **Required CSV columns:**
-    - `date` — ISO 8601 format (YYYY-MM-DD)
-    - `units_produced` — non-negative number
+    - `date` â€” ISO 8601 format (YYYY-MM-DD)
+    - `units_produced` â€” non-negative number
 
     **Optional columns:**
-    - `unit_label` — e.g. `tonnes`, `pezzi`, `m²` (defaults to `units`)
-    - `notes` — free text
+    - `unit_label` â€” e.g. `tonnes`, `pezzi`, `mÂ²` (defaults to `units`)
+    - `notes` â€” free text
 
     Existing records for the same (site, date) are updated (upsert behaviour).
     Returns counts of inserted, updated, and skipped rows plus any row-level errors.
@@ -1282,14 +1289,14 @@ def get_production_correlation_endpoint(
     but counted in `total_days_requested`.
 
     **Anomaly signals:**
-    - Statistical: kWh/unit exceeds mean + 1.5σ
+    - Statistical: kWh/unit exceeds mean + 1.5Ïƒ
     - Directional: energy increased while production fell vs prior day
 
     **Trend direction:**
-    - `improving` — kWh/unit falling (becoming more efficient)
-    - `worsening` — kWh/unit rising (becoming less efficient)
-    - `stable`    — slope < 0.5% of mean
-    - `insufficient_data` — fewer than 3 days of coverage
+    - `improving` â€” kWh/unit falling (becoming more efficient)
+    - `worsening` â€” kWh/unit rising (becoming less efficient)
+    - `stable`    â€” slope < 0.5% of mean
+    - `insufficient_data` â€” fewer than 3 days of coverage
     """
     if end < start:
         raise HTTPException(status_code=400, detail="end must be >= start")
@@ -1374,7 +1381,7 @@ async def get_correlation_report(
     total_kwh  = sum(float(r.value or 0) for r in records)
     total_hours = len(records)
 
-    # Night ratio (22:00–06:00)
+    # Night ratio (22:00â€“06:00)
     night_kwh = sum(float(r.value or 0) for r in records if r.timestamp.hour >= 22 or r.timestamp.hour < 6)
     night_pct = night_kwh / total_kwh * 100 if total_kwh > 0 else 0
 
