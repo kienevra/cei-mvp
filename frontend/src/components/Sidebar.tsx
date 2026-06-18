@@ -13,6 +13,7 @@ import {
   FiUpload,
   FiCreditCard,
   FiLifeBuoy,
+  FiGrid,
 } from "react-icons/fi";
 import { useAuth } from "../hooks/useAuth";
 
@@ -41,6 +42,7 @@ const Sidebar: React.FC = () => {
   const navItems = useMemo(() => {
     if (isManagingOrg) {
       return [
+        { label: "Compliance Portal", path: "/commercialista", icon: <FiGrid /> },
         { label: t("nav.manage"), path: "/manage", icon: <FiBriefcase /> },
         { label: t("nav.account"), path: "/account", icon: <FiUser /> },
         { label: t("nav.billing"), path: "/billing", icon: <FiCreditCard /> },

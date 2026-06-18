@@ -229,6 +229,17 @@ const App: React.FC = () => (
             }
           />
 
+          <Route path="/accept-invite/:token" element={<AcceptInvite />} />
+          <Route
+            path="/commercialista"
+            element={
+              <Layout>
+                <ProtectedRoute allowedOrgTypes={["managing"]}>
+                  <CommerciallistaDashboard />
+                </ProtectedRoute>
+              </Layout>
+            }
+          />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>

@@ -247,7 +247,7 @@ const Login: React.FC = () => {
         // Upgrade to managing if ESCO
         if (regType === "manager") {
           try { await upgradeToManaging(null); } catch { /* non-fatal, user can upgrade later */ }
-          window.location.href = "/manage";
+          window.location.href = "/commercialista";
           return;
         }
         return;

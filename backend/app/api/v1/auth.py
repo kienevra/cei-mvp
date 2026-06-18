@@ -973,3 +973,49 @@ def accept_partner_invite(
             "managed_by_org_id": factory_org.managed_by_org_id,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Partner invite info — public endpoint to preview invite before signup
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/auth/invite-info/{token}",
+    summary="Preview partner invite details before accepting",
+)
+def get_partner_invite_info(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    import hashlib as _hl
+    from datetime import timezone
+    from app.models import PartnerInvite, Organization
+
+    token_hash = _hl.sha256(token.encode()).hexdigest()
+    inv = db.query(PartnerInvite).filter(
+        PartnerInvite.token_hash == token_hash,
+    ).first()
+
+    if not inv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "INVITE_NOT_FOUND", "message": "Invite link is invalid."},
+        )
+
+    managing_org = db.query(Organization).filter(
+        Organization.id == inv.managing_org_id
+    ).first()
+
+    partner_name = (
+        getattr(managing_org, 'partner_name', None)
+        or getattr(managing_org, 'name', None)
+        or 'Your energy consultant'
+    )
+
+    return {
+        "status":        inv.status,
+        "factory_name":  inv.factory_name,
+        "factory_email": inv.factory_email,
+        "partner_name":  partner_name,
+        "expires_at":    inv.expires_at.isoformat() if inv.expires_at else None,
+    }
