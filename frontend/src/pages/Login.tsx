@@ -134,6 +134,9 @@ const Login: React.FC = () => {
   const [notice, setNotice] = useState<string | null>(null);
   const [termsAccepted, setTermsAccepted] = useState<boolean>(false);
   const [aggregateConsent, setAggregateConsent] = useState<boolean>(false);
+  // Manager sub-type: "esco" | "commercialista" | null
+  const [managerSubType, setManagerSubType] = useState<"esco" | "commercialista" | null>(null);
+  const [partnerName, setPartnerName] = useState<string>("");
   
 
   // Redirect if already authenticated
@@ -206,6 +209,8 @@ const Login: React.FC = () => {
     setPassword("");
     setPasswordConfirm("");
     setOrganizationName("");
+    setManagerSubType(null);
+    setPartnerName("");
   };
 
   // ── Submit ──
@@ -238,6 +243,7 @@ const Login: React.FC = () => {
           full_name: fullName.trim() || undefined,
           organization_name: organizationName.trim() || undefined,
           org_type: regType === "manager" ? "managing" : "standalone",
+          partner_name: managerSubType === "commercialista" && partnerName.trim() ? partnerName.trim() : undefined,
           ui_lang: localStorage.getItem("cei_lang") || undefined,
           terms_accepted: termsAccepted,
           aggregate_data_consent: aggregateConsent,
@@ -291,6 +297,8 @@ const Login: React.FC = () => {
   const isSignup = mode === "signup";
   const isInvitee = regType === "invitee_org" || regType === "invitee_consultant";
   const isSelfSignup = regType === "manager" || regType === "organization";
+  // Manager needs sub-type selection before showing the full form
+  const needsManagerSubType = regType === "manager" && managerSubType === null;
 
   // ── Styles ──
   const cardStyle: React.CSSProperties = {
@@ -439,6 +447,37 @@ const Login: React.FC = () => {
                 </button>
               )}
 
+                {/* Manager sub-type selection */}
+                {regType === "manager" && needsManagerSubType && (
+                  <div>
+                    <div style={{ fontSize: "0.88rem", fontWeight: 600, marginBottom: "0.85rem", textAlign: "center", color: "var(--cei-text-main)" }}>What best describes your role?</div>
+                    <button type="button" onClick={() => setManagerSubType("esco")} style={{ border: "1px solid var(--cei-border-subtle)", borderRadius: "0.75rem", padding: "0.85rem 1rem", cursor: "pointer", display: "flex", alignItems: "flex-start", gap: "0.85rem", background: "transparent", width: "100%", textAlign: "left", marginBottom: "0.6rem" }}>
+                      <span style={{ fontSize: "1.4rem", flexShrink: 0 }}>🏭</span>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: "0.92rem", marginBottom: "0.2rem" }}>ESCO / Energy Manager</div>
+                        <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>I install sensors, manage energy contracts, and run technical audits for factories.</div>
+                      </div>
+                    </button>
+                    <button type="button" onClick={() => setManagerSubType("commercialista")} style={{ border: "1px solid var(--cei-border-subtle)", borderRadius: "0.75rem", padding: "0.85rem 1rem", cursor: "pointer", display: "flex", alignItems: "flex-start", gap: "0.85rem", background: "transparent", width: "100%", textAlign: "left", marginBottom: "0.6rem" }}>
+                      <span style={{ fontSize: "1.4rem", flexShrink: 0 }}>📋</span>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: "0.92rem", marginBottom: "0.2rem" }}>Commercialista / Accountant</div>
+                        <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>I handle tax and compliance for manufacturing clients and want to generate CBAM and ETS reports for them.</div>
+                      </div>
+                    </button>
+                  </div>
+                )}
+                {/* Partner name field for commercialista */}
+                {regType === "manager" && managerSubType === "commercialista" && (
+                  <div style={{ marginBottom: "0.75rem", padding: "0.75rem 1rem", borderRadius: "0.5rem", background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.2)" }}>
+                    <label style={{ fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", display: "block", marginBottom: "0.4rem" }}>Studio / Practice name</label>
+                    <input value={partnerName} onChange={e => setPartnerName(e.target.value)} placeholder="e.g. Studio Pincelli & Associati" style={{ width: "100%", padding: "0.5rem 0.75rem", borderRadius: "0.4rem", border: "1px solid var(--cei-border-subtle)", background: "rgba(148,163,184,0.07)", color: "var(--cei-text-main)", fontSize: "0.875rem", boxSizing: "border-box" }} />
+                    <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginTop: "0.35rem" }}>This name appears on all co-branded client reports.</div>
+                  </div>
+                )}
+                {/* Hide form fields until sub-type is chosen for managers */}
+                {!needsManagerSubType && (
+                <div>
               <p style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)", marginBottom: "0.75rem" }}>
                 {regType === "manager"
                   ? t("signup.selfSignup.managerSubtitle", { defaultValue: "Your account will be set up as an energy management firm. You can add client organizations from the Manage dashboard." })
@@ -528,6 +567,8 @@ const Login: React.FC = () => {
                   ? (regType === "manager" ? t("signup.selfSignup.creatingManagerBtn", { defaultValue: "Creating consultant account…" }) : t("signup.selfSignup.creatingOrgBtn", { defaultValue: "Creating account…" }))
                   : (regType === "manager" ? t("signup.selfSignup.createManagerBtn", { defaultValue: "Create consultant account" }) : t("signup.selfSignup.createOrgBtn", { defaultValue: "Create account" }))}
               </button>
+                </div>
+                )}
             </form>
           )}
 

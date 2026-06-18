@@ -295,6 +295,7 @@ class UserCreate(BaseModel):
     ui_lang: Optional[str] = None   # "it" or "en" from CEI UI toggle
     terms_accepted: Optional[bool] = None  # must be True to register
     aggregate_data_consent: Optional[bool] = None  # optional GDPR consent for anonymised benchmarking
+    partner_name: Optional[str] = None  # commercialista studio name for co-branded PDFs
 
 
 @router.post("/signup", response_model=Token, dependencies=[Depends(login_rate_limit)])
@@ -319,6 +320,8 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
     from datetime import datetime, timezone, timedelta
     org = Organization(name=org_name)
     org.org_type = "managing" if user.org_type == "managing" else "standalone"
+    if user.partner_name and user.partner_name.strip():
+        org.partner_name = user.partner_name.strip()
     org.trial_ends_at = datetime.now(timezone.utc) + timedelta(days=30)
     for k, v in [("plan_key", "cei-starter"), ("subscription_plan_key", "cei-starter"),
                  ("enable_alerts", True), ("enable_reports", True), ("subscription_status", "active")]:
