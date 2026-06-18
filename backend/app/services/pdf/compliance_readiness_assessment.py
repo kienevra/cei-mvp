@@ -755,3 +755,113 @@ def generate_compliance_readiness_pdf(
     doc.build(story)
     buf.seek(0)
     return buf
+
+
+# ---------------------------------------------------------------------------
+# Helper: build assessment dict from EmissionsResult (for API use)
+# ---------------------------------------------------------------------------
+
+def build_assessment_from_emissions(
+    emissions_result,
+    org,
+    has_mrv: bool = False,
+    has_ets: bool = False,
+    has_enpi: bool = False,
+    cbam_registered: bool = False,
+) -> dict:
+    """
+    Build the assessment dict from a CEI EmissionsResult object and org model.
+    Called directly from the manage.py PDF endpoints.
+    """
+    r = emissions_result
+    confidence = getattr(r, 'cbam_confidence', 'none')
+    days       = getattr(r, 'data_window_days', 0)
+    gap_pct    = getattr(r, 'benchmark_gap_pct', None)
+    deficit    = getattr(r, 'ets_surplus_deficit', None)
+    ef         = getattr(r, 'emission_factor_kg_co2_kwh', None)
+    sector     = getattr(r, 'sector_code', None)
+    framework  = getattr(r, 'framework', None)
+
+    if confidence == 'high':
+        baseline = {'score': 'green', 'detail': f'{days} days of data. High-confidence baseline established.', 'action': None}
+    elif confidence in ('medium', 'low'):
+        baseline = {'score': 'amber', 'detail': f'{days} days of data. 90+ days required for CBAM filing.', 'action': 'Extend data collection to 90+ days.'}
+    else:
+        baseline = {'score': 'red', 'detail': 'No verified energy baseline. Insufficient data.', 'action': 'Provide utility bills or meter data immediately.'}
+
+    if ef and sector and framework:
+        emissions_config = {'score': 'green', 'detail': f'EF {ef:.4f} kg CO2/kWh, {sector}, {framework} configured.', 'action': None}
+    elif ef or sector:
+        emissions_config = {'score': 'amber', 'detail': 'Partial emissions configuration.', 'action': 'Complete sector and framework configuration.'}
+    else:
+        emissions_config = {'score': 'red', 'detail': 'No emissions configuration.', 'action': 'Configure country, sector, energy source, and framework in CEI.'}
+
+    if cbam_registered:
+        cbam_registration = {'score': 'green', 'detail': 'Registered as CBAM declarant.', 'action': None}
+    else:
+        cbam_registration = {'score': 'amber', 'detail': 'CBAM declarant registration not confirmed.', 'action': 'Confirm registration with national competent authority.'}
+
+    if deficit is not None:
+        if deficit >= 0:
+            ets_position = {'score': 'green', 'detail': f'ETS surplus of {deficit:.1f} tCO2.', 'action': None}
+        else:
+            ets_position = {'score': 'amber', 'detail': f'ETS deficit of {abs(deficit):.1f} tCO2. Purchase required.', 'action': f'Address ETS deficit of {abs(deficit):.1f} tCO2.'}
+    else:
+        ets_position = {'score': 'red', 'detail': 'ETS position not calculated. Free allocation not configured.', 'action': 'Configure free allocation tonnes in CEI.'}
+
+    if gap_pct is not None:
+        if gap_pct <= 0:
+            benchmark = {'score': 'green', 'detail': f'{abs(gap_pct):.1f}% below EU sector benchmark.', 'action': None}
+        elif gap_pct <= 10:
+            benchmark = {'score': 'amber', 'detail': f'{gap_pct:.1f}% above EU sector benchmark.', 'action': 'Identify efficiency measures to close benchmark gap.'}
+        else:
+            benchmark = {'score': 'red', 'detail': f'{gap_pct:.1f}% above EU sector benchmark. Significant ETS Phase 4 risk.', 'action': 'Commission CEI opportunity assessment.'}
+    else:
+        benchmark = {'score': 'amber', 'detail': 'Benchmark comparison unavailable. Production volume not configured.', 'action': 'Configure annual production volume in CEI.'}
+
+    if days >= 90:
+        data_coverage = {'score': 'green', 'detail': f'{days} days of data.', 'action': None}
+    elif days >= 30:
+        data_coverage = {'score': 'amber', 'detail': f'{days} days. Below 90-day threshold.', 'action': 'Upload historical utility bills to extend data window.'}
+    else:
+        data_coverage = {'score': 'red', 'detail': f'Only {days} days. Insufficient for extrapolation.', 'action': 'Upload historical utility bills immediately.'}
+
+    docs_ready = sum([has_mrv, has_ets, has_enpi])
+    if docs_ready == 3:
+        documentation = {'score': 'green', 'detail': 'MRV, ETS, and EnPI documents generated.', 'action': None}
+    elif docs_ready >= 1:
+        missing = []
+        if not has_mrv:  missing.append('MRV Declaration')
+        if not has_ets:  missing.append('ETS Position Statement')
+        if not has_enpi: missing.append('EnPI Baseline Report')
+        documentation = {'score': 'amber', 'detail': f'Missing: {", ".join(missing)}.', 'action': f'Generate: {", ".join(missing)}.'}
+    else:
+        documentation = {'score': 'red', 'detail': 'No compliance documents generated.', 'action': 'Generate MRV, ETS, and EnPI documents in CEI.'}
+
+    area_scores = {
+        'baseline': baseline['score'],
+        'emissions_config': emissions_config['score'],
+        'cbam_registration': cbam_registration['score'],
+        'ets_position': ets_position['score'],
+        'benchmark': benchmark['score'],
+        'data_coverage': data_coverage['score'],
+        'documentation': documentation['score'],
+    }
+    rag_scores = {'green': 100, 'amber': 50, 'red': 0}
+    total = sum(rag_scores.get(v, 0) for v in area_scores.values())
+    score = int((total / (len(area_scores) * 100)) * 100)
+    overall_rag = 'green' if score >= 80 else ('amber' if score >= 50 else 'red')
+    critical_gaps = [k for k, v in area_scores.items() if v == 'red']
+
+    return {
+        'baseline':           baseline,
+        'emissions_config':   emissions_config,
+        'cbam_registration':  cbam_registration,
+        'ets_position':       ets_position,
+        'benchmark':          benchmark,
+        'data_coverage':      data_coverage,
+        'documentation':      documentation,
+        'overall_score':      score,
+        'overall_rag':        overall_rag,
+        'critical_gaps':      critical_gaps,
+    }

@@ -47,7 +47,6 @@ from app.services.reporting import generate_client_org_pdf
 from app.services.pdf.cbam_exposure_summary import generate_cbam_exposure_pdf
 from app.services.pdf.compliance_readiness_assessment import (
     generate_compliance_readiness_pdf,
-    build_assessment_from_emissions,
 )
 
 router = APIRouter(prefix="/manage", tags=["manage"])
@@ -1757,6 +1756,7 @@ async def get_client_compliance_readiness_pdf(
     managing_org: Organization = Depends(require_managing_org_dep()),
 ):
     from app.services.emissions import EmissionsCalculator
+    from app.services.pdf.compliance_readiness_assessment import build_assessment_from_emissions
     from datetime import timezone
 
     managing_org_id = _get_managing_org_id(org_context)
