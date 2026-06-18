@@ -44,6 +44,11 @@ from app.models import (
 )
 from fastapi.responses import StreamingResponse
 from app.services.reporting import generate_client_org_pdf
+from app.services.pdf.cbam_exposure_summary import generate_cbam_exposure_pdf
+from app.services.pdf.compliance_readiness_assessment import (
+    generate_compliance_readiness_pdf,
+    build_assessment_from_emissions,
+)
 
 router = APIRouter(prefix="/manage", tags=["manage"])
 
@@ -1677,3 +1682,119 @@ def revoke_partner_invite(
         description=f"invite_id={invite_id}",
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Commercialista PDF endpoints
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/client-orgs/{client_org_id}/cbam-exposure/pdf",
+    response_class=StreamingResponse,
+    summary="Generate co-branded CBAM Exposure Summary PDF for a client org",
+)
+async def get_client_cbam_exposure_pdf(
+    client_org_id: int,
+    lang: str = "it",
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+):
+    from app.services.emissions import EmissionsCalculator
+    from datetime import timezone
+
+    managing_org_id = _get_managing_org_id(org_context)
+    client_org = _get_client_org_or_404(db, client_org_id, managing_org_id)
+    calc = EmissionsCalculator(db)
+    result = calc.calculate(client_org_id)
+    partner_name = getattr(managing_org, 'partner_name', None) or managing_org.name
+    data = {
+        "org_name":                    client_org.name,
+        "org_id":                      client_org.id,
+        "sector_code":                 getattr(result, "sector_code", "") or "",
+        "country_code":                getattr(result, "country_code", "ITA") or "ITA",
+        "reporting_year":              getattr(result, "reporting_year", 2026) or 2026,
+        "total_tco2":                  getattr(result, "total_tco2", 0.0) or 0.0,
+        "annualised_tco2":             getattr(result, "annualised_tco2", None),
+        "free_allocation_tonnes":      getattr(result, "free_allocation_tonnes", None),
+        "ets_surplus_deficit":         getattr(result, "ets_surplus_deficit", None),
+        "ets_credit_cost_eur":         getattr(result, "ets_credit_cost_eur", None),
+        "cbam_confidence":             getattr(result, "cbam_confidence", "none"),
+        "data_window_days":            getattr(result, "data_window_days", 0),
+        "benchmark_value":             getattr(result, "benchmark_value", None),
+        "actual_intensity":            getattr(result, "actual_intensity", None),
+        "benchmark_gap_pct":           getattr(result, "benchmark_gap_pct", None),
+        "cbam_default_factor":         None,
+        "cbam_verified_factor":        getattr(result, "emission_factor_kg_co2_kwh", None),
+        "default_vs_verified_delta_eur": None,
+        "ets_carbon_price_eur":        65.0,
+        "partner_name":                partner_name,
+        "partner_role":                "Dottore Commercialista",
+        "report_date":                 datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+    }
+    buf = generate_cbam_exposure_pdf(data, lang=lang, partner_name=partner_name)
+    filename = (
+        f"cei_cbam_exposure_{client_org.name.lower().replace(' ', '_')}"
+        f"_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+    )
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get(
+    "/client-orgs/{client_org_id}/compliance-readiness/pdf",
+    response_class=StreamingResponse,
+    summary="Generate co-branded Compliance Readiness Assessment PDF for a client org",
+)
+async def get_client_compliance_readiness_pdf(
+    client_org_id: int,
+    lang: str = "it",
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+):
+    from app.services.emissions import EmissionsCalculator
+    from datetime import timezone
+
+    managing_org_id = _get_managing_org_id(org_context)
+    client_org = _get_client_org_or_404(db, client_org_id, managing_org_id)
+    calc = EmissionsCalculator(db)
+    result = calc.calculate(client_org_id)
+    partner_name = getattr(managing_org, 'partner_name', None) or managing_org.name
+    events = db.query(SiteEvent).filter(
+        SiteEvent.organization_id == client_org_id,
+        SiteEvent.type == "report_generated",
+    ).all()
+    event_titles = [e.title for e in events]
+    has_mrv  = any("MRV"  in (t or "") for t in event_titles)
+    has_ets  = any("ETS"  in (t or "") for t in event_titles)
+    has_enpi = any("EnPI" in (t or "") for t in event_titles)
+    assessment = build_assessment_from_emissions(
+        result, client_org,
+        has_mrv=has_mrv, has_ets=has_ets, has_enpi=has_enpi,
+    )
+    from datetime import timezone
+    data = {
+        "org_name":       client_org.name,
+        "org_id":         client_org.id,
+        "sector_code":    getattr(result, "sector_code", "") or "",
+        "country_code":   getattr(result, "country_code", "ITA") or "ITA",
+        "reporting_year": getattr(result, "reporting_year", 2026) or 2026,
+        "report_date":    datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "partner_name":   partner_name,
+        "partner_role":   "Dottore Commercialista",
+        **assessment,
+    }
+    buf = generate_compliance_readiness_pdf(data, lang=lang, partner_name=partner_name)
+    filename = (
+        f"cei_compliance_readiness_{client_org.name.lower().replace(' ', '_')}"
+        f"_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+    )
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
