@@ -29,6 +29,8 @@ const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const ManageDashboard = lazy(() => import("./pages/ManageDashboard"));
 const ManageClientOrg = lazy(() => import("./pages/ManageClientOrg"));
+const AcceptInvite = lazy(() => import("./pages/AcceptInvite"));
+const CommerciallistaDashboard = lazy(() => import("./pages/CommerciallistaDashboard"));
 const ManageClientSiteView = lazy(() => import("./pages/ManageClientSiteView"));
 const Billing = lazy(() => import("./pages/Billing"));
 const Support = lazy(() => import("./pages/Support"));

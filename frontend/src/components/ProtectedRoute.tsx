@@ -27,7 +27,10 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedOrgTyp
       user?.org?.org_type ?? user?.organization?.org_type ?? "standalone";
     if (!allowedOrgTypes.includes(orgType)) {
       // Redirect to the most appropriate page for their org type
-      if (orgType === "managing") return <Navigate to="/manage" replace />;
+      if (orgType === "managing") {
+        const partnerName = user?.org?.partner_name ?? user?.organization?.partner_name ?? null;
+        return <Navigate to={partnerName ? "/commercialista" : "/manage"} replace />;
+      }
       if (orgType === "client") return <Navigate to="/" replace />;
       return <Navigate to="/" replace />;
     }

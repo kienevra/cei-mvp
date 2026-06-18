@@ -255,6 +255,20 @@ const ManageDashboard: React.FC = () => {
     finally { setDownloading(null); }
   };
 
+  const handleDownloadCbam = async (orgId: number) => {
+    setDownloadingCbam(orgId);
+    try { await downloadCbamExposurePdf(orgId); }
+    catch (e: unknown) { setDownloadError((e as any)?.message ?? "Failed to download CBAM PDF."); }
+    finally { setDownloadingCbam(null); }
+  };
+
+  const handleDownloadCompliance = async (orgId: number) => {
+    setDownloadingCompliance(orgId);
+    try { await downloadComplianceReadinessPdf(orgId); }
+    catch (e: unknown) { setDownloadError((e as any)?.message ?? "Failed to download Compliance PDF."); }
+    finally { setDownloadingCompliance(null); }
+  };
+
   const WINDOW_OPTIONS = [
     { label: t("manage.header.windowBtn7"), value: 7 },
     { label: t("manage.header.windowBtn14"), value: 14 },

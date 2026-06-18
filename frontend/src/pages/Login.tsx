@@ -247,7 +247,15 @@ const Login: React.FC = () => {
         // Upgrade to managing if ESCO
         if (regType === "manager") {
           try { await upgradeToManaging(null); } catch { /* non-fatal, user can upgrade later */ }
-          window.location.href = "/commercialista";
+          // After login, /auth/me will determine the right dashboard
+          // partner_name set = commercialista, no partner_name = ESCO/energy manager
+          try {
+            const meRes = await import("../services/api").then(m => m.default.get("/auth/me"));
+            const partnerName = meRes.data?.org?.partner_name ?? meRes.data?.organization?.partner_name ?? null;
+            window.location.href = partnerName ? "/commercialista" : "/manage";
+          } catch {
+            window.location.href = "/manage";
+          }
           return;
         }
         return;
