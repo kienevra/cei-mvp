@@ -863,3 +863,113 @@ def assign_user_role(
         "role": target_user.role,
         "organization_id": target_user.organization_id,
     }
+
+# ---------------------------------------------------------------------------
+# Accept partner invite ? factory self-onboarding
+# ---------------------------------------------------------------------------
+
+class AcceptInviteIn(BaseModel):
+    org_name:  str
+    email:     str
+    password:  str
+    full_name: Optional[str] = None
+
+
+@router.post(
+    "/auth/accept-invite/{token}",
+    summary="Factory signup via partner invite link",
+    status_code=status.HTTP_201_CREATED,
+)
+def accept_partner_invite(
+    token: str,
+    payload: AcceptInviteIn,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    import hashlib as _hl
+    from datetime import timezone
+    from app.models import PartnerInvite
+
+    # 1. Validate token
+    token_hash = _hl.sha256(token.encode()).hexdigest()
+    inv = db.query(PartnerInvite).filter(
+        PartnerInvite.token_hash == token_hash,
+    ).first()
+
+    if not inv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "INVITE_NOT_FOUND", "message": "Invite link is invalid."},
+        )
+    if inv.revoked_at:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={"code": "INVITE_REVOKED", "message": "This invite link has been revoked."},
+        )
+    if inv.used_at:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={"code": "INVITE_USED", "message": "This invite link has already been used."},
+        )
+    if datetime.now(timezone.utc) >= inv.expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={"code": "INVITE_EXPIRED", "message": "This invite link has expired. Ask your energy manager for a new one."},
+        )
+
+    # 2. Check email not already registered
+    email_norm = (payload.email or "").strip().lower()
+    if db.query(User).filter(User.email == email_norm).first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "EMAIL_TAKEN", "message": "An account with this email already exists."},
+        )
+
+    # 3. Create factory org linked to managing org
+    factory_org = Organization(
+        name              = payload.org_name.strip(),
+        org_type          = "client",
+        managed_by_org_id = inv.managing_org_id,
+    )
+    db.add(factory_org)
+    db.flush()  # get factory_org.id before creating user
+
+    # 4. Create owner user
+    hashed_pw = get_password_hash(payload.password)
+    user = User(
+        email           = email_norm,
+        full_name       = (payload.full_name or "").strip() or None,
+        hashed_password = hashed_pw,
+        organization_id = factory_org.id,
+        role            = "owner",
+        is_active       = 1,
+    )
+    db.add(user)
+    db.flush()
+
+    # 5. Mark invite used
+    inv.used_at        = datetime.now(timezone.utc)
+    inv.used_by_org_id = factory_org.id
+    db.add(inv)
+    db.commit()
+    db.refresh(user)
+
+    # 6. Issue JWT and return (same as normal signup)
+    access_token  = create_access_token({"sub": user.email, "type": "access"})
+    refresh_token = create_refresh_token({"sub": user.email, "type": "refresh"})
+    _set_refresh_cookie(response, refresh_token)
+
+    return {
+        "access_token": access_token,
+        "token_type":   "bearer",
+        "user": {
+            "id":              user.id,
+            "email":           user.email,
+            "full_name":       user.full_name,
+            "role":            user.role,
+            "organization_id": user.organization_id,
+            "org_name":        factory_org.name,
+            "org_type":        factory_org.org_type,
+            "managed_by_org_id": factory_org.managed_by_org_id,
+        },
+    }

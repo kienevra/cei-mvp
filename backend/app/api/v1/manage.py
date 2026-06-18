@@ -39,7 +39,8 @@ from app.models import (
     SiteEvent,
     TimeseriesRecord,
     User,
-    OrgLinkRequest
+    OrgLinkRequest,
+    PartnerInvite,
 )
 from fastapi.responses import StreamingResponse
 from app.services.reporting import generate_client_org_pdf
@@ -1508,3 +1509,171 @@ def invite_user_to_client_org(
         accept_url_hint=f"{origin_hint}/login?invite={raw_token}",
     )
 
+
+
+# ---------------------------------------------------------------------------
+# Partner invite endpoints (commercialista onboarding flow)
+# ---------------------------------------------------------------------------
+
+class PartnerInviteIn(BaseModel):
+    factory_name:  Optional[str] = None
+    factory_email: Optional[str] = None
+    note:          Optional[str] = None
+    expires_days:  int = Field(default=30, ge=1, le=90)
+
+
+class PartnerInviteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id:             int
+    managing_org_id: int
+    factory_name:   Optional[str]
+    factory_email:  Optional[str]
+    note:           Optional[str]
+    created_at:     datetime
+    expires_at:     datetime
+    used_at:        Optional[datetime]
+    used_by_org_id: Optional[int]
+    revoked_at:     Optional[datetime]
+    status:         str
+    invite_url:     str
+
+
+def _build_invite_url(token: str) -> str:
+    try:
+        from app.core.config import settings as _s
+        origin = getattr(_s, "frontend_url", None) or "https://app.carbonefficiencyintel.com"
+    except Exception:
+        origin = "https://app.carbonefficiencyintel.com"
+    return f"{origin}/accept-invite/{token}"
+
+
+@router.post(
+    "/partner-invites",
+    response_model=PartnerInviteOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate a partner invite link for a factory to self-onboard",
+)
+def create_partner_invite(
+    payload: PartnerInviteIn,
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+):
+    import hashlib, secrets as _sec
+    from datetime import timezone
+    raw_token  = _sec.token_hex(32)          # 64 hex chars
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    expires_at = datetime.now(timezone.utc) + timedelta(days=payload.expires_days)
+
+    inv = PartnerInvite(
+        managing_org_id = managing_org.id,
+        token           = raw_token,
+        token_hash      = token_hash,
+        factory_name    = payload.factory_name,
+        factory_email   = payload.factory_email,
+        note            = payload.note,
+        expires_at      = expires_at,
+    )
+    db.add(inv)
+    db.commit()
+    db.refresh(inv)
+
+    create_org_audit_event(
+        db,
+        org_id  = managing_org.id,
+        user_id = getattr(org_context.user, "id", None),
+        title   = "Partner invite created",
+        description=(
+            f"invite_id={inv.id}; factory_name={payload.factory_name}; "
+            f"factory_email={payload.factory_email}; expires_days={payload.expires_days}"
+        ),
+    )
+
+    return PartnerInviteOut(
+        id              = inv.id,
+        managing_org_id = inv.managing_org_id,
+        factory_name    = inv.factory_name,
+        factory_email   = inv.factory_email,
+        note            = inv.note,
+        created_at      = inv.created_at,
+        expires_at      = inv.expires_at,
+        used_at         = inv.used_at,
+        used_by_org_id  = inv.used_by_org_id,
+        revoked_at      = inv.revoked_at,
+        status          = inv.status,
+        invite_url      = _build_invite_url(raw_token),
+    )
+
+
+@router.get(
+    "/partner-invites",
+    response_model=List[PartnerInviteOut],
+    summary="List all partner invites for this managing org",
+)
+def list_partner_invites(
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep()),
+):
+    invites = (
+        db.query(PartnerInvite)
+        .filter(PartnerInvite.managing_org_id == managing_org.id)
+        .order_by(PartnerInvite.created_at.desc())
+        .all()
+    )
+    return [
+        PartnerInviteOut(
+            id              = inv.id,
+            managing_org_id = inv.managing_org_id,
+            factory_name    = inv.factory_name,
+            factory_email   = inv.factory_email,
+            note            = inv.note,
+            created_at      = inv.created_at,
+            expires_at      = inv.expires_at,
+            used_at         = inv.used_at,
+            used_by_org_id  = inv.used_by_org_id,
+            revoked_at      = inv.revoked_at,
+            status          = inv.status,
+            invite_url      = _build_invite_url(inv.token),
+        )
+        for inv in invites
+    ]
+
+
+@router.delete(
+    "/partner-invites/{invite_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke a partner invite",
+)
+def revoke_partner_invite(
+    invite_id: int,
+    db: Session = Depends(get_db),
+    org_context: OrgContext = Depends(get_org_context),
+    managing_org: Organization = Depends(require_managing_org_dep(require_role="owner")),
+):
+    from datetime import timezone
+    inv = db.query(PartnerInvite).filter(
+        PartnerInvite.id == invite_id,
+        PartnerInvite.managing_org_id == managing_org.id,
+    ).first()
+    if not inv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "INVITE_NOT_FOUND", "message": f"Invite id={invite_id} not found."},
+        )
+    if inv.used_at:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "INVITE_ALREADY_USED", "message": "This invite has already been used and cannot be revoked."},
+        )
+    inv.revoked_at = datetime.now(timezone.utc)
+    db.add(inv)
+    db.commit()
+    create_org_audit_event(
+        db,
+        org_id  = managing_org.id,
+        user_id = getattr(org_context.user, "id", None),
+        title   = "Partner invite revoked",
+        description=f"invite_id={invite_id}",
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
