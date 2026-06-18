@@ -154,6 +154,7 @@ function ClientTable({ summary, analytics, onDownload, downloading, onOrgClick }
                   <button onClick={() => onDownloadCompliance(client.org_id)} disabled={downloadingCompliance === client.org_id} style={{ fontSize: "0.78rem", padding: "0.25rem 0.65rem", borderRadius: "999px", border: "1px solid rgba(34,197,94,0.4)", background: "transparent", color: downloadingCompliance === client.org_id ? "var(--cei-text-muted)" : "var(--cei-green,#22c55e)", cursor: downloadingCompliance === client.org_id ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>
                     {downloadingCompliance === client.org_id ? "..." : "Readiness"}
                   </button>
+                </td>
               </tr>
             );
           })}
@@ -440,8 +441,8 @@ const ManageDashboard: React.FC = () => {
                     const sc = inv.status === "active" ? "var(--cei-green,#22c55e)" : inv.status === "used" ? "var(--cei-text-muted)" : "var(--cei-red,#ef4444)";
                     return (
                       <tr key={inv.id} style={{ background: idx % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)" }}>
-                        <td style={{ padding: "0.45rem 0.6rem", fontWeight: 500 }}>{inv.factory_name ?? "—"}</td>
-                        <td style={{ padding: "0.45rem 0.6rem", color: "var(--cei-text-muted)" }}>{inv.factory_email ?? "—"}</td>
+                        <td style={{ padding: "0.45rem 0.6rem", fontWeight: 500 }}>{inv.factory_name ?? "-"}</td>
+                        <td style={{ padding: "0.45rem 0.6rem", color: "var(--cei-text-muted)" }}>{inv.factory_email ?? "-"}</td>
                         <td style={{ padding: "0.45rem 0.6rem" }}><span style={{ color: sc, fontWeight: 600, fontSize: "0.78rem" }}>{inv.status.toUpperCase()}</span></td>
                         <td style={{ padding: "0.45rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.78rem" }}>{new Date(inv.expires_at).toLocaleDateString()}</td>
                         <td style={{ padding: "0.45rem 0.6rem" }}>
