@@ -10,6 +10,12 @@ import {
   getPortfolioAnalytics,
   getOnboardingStatus,
   downloadClientReport,
+  downloadCbamExposurePdf,
+  downloadComplianceReadinessPdf,
+  listPartnerInvites,
+  createPartnerInvite,
+  revokePartnerInvite,
+  type PartnerInvite,
   createClientOrg,
   type PortfolioSummary,
   type PortfolioAnalytics,
@@ -80,6 +86,8 @@ function ClientTable({ summary, analytics, onDownload, downloading, onOrgClick }
     t("manage.clients.table.openAlerts"),
     t("manage.clients.table.activeTokens"),
     t("manage.clients.table.report"),
+    "CBAM PDF",
+    "Compliance PDF",
   ];
 
   return (
@@ -137,6 +145,15 @@ function ClientTable({ summary, analytics, onDownload, downloading, onOrgClick }
                     {isDownloading ? t("manage.clients.downloading") : t("manage.clients.downloadPdf")}
                   </button>
                 </td>
+                <td style={{ padding: "0.55rem 0.75rem" }}>
+                  <button onClick={() => onDownloadCbam(client.org_id)} disabled={downloadingCbam === client.org_id} style={{ fontSize: "0.78rem", padding: "0.25rem 0.65rem", borderRadius: "999px", border: "1px solid rgba(56,189,248,0.4)", background: "transparent", color: downloadingCbam === client.org_id ? "var(--cei-text-muted)" : "var(--cei-accent,#38bdf8)", cursor: downloadingCbam === client.org_id ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>
+                    {downloadingCbam === client.org_id ? "..." : "CBAM"}
+                  </button>
+                </td>
+                <td style={{ padding: "0.55rem 0.75rem" }}>
+                  <button onClick={() => onDownloadCompliance(client.org_id)} disabled={downloadingCompliance === client.org_id} style={{ fontSize: "0.78rem", padding: "0.25rem 0.65rem", borderRadius: "999px", border: "1px solid rgba(34,197,94,0.4)", background: "transparent", color: downloadingCompliance === client.org_id ? "var(--cei-text-muted)" : "var(--cei-green,#22c55e)", cursor: downloadingCompliance === client.org_id ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>
+                    {downloadingCompliance === client.org_id ? "..." : "Readiness"}
+                  </button>
               </tr>
             );
           })}
@@ -159,6 +176,16 @@ const ManageDashboard: React.FC = () => {
   const [windowDays, setWindowDays] = useState(7);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
   const [downloading, setDownloading] = useState<number | null>(null);
+  const [downloadingCbam, setDownloadingCbam] = useState<number | null>(null);
+  const [downloadingCompliance, setDownloadingCompliance] = useState<number | null>(null);
+  const [invites, setInvites] = useState<PartnerInvite[]>([]);
+  const [invitesLoading, setInvitesLoading] = useState(false);
+  const [showInvitePanel, setShowInvitePanel] = useState(false);
+  const [newInviteName, setNewInviteName] = useState("");
+  const [newInviteEmail, setNewInviteEmail] = useState("");
+  const [creatingInvite, setCreatingInvite] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [showCreateOrg, setShowCreateOrg] = useState(false);
   const [newOrgName, setNewOrgName] = useState("");
@@ -301,6 +328,10 @@ const ManageDashboard: React.FC = () => {
       {summary ? (
         <div className="cei-card" style={{ padding: 0, overflow: "hidden" }}>
           <ClientTable summary={summary} analytics={analytics} onDownload={handleDownload} downloading={downloading} onOrgClick={(id) => navigate(`/manage/client-orgs/${id}`)} />
+            onDownloadCbam={handleDownloadCbam}
+            onDownloadCompliance={handleDownloadCompliance}
+            downloadingCbam={downloadingCbam}
+            downloadingCompliance={downloadingCompliance}
         </div>
       ) : (
         <div style={{ color: "var(--cei-text-muted)", fontSize: "0.85rem" }}>{t("manage.clients.noClients")}</div>
@@ -368,6 +399,72 @@ const ManageDashboard: React.FC = () => {
         </div>
       </div>
     )}
+
+      {/* Partner Invites Panel */}
+      <div style={{ marginTop: "2rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+          <SectionHeading style={{ margin: 0 }}>Partner Invite Links</SectionHeading>
+          <button onClick={() => { setShowInvitePanel(!showInvitePanel); if (!showInvitePanel) loadInvites(); }} style={{ fontSize: "0.8rem", padding: "0.3rem 0.8rem", borderRadius: "999px", border: "1px solid var(--cei-border-subtle)", background: "transparent", color: "var(--cei-text-muted)", cursor: "pointer" }}>
+            {showInvitePanel ? "Hide" : "Manage Invites"}
+          </button>
+        </div>
+        {showInvitePanel && (
+          <div className="cei-card">
+            {inviteError && <div style={{ color: "var(--cei-red,#ef4444)", fontSize: "0.82rem", marginBottom: "0.75rem" }}>{inviteError}</div>}
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem", alignItems: "flex-end" }}>
+              <div style={{ flex: "1 1 160px" }}>
+                <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", marginBottom: "0.3rem" }}>Factory name</div>
+                <input value={newInviteName} onChange={e => setNewInviteName(e.target.value)} placeholder="e.g. Ceramica Bianchi Srl" style={{ width: "100%", padding: "0.45rem 0.7rem", borderRadius: "0.4rem", border: "1px solid var(--cei-border-subtle)", background: "rgba(148,163,184,0.07)", color: "var(--cei-text-main)", fontSize: "0.85rem", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ flex: "1 1 160px" }}>
+                <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", marginBottom: "0.3rem" }}>Factory email (optional)</div>
+                <input value={newInviteEmail} onChange={e => setNewInviteEmail(e.target.value)} placeholder="admin@factory.it" style={{ width: "100%", padding: "0.45rem 0.7rem", borderRadius: "0.4rem", border: "1px solid var(--cei-border-subtle)", background: "rgba(148,163,184,0.07)", color: "var(--cei-text-main)", fontSize: "0.85rem", boxSizing: "border-box" }} />
+              </div>
+              <button onClick={handleCreateInvite} disabled={creatingInvite || !newInviteName.trim()} style={{ padding: "0.45rem 1.1rem", borderRadius: "999px", border: "none", background: "var(--cei-green,#22c55e)", color: "#0f172a", fontWeight: 600, fontSize: "0.82rem", cursor: creatingInvite || !newInviteName.trim() ? "not-allowed" : "pointer", opacity: creatingInvite || !newInviteName.trim() ? 0.5 : 1 }}>
+                {creatingInvite ? "Generating..." : "+ Generate Invite Link"}
+              </button>
+            </div>
+            {invitesLoading ? (
+              <div style={{ fontSize: "0.82rem", color: "var(--cei-text-muted)" }}>Loading...</div>
+            ) : invites.length === 0 ? (
+              <div style={{ fontSize: "0.82rem", color: "var(--cei-text-muted)" }}>No invites yet. Generate a link to onboard a factory client.</div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
+                <thead><tr>
+                  {["Factory", "Email", "Status", "Expires", "Link", "Actions"].map(h => (
+                    <th key={h} style={{ textAlign: "left", padding: "0.4rem 0.6rem", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", borderBottom: "1px solid var(--cei-border-subtle)" }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {invites.map((inv, idx) => {
+                    const sc = inv.status === "active" ? "var(--cei-green,#22c55e)" : inv.status === "used" ? "var(--cei-text-muted)" : "var(--cei-red,#ef4444)";
+                    return (
+                      <tr key={inv.id} style={{ background: idx % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)" }}>
+                        <td style={{ padding: "0.45rem 0.6rem", fontWeight: 500 }}>{inv.factory_name ?? "—"}</td>
+                        <td style={{ padding: "0.45rem 0.6rem", color: "var(--cei-text-muted)" }}>{inv.factory_email ?? "—"}</td>
+                        <td style={{ padding: "0.45rem 0.6rem" }}><span style={{ color: sc, fontWeight: 600, fontSize: "0.78rem" }}>{inv.status.toUpperCase()}</span></td>
+                        <td style={{ padding: "0.45rem 0.6rem", color: "var(--cei-text-muted)", fontSize: "0.78rem" }}>{new Date(inv.expires_at).toLocaleDateString()}</td>
+                        <td style={{ padding: "0.45rem 0.6rem" }}>
+                          {inv.status === "active" ? (
+                            <button onClick={() => handleCopyInvite(inv.id, inv.invite_url)} style={{ fontSize: "0.75rem", padding: "0.2rem 0.55rem", borderRadius: "999px", border: "1px solid var(--cei-border-subtle)", background: "transparent", color: copiedId === inv.id ? "var(--cei-green,#22c55e)" : "var(--cei-accent,#38bdf8)", cursor: "pointer" }}>
+                              {copiedId === inv.id ? "Copied!" : "Copy Link"}
+                            </button>
+                          ) : <span style={{ color: "var(--cei-text-muted)", fontSize: "0.75rem" }}>{inv.status}</span>}
+                        </td>
+                        <td style={{ padding: "0.45rem 0.6rem" }}>
+                          {inv.status === "active" && (
+                            <button onClick={() => handleRevokeInvite(inv.id)} style={{ fontSize: "0.75rem", padding: "0.2rem 0.55rem", borderRadius: "999px", border: "1px solid rgba(239,68,68,0.4)", background: "transparent", color: "var(--cei-red,#ef4444)", cursor: "pointer" }}>Revoke</button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

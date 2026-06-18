@@ -436,3 +436,63 @@ export async function getClientOrgTimeseriesSummary(
   });
   return resp.data as TimeseriesSummary;
 }
+
+export async function downloadCbamExposurePdf(clientOrgId: number, lang = "it"): Promise<void> {
+  const res = await api.get(
+    `/manage/client-orgs/${clientOrgId}/cbam-exposure/pdf?lang=${lang}`,
+    { responseType: "blob" }
+  );
+  const url = URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `cei_cbam_exposure_${clientOrgId}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function downloadComplianceReadinessPdf(clientOrgId: number, lang = "it"): Promise<void> {
+  const res = await api.get(
+    `/manage/client-orgs/${clientOrgId}/compliance-readiness/pdf?lang=${lang}`,
+    { responseType: "blob" }
+  );
+  const url = URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `cei_compliance_readiness_${clientOrgId}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export type PartnerInvite = {
+  id: number;
+  managing_org_id: number;
+  factory_name: string | null;
+  factory_email: string | null;
+  note: string | null;
+  created_at: string;
+  expires_at: string;
+  used_at: string | null;
+  used_by_org_id: number | null;
+  revoked_at: string | null;
+  status: string;
+  invite_url: string;
+};
+
+export async function listPartnerInvites(): Promise<PartnerInvite[]> {
+  const res = await api.get("/manage/partner-invites");
+  return res.data;
+}
+
+export async function createPartnerInvite(payload: {
+  factory_name?: string;
+  factory_email?: string;
+  note?: string;
+  expires_days?: number;
+}): Promise<PartnerInvite> {
+  const res = await api.post("/manage/partner-invites", payload);
+  return res.data;
+}
+
+export async function revokePartnerInvite(inviteId: number): Promise<void> {
+  await api.delete(`/manage/partner-invites/${inviteId}`);
+}
