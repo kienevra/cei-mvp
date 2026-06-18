@@ -165,7 +165,7 @@ def get_styles() -> dict:
 # Canvas-level page decorations
 # ---------------------------------------------------------------------------
 
-def _draw_header(canvas, doc, title: str, subtitle: str | None) -> None:
+def _draw_header(canvas, doc, title: str, subtitle: str | None, partner_name: str | None = None) -> None:
     w, h = A4
     R = _FONT_REGULAR
     B = _FONT_BOLD
@@ -212,13 +212,25 @@ def _draw_header(canvas, doc, title: str, subtitle: str | None) -> None:
     canvas.line(mid_x, h - HEADER_H + 6 * mm, mid_x, h - 6 * mm)
 
     # ── Document title (right) ────────────────────────────────────────────
-    canvas.setFillColor(C_TEXT_DK)
-    canvas.setFont(B, 10)
-    canvas.drawRightString(w - MARGIN, h - HEADER_H / 2 + 3, title)
-    if subtitle:
+    if partner_name:
+        # Co-branded: studio name prominent, partnership line below, doc type smallest
+        canvas.setFillColor(C_TEXT_DK)
+        canvas.setFont(B, 10)
+        canvas.drawRightString(w - MARGIN, h - HEADER_H / 2 + 6, partner_name)
         canvas.setFillColor(C_MUTED_DK)
-        canvas.setFont(R, 8)
-        canvas.drawRightString(w - MARGIN, h - HEADER_H / 2 - 10, subtitle)
+        canvas.setFont(R, 7.5)
+        canvas.drawRightString(w - MARGIN, h - HEADER_H / 2 - 4, 'in partnership with Carbon Efficiency Intelligence')
+        canvas.setFillColor(C_MUTED_DK)
+        canvas.setFont(R, 7)
+        canvas.drawRightString(w - MARGIN, h - HEADER_H / 2 - 14, title)
+    else:
+        canvas.setFillColor(C_TEXT_DK)
+        canvas.setFont(B, 10)
+        canvas.drawRightString(w - MARGIN, h - HEADER_H / 2 + 3, title)
+        if subtitle:
+            canvas.setFillColor(C_MUTED_DK)
+            canvas.setFont(R, 8)
+            canvas.drawRightString(w - MARGIN, h - HEADER_H / 2 - 10, subtitle)
 
     # Accent bottom border
     canvas.setStrokeColor(C_ACCENT)
@@ -226,7 +238,7 @@ def _draw_header(canvas, doc, title: str, subtitle: str | None) -> None:
     canvas.line(0, h - HEADER_H, w, h - HEADER_H)
 
 
-def _draw_footer(canvas, doc, lang: str = "en") -> None:
+def _draw_footer(canvas, doc, lang: str = "en", partner_name: str | None = None) -> None:
     w, h = A4
     R = _FONT_REGULAR
     B = _FONT_BOLD
@@ -251,13 +263,19 @@ def _draw_footer(canvas, doc, lang: str = "en") -> None:
     canvas.setFillColor(C_TEXT_DK)
     canvas.drawRightString(w - MARGIN, FOOTER_H + 1 * mm, f"Page {doc.page}")
 
-    # Generation timestamp
+    # Generation timestamp / product attribution
     canvas.setFont(R, 6.5)
     canvas.setFillColor(C_MUTED_DK)
-    canvas.drawString(
-        MARGIN, FOOTER_H - 6 * mm,
-        f"{t('generated_by', lang)}  ·  {datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')}",
-    )
+    if partner_name:
+        canvas.drawString(
+            MARGIN, FOOTER_H - 6 * mm,
+            f"A product of Carbon Efficiency Intelligence  ·  {datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')}",
+        )
+    else:
+        canvas.drawString(
+            MARGIN, FOOTER_H - 6 * mm,
+            f"{t('generated_by', lang)}  ·  {datetime.utcnow().strftime('%d %b %Y, %H:%M UTC')}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -271,11 +289,13 @@ class CEIDocTemplate(BaseDocTemplate):
         doc_title: str,
         doc_subtitle: str | None = None,
         lang: str = "en",
+        partner_name: str | None = None,
         **kwargs,
     ):
         self._doc_title    = doc_title
         self._doc_subtitle = doc_subtitle
         self._lang         = lang
+        self._partner_name = partner_name
         super().__init__(
             buffer, pagesize=A4,
             leftMargin=MARGIN, rightMargin=MARGIN,
@@ -295,8 +315,8 @@ class CEIDocTemplate(BaseDocTemplate):
 
     def _on_page(self, canvas, doc) -> None:
         canvas.saveState()
-        _draw_header(canvas, doc, self._doc_title, self._doc_subtitle)
-        _draw_footer(canvas, doc, self._lang)
+        _draw_header(canvas, doc, self._doc_title, self._doc_subtitle, self._partner_name)
+        _draw_footer(canvas, doc, self._lang, self._partner_name)
         canvas.restoreState()
 
 
