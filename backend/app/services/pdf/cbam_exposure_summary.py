@@ -96,7 +96,7 @@ def _eur(value: float, decimals: int = 0) -> str:
 
 
 def _tco2(value: float, decimals: int = 1) -> str:
-    return f"{value:,.{decimals}f} tCO₂"
+    return f"{value:,.{decimals}f} tCO2"
 
 
 def _pct(value: float) -> str:
@@ -168,7 +168,7 @@ def _section_executive_summary(data: Dict, s: dict, lang: str) -> list:
         lines.append(
             f"<b>{org}</b> operates in the <b>{sector}</b> sector and is subject to EU CBAM "
             f"reporting obligations under Regulation (EU) 2023/956. Based on energy data "
-            f"analysed by CEI, the organisation's projected annual CO₂ emissions for {year} "
+            f"analysed by CEI, the organisation's projected annual CO2 emissions for {year} "
             f"are estimated at <b>{_tco2(annualised)}</b>."
         )
     else:
@@ -244,8 +244,8 @@ def _section_cbam_position(data: Dict, s: dict) -> list:
     days = data.get("data_window_days", 0)
 
     rows = [
-        ("Verified CO₂ (measurement period)", _tco2(total)),
-        ("Projected annual CO₂", _tco2(annualised) if annualised else "Insufficient data"),
+        ("Verified CO2 (measurement period)", _tco2(total)),
+        ("Projected annual CO2", _tco2(annualised) if annualised else "Insufficient data"),
         ("EU free allocation", _tco2(free_alloc) if free_alloc else "Not configured"),
         ("ETS surplus / (deficit)", (
             f"+{_tco2(deficit)}" if deficit and deficit > 0
@@ -256,7 +256,7 @@ def _section_cbam_position(data: Dict, s: dict) -> list:
             _eur(abs(cost)) if cost and cost < 0
             else ("Surplus — no purchase required" if deficit and deficit > 0 else "Not configured")
         )),
-        ("Carbon price used (EUR/tCO₂)", f"€{price:.2f}"),
+        ("Carbon price used (EUR/tCO2)", f"€{price:.2f}"),
         ("Data confidence level", _confidence_label(confidence)),
         ("Days of energy data analysed", f"{days} days"),
     ]
@@ -269,7 +269,7 @@ def _section_cbam_position(data: Dict, s: dict) -> list:
             label="ESTIMATED ETS LIABILITY",
             value=_eur(abs(cost)),
             unit="at current carbon prices",
-            sub=f"Based on {_tco2(abs(deficit))} deficit × €{price:.0f}/tCO₂",
+            sub=f"Based on {_tco2(abs(deficit))} deficit × €{price:.0f}/tCO2",
         ))
         elements.append(spacer(4))
 
@@ -295,9 +295,9 @@ def _section_default_vs_verified(data: Dict, s: dict) -> list:
 
     rows = []
     if default_factor:
-        rows.append(("EU default emission factor", f"{default_factor:.4f} kg CO₂/kWh"))
+        rows.append(("EU default emission factor", f"{default_factor:.4f} kg CO2/kWh"))
     if verified_factor:
-        rows.append(("CEI verified emission factor", f"{verified_factor:.4f} kg CO₂/kWh"))
+        rows.append(("CEI verified emission factor", f"{verified_factor:.4f} kg CO2/kWh"))
     if annualised and default_factor and verified_factor:
         default_tco2 = annualised * (default_factor / verified_factor) if verified_factor else annualised
         rows.append(("Emissions using default factor (projected)", _tco2(default_tco2)))
@@ -337,8 +337,8 @@ def _section_benchmark(data: Dict, s: dict) -> list:
         return elements
 
     rows = [
-        ("EU sector benchmark (tCO₂/tonne product)", f"{benchmark:.4f}"),
-        ("Organisation actual intensity (tCO₂/tonne)", f"{actual:.4f}" if actual else "Not calculated"),
+        ("EU sector benchmark (tCO2/tonne product)", f"{benchmark:.4f}"),
+        ("Organisation actual intensity (tCO2/tonne)", f"{actual:.4f}" if actual else "Not calculated"),
         ("Gap vs. benchmark", _pct(gap_pct) if gap_pct is not None else "N/A"),
         ("Sector", sector),
     ]

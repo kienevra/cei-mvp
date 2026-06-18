@@ -30,6 +30,7 @@ from app.models import (
     SiteEvent,
     IntegrationToken,
     OrgInvite,
+    PartnerInvite,
 )
 
 __all__ = [

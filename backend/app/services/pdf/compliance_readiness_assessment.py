@@ -243,9 +243,9 @@ def _eval_ets(data: Dict) -> RAGItem:
         return RAGItem(
             dimension="ETS Phase 4 Position",
             status="green", score=85,
-            headline=f"ETS surplus — {deficit:,.1f} tCO₂ available",
+            headline=f"ETS surplus — {deficit:,.1f} tCO2 available",
             detail=(
-                f"The organisation holds a surplus of {deficit:,.1f} tCO₂ against its "
+                f"The organisation holds a surplus of {deficit:,.1f} tCO2 against its "
                 f"free allocation. It is also at or below the EU sector benchmark, "
                 f"providing protection against ETS Phase 4 ratcheting."
             ),
@@ -258,7 +258,7 @@ def _eval_ets(data: Dict) -> RAGItem:
             status="amber", score=60,
             headline=f"ETS surplus but above benchmark",
             detail=(
-                f"The organisation has a current surplus of {deficit:,.1f} tCO₂ but is "
+                f"The organisation has a current surplus of {deficit:,.1f} tCO2 but is "
                 f"{gap_pct:.1f}% above the EU sector benchmark. As ETS Phase 4 ratchets "
                 f"free allocations down 4.4%/year, this surplus will erode."
             ),
@@ -270,9 +270,9 @@ def _eval_ets(data: Dict) -> RAGItem:
         return RAGItem(
             dimension="ETS Phase 4 Position",
             status="red", score=score,
-            headline=f"ETS deficit — {abs(deficit):,.1f} tCO₂ purchase required",
+            headline=f"ETS deficit — {abs(deficit):,.1f} tCO2 purchase required",
             detail=(
-                f"The organisation has a deficit of {abs(deficit):,.1f} tCO₂ against its "
+                f"The organisation has a deficit of {abs(deficit):,.1f} tCO2 against its "
                 f"free allocation. Carbon allowances must be purchased before the "
                 f"compliance deadline, or energy reduction measures implemented."
             ),
