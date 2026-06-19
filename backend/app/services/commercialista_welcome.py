@@ -10,7 +10,9 @@ Includes:
   - Support contact
 """
 from __future__ import annotations
+import base64
 import logging
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("cei")
@@ -314,6 +316,42 @@ carbonefficiencyintel.com
     return subject, text_body, html_body
 
 
+# ---------------------------------------------------------------------------
+# Attachment builder
+# ---------------------------------------------------------------------------
+
+_PLAYBOOKS_DIR = Path(__file__).parent.parent / "static" / "playbooks"
+
+_PLAYBOOK_FILES = [
+    ("CEI_Commercialista_Playbook_EN.docx", "CEI Commercialista Playbook (EN).docx"),
+    ("CEI_Manuale_Commercialisti_IT.docx",  "CEI Manuale Commercialisti (IT).docx"),
+]
+
+
+def _get_attachments() -> list:
+    """
+    Read both playbook docx files from static/playbooks and return
+    Resend-compatible attachment dicts with base64-encoded content.
+    Returns empty list if files not found (email still sends without attachments).
+    """
+    attachments = []
+    for filename, display_name in _PLAYBOOK_FILES:
+        fpath = _PLAYBOOKS_DIR / filename
+        if fpath.exists():
+            try:
+                data = fpath.read_bytes()
+                attachments.append({
+                    "filename": display_name,
+                    "content": base64.b64encode(data).decode("utf-8"),
+                })
+                logger.info("Attached %s (%d bytes)", display_name, len(data))
+            except Exception as e:
+                logger.warning("Could not read attachment %s: %s", fpath, e)
+        else:
+            logger.warning("Playbook not found for email attachment: %s", fpath)
+    return attachments
+
+
 def send_commercialista_welcome(
     *,
     to_email: str,
@@ -333,11 +371,13 @@ def send_commercialista_welcome(
         else:
             subject, text_body, html_body = _build_email_it(partner_name, user_name)
 
+        attachments = _get_attachments()
         send_email(
             to_email=to_email,
             subject=subject,
             text_body=text_body,
             html_body=html_body,
+            attachments=attachments or None,
         )
         logger.info("Commercialista welcome email sent to %s (lang=%s)", to_email, lang)
     except Exception as exc:
