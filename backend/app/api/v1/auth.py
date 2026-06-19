@@ -385,6 +385,19 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
     access = create_access_token({"sub": db_user.email})
     refresh = create_refresh_token({"sub": db_user.email})
     _set_refresh_cookie(response, refresh)
+    # Send welcome email to commercialisti
+    if _is_commercialista:
+        try:
+            from app.services.commercialista_welcome import send_commercialista_welcome
+            send_commercialista_welcome(
+                to_email=email_norm,
+                partner_name=org.partner_name,
+                user_name=(getattr(db_user, 'full_name', None) or '').strip() or None,
+                lang=getattr(user, 'ui_lang', None) or 'it',
+            )
+        except Exception as _e:
+            logger.warning('Welcome email failed: %s', _e)
+
     return Token(access_token=access, token_type="bearer")
 
 
