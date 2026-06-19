@@ -454,14 +454,14 @@ const Login: React.FC = () => {
                     <button type="button" onClick={() => setManagerSubType("esco")} style={{ border: "1px solid var(--cei-border-subtle)", borderRadius: "0.75rem", padding: "0.85rem 1rem", cursor: "pointer", display: "flex", alignItems: "flex-start", gap: "0.85rem", background: "transparent", width: "100%", textAlign: "left", marginBottom: "0.6rem" }}>
                       <span style={{ fontSize: "1.4rem", flexShrink: 0 }}>🏭</span>
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: "0.92rem", marginBottom: "0.2rem" }}>ESCO / Energy Manager</div>
+                        <div style={{ fontWeight: 600, fontSize: "0.92rem", marginBottom: "0.2rem", color: "#e5e7eb" }}>ESCO / Energy Manager</div>
                         <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>I install sensors, manage energy contracts, and run technical audits for factories.</div>
                       </div>
                     </button>
                     <button type="button" onClick={() => setManagerSubType("commercialista")} style={{ border: "1px solid var(--cei-border-subtle)", borderRadius: "0.75rem", padding: "0.85rem 1rem", cursor: "pointer", display: "flex", alignItems: "flex-start", gap: "0.85rem", background: "transparent", width: "100%", textAlign: "left", marginBottom: "0.6rem" }}>
                       <span style={{ fontSize: "1.4rem", flexShrink: 0 }}>📋</span>
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: "0.92rem", marginBottom: "0.2rem" }}>Commercialista / Accountant</div>
+                        <div style={{ fontWeight: 600, fontSize: "0.92rem", marginBottom: "0.2rem", color: "#e5e7eb" }}>Commercialista / Accountant</div>
                         <div style={{ fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>I handle tax and compliance for manufacturing clients and want to generate CBAM and ETS reports for them.</div>
                       </div>
                     </button>
