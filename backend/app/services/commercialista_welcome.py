@@ -328,28 +328,30 @@ _PLAYBOOK_FILES = [
 ]
 
 
-def _get_attachments() -> list:
+def _get_attachments(lang: str = "it") -> list:
     """
-    Read both playbook docx files from static/playbooks and return
-    Resend-compatible attachment dicts with base64-encoded content.
-    Returns empty list if files not found (email still sends without attachments).
+    Read the language-appropriate playbook from static/playbooks and return
+    a Resend-compatible attachment dict with base64-encoded content.
+    Sends only one file matching the user's language (IT or EN).
+    Returns empty list if file not found (email still sends without attachments).
     """
-    attachments = []
-    for filename, display_name in _PLAYBOOK_FILES:
-        fpath = _PLAYBOOKS_DIR / filename
-        if fpath.exists():
-            try:
-                data = fpath.read_bytes()
-                attachments.append({
-                    "filename": display_name,
-                    "content": base64.b64encode(data).decode("utf-8"),
-                })
-                logger.info("Attached %s (%d bytes)", display_name, len(data))
-            except Exception as e:
-                logger.warning("Could not read attachment %s: %s", fpath, e)
-        else:
-            logger.warning("Playbook not found for email attachment: %s", fpath)
-    return attachments
+    is_en = lang.strip().lower().startswith("en")
+    if is_en:
+        filename, display_name = _PLAYBOOK_FILES[0]   # EN first
+    else:
+        filename, display_name = _PLAYBOOK_FILES[1]   # IT default
+
+    fpath = _PLAYBOOKS_DIR / filename
+    if fpath.exists():
+        try:
+            data = fpath.read_bytes()
+            logger.info("Attached %s (%d bytes)", display_name, len(data))
+            return [{"filename": display_name, "content": base64.b64encode(data).decode("utf-8")}]
+        except Exception as e:
+            logger.warning("Could not read attachment %s: %s", fpath, e)
+    else:
+        logger.warning("Playbook not found for email attachment: %s", fpath)
+    return []
 
 
 def send_commercialista_welcome(
@@ -371,7 +373,7 @@ def send_commercialista_welcome(
         else:
             subject, text_body, html_body = _build_email_it(partner_name, user_name)
 
-        attachments = _get_attachments()
+        attachments = _get_attachments(lang)
         send_email(
             to_email=to_email,
             subject=subject,
