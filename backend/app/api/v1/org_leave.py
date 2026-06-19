@@ -13,6 +13,7 @@ from app.db.session import get_db
 from app.models import (
     Organization, User, Site, TimeseriesRecord,
     SiteEvent, AlertEvent, IntegrationToken, OrgInvite, Subscription,
+    PartnerInvite,
 )
 
 import logging
@@ -275,6 +276,10 @@ def delete_own_account(
             Subscription.organization_id == org_id
         ).delete(synchronize_session=False))
 
+    # 12b. Partner invites (managing org generated)
+    safe_orm_delete(lambda: db.query(PartnerInvite).filter(
+        PartnerInvite.managing_org_id == org_id
+    ).delete(synchronize_session=False))
     # 13. Sites
     safe_orm_delete(lambda: db.query(Site).filter(
         Site.org_id == org_id
