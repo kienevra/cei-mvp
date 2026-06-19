@@ -230,13 +230,27 @@
       "stepsRemaining_one": "{{count}} passaggio rimanente",
       "stepsRemaining_other": "{{count}} passaggi rimanenti",
       "steps": {
-        "managing_org_configured": { "label": "Organizzazione consulente configurata" },
-        "subscription_active":     { "label": "Abbonamento attivo" },
-        "first_client_created":    { "label": "Primo cliente creato" },
-        "first_site_created":      { "label": "Primo impianto creato" },
-        "first_token_created":     { "label": "Primo token di integrazione creato" },
-        "first_data_ingested":     { "label": "Primi dati importati" },
-        "first_user_invited":      { "label": "Primo utente invitato" }
+        "managing_org_configured": {
+          "label": "Organizzazione consulente configurata"
+        },
+        "subscription_active": {
+          "label": "Abbonamento attivo"
+        },
+        "first_client_created": {
+          "label": "Primo cliente creato"
+        },
+        "first_site_created": {
+          "label": "Primo impianto creato"
+        },
+        "first_token_created": {
+          "label": "Primo token di integrazione creato"
+        },
+        "first_data_ingested": {
+          "label": "Primi dati importati"
+        },
+        "first_user_invited": {
+          "label": "Primo utente invitato"
+        }
       }
     },
     "linkPanel": {
@@ -414,14 +428,38 @@
         "errorSave": "Impossibile salvare le soglie.",
         "defaultLabel": "predefinito: {{value}}",
         "fields": {
-          "nightWarning": { "label": "Soglia notte (avviso)", "hint": "Frazione della media diurna" },
-          "nightCritical": { "label": "Soglia notte (critica)", "hint": "Frazione della media diurna" },
-          "spikeWarning": { "label": "Soglia picco (avviso)", "hint": "Multiplo della media recente" },
-          "portfolioShare": { "label": "Quota portfolio", "hint": "Multiplo della media portfolio" },
-          "weekendWarning": { "label": "Soglia weekend (avviso)", "hint": "Frazione della media infrasettimanale" },
-          "weekendCritical": { "label": "Soglia weekend (critica)", "hint": "Frazione della media infrasettimanale" },
-          "minPoints": { "label": "Punti minimi", "hint": "Numero minimo di punti dati richiesti" },
-          "minKwh": { "label": "kWh minimi totali", "hint": "Energia minima per attivare l'avviso" }
+          "nightWarning": {
+            "label": "Soglia notte (avviso)",
+            "hint": "Frazione della media diurna"
+          },
+          "nightCritical": {
+            "label": "Soglia notte (critica)",
+            "hint": "Frazione della media diurna"
+          },
+          "spikeWarning": {
+            "label": "Soglia picco (avviso)",
+            "hint": "Multiplo della media recente"
+          },
+          "portfolioShare": {
+            "label": "Quota portfolio",
+            "hint": "Multiplo della media portfolio"
+          },
+          "weekendWarning": {
+            "label": "Soglia weekend (avviso)",
+            "hint": "Frazione della media infrasettimanale"
+          },
+          "weekendCritical": {
+            "label": "Soglia weekend (critica)",
+            "hint": "Frazione della media infrasettimanale"
+          },
+          "minPoints": {
+            "label": "Punti minimi",
+            "hint": "Numero minimo di punti dati richiesti"
+          },
+          "minKwh": {
+            "label": "kWh minimi totali",
+            "hint": "Energia minima per attivare l'avviso"
+          }
         }
       }
     }
@@ -1016,8 +1054,8 @@
       "footer": "Offboard organizzazione scollega gli utenti e revoca inviti/token, ma mantiene la riga org. Elimina definitivamente cancella org e dati associati. Lascia organizzazione scollega solo te (bloccato se sei l'ultimo owner)."
     },
     "invites": {
-      "title": "Inviti organizzazione",
-      "subtitle": "Solo owner. Genera link di accesso per questa org.",
+      "title": "Invita collaboratore",
+      "subtitle": "Solo owner. Genera link di accesso per i membri del tuo studio.",
       "notOwnerBlurb": "Non sei owner dell'organizzazione. La generazione inviti è limitata.",
       "form": {
         "emailLabel": "Email invito",
@@ -1423,7 +1461,7 @@
     }
   },
   "notifications": {
-     "ui": {
+    "ui": {
       "title": "Notifiche",
       "unread": "{{count}} non lette",
       "markAllRead": "Segna tutte come lette",

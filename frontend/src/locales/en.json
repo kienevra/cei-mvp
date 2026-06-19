@@ -230,13 +230,27 @@
       "stepsRemaining_one": "{{count}} step remaining",
       "stepsRemaining_other": "{{count}} steps remaining",
       "steps": {
-        "managing_org_configured": { "label": "Managing org configured" },
-        "subscription_active":     { "label": "Subscription active" },
-        "first_client_created":    { "label": "First client org created" },
-        "first_site_created":      { "label": "First site created" },
-        "first_token_created":     { "label": "First integration token created" },
-        "first_data_ingested":     { "label": "First data ingested" },
-        "first_user_invited":      { "label": "First user invited" }
+        "managing_org_configured": {
+          "label": "Managing org configured"
+        },
+        "subscription_active": {
+          "label": "Subscription active"
+        },
+        "first_client_created": {
+          "label": "First client org created"
+        },
+        "first_site_created": {
+          "label": "First site created"
+        },
+        "first_token_created": {
+          "label": "First integration token created"
+        },
+        "first_data_ingested": {
+          "label": "First data ingested"
+        },
+        "first_user_invited": {
+          "label": "First user invited"
+        }
       }
     },
     "clients": {
@@ -395,14 +409,38 @@
         "errorSave": "Failed to save thresholds.",
         "defaultLabel": "default: {{value}}",
         "fields": {
-          "nightWarning": { "label": "Night warning ratio", "hint": "Fraction of daytime avg" },
-          "nightCritical": { "label": "Night critical ratio", "hint": "Fraction of daytime avg" },
-          "spikeWarning": { "label": "Spike warning ratio", "hint": "Multiple of recent avg" },
-          "portfolioShare": { "label": "Portfolio share ratio", "hint": "Multiple of portfolio avg" },
-          "weekendWarning": { "label": "Weekend warning ratio", "hint": "Fraction of weekday avg" },
-          "weekendCritical": { "label": "Weekend critical ratio", "hint": "Fraction of weekday avg" },
-          "minPoints": { "label": "Min points", "hint": "Minimum data points required" },
-          "minKwh": { "label": "Min total kWh", "hint": "Minimum energy for alert to fire" }
+          "nightWarning": {
+            "label": "Night warning ratio",
+            "hint": "Fraction of daytime avg"
+          },
+          "nightCritical": {
+            "label": "Night critical ratio",
+            "hint": "Fraction of daytime avg"
+          },
+          "spikeWarning": {
+            "label": "Spike warning ratio",
+            "hint": "Multiple of recent avg"
+          },
+          "portfolioShare": {
+            "label": "Portfolio share ratio",
+            "hint": "Multiple of portfolio avg"
+          },
+          "weekendWarning": {
+            "label": "Weekend warning ratio",
+            "hint": "Fraction of weekday avg"
+          },
+          "weekendCritical": {
+            "label": "Weekend critical ratio",
+            "hint": "Fraction of weekday avg"
+          },
+          "minPoints": {
+            "label": "Min points",
+            "hint": "Minimum data points required"
+          },
+          "minKwh": {
+            "label": "Min total kWh",
+            "hint": "Minimum energy for alert to fire"
+          }
         }
       }
     },
@@ -1016,8 +1054,8 @@
       "footer": "Offboard Organization detaches users and revokes invites/tokens, but keeps the org row. Permanently Delete deletes the org and org-scoped data. Leave Organization detaches only you (blocked if you're the last owner)."
     },
     "invites": {
-      "title": "Organization invites",
-      "subtitle": "Owner-only. Generates join links for this org.",
+      "title": "Invite team member",
+      "subtitle": "Owner-only. Generates join links for members of your practice.",
       "notOwnerBlurb": "You are not an org owner. Invite generation is restricted.",
       "form": {
         "emailLabel": "Invite email",
@@ -1448,8 +1486,8 @@
       "body": "{{name}}"
     },
     "org_linked": {
-      "title": "{{name}}",
-      "body": "{{name}}"
+      "title": "Connected to {{name}}",
+      "body": "Your account is now managed by a CEI consultant."
     },
     "link_request_rejected": {
       "title": "{{name}} declined your request",
@@ -1458,10 +1496,6 @@
     "link_request_cancelled": {
       "title": "{{name}} cancelled the request",
       "body": "The link request was cancelled by the consultant."
-    },
-    "org_linked": {
-      "title": "Connected to {{name}}",
-      "body": "Your account is now managed by a CEI consultant."
     },
     "org_unlinked": {
       "title": "{{name}} left your portfolio",

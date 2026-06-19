@@ -35,14 +35,29 @@ const Sidebar: React.FC = () => {
     user?.org?.org_type === "managing" ||
     user?.organization?.org_type === "managing";
 
+  const partnerName =
+    user?.org?.partner_name ?? user?.organization?.partner_name ?? null;
+
+  const isCommercialista = isManagingOrg && !!partnerName;
+  const isEsco = isManagingOrg && !partnerName;
+
   const isClientOrg =
     user?.org?.org_type === "client" ||
     user?.organization?.org_type === "client";
 
   const navItems = useMemo(() => {
-    if (isManagingOrg) {
+    if (isCommercialista) {
       return [
         { label: "Compliance Portal", path: "/commercialista", icon: <FiGrid /> },
+        { label: t("nav.account"), path: "/account", icon: <FiUser /> },
+        { label: t("nav.billing"), path: "/billing", icon: <FiCreditCard /> },
+        { label: t("nav.settings"), path: "/settings", icon: <FiSettings /> },
+        { label: t("nav.support", { defaultValue: "Support" }), path: "/support", icon: <FiLifeBuoy /> },
+      ];
+    }
+
+    if (isEsco) {
+      return [
         { label: t("nav.manage"), path: "/manage", icon: <FiBriefcase /> },
         { label: t("nav.account"), path: "/account", icon: <FiUser /> },
         { label: t("nav.billing"), path: "/billing", icon: <FiCreditCard /> },
@@ -72,7 +87,7 @@ const Sidebar: React.FC = () => {
       { label: t("nav.account"), path: "/account", icon: <FiUser /> },
       { label: t("nav.support", { defaultValue: "Support" }), path: "/support", icon: <FiLifeBuoy /> },
     ];
-  }, [t, isManagingOrg, isClientOrg]);
+  }, [t, isManagingOrg, isCommercialista, isEsco, isClientOrg]);
 
   return (
     <aside
