@@ -322,6 +322,7 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
     org.org_type = "managing" if user.org_type == "managing" else "standalone"
     if user.partner_name and user.partner_name.strip():
         org.partner_name = user.partner_name.strip()
+    _is_commercialista = bool(org.partner_name)
     org.trial_ends_at = datetime.now(timezone.utc) + timedelta(days=30)
     for k, v in [("plan_key", "cei-starter"), ("subscription_plan_key", "cei-starter"),
                  ("enable_alerts", True), ("enable_reports", True), ("subscription_status", "active")]:
