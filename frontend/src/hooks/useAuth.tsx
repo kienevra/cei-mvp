@@ -241,9 +241,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setUser(meResp.data);
         // Route based on org type and partner_name
         const _orgType = meResp.data?.org?.org_type ?? meResp.data?.organization?.org_type ?? "standalone";
-        const _pName = meResp.data?.org?.partner_name ?? meResp.data?.organization?.partner_name ?? null;
+        const _subtype = meResp.data?.org?.account_subtype ?? meResp.data?.organization?.account_subtype ?? null;
         if (_orgType === "managing") {
-          navigate(_pName ? "/commercialista" : "/manage", { replace: true });
+          navigate(_subtype === "commercialista" ? "/commercialista" : "/manage", { replace: true });
           return;
         }
       } catch {

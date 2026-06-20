@@ -38,8 +38,11 @@ const Sidebar: React.FC = () => {
   const partnerName =
     user?.org?.partner_name ?? user?.organization?.partner_name ?? null;
 
-  const isCommercialista = isManagingOrg && !!partnerName;
-  const isEsco = isManagingOrg && !partnerName;
+  const accountSubtype =
+    user?.org?.account_subtype ?? user?.organization?.account_subtype ?? null;
+
+  const isCommercialista = isManagingOrg && accountSubtype === "commercialista";
+  const isEsco = isManagingOrg && accountSubtype !== "commercialista";
 
   const isClientOrg =
     user?.org?.org_type === "client" ||

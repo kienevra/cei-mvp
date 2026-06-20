@@ -297,6 +297,7 @@ class UserCreate(BaseModel):
     terms_accepted: Optional[bool] = None  # must be True to register
     aggregate_data_consent: Optional[bool] = None  # optional GDPR consent for anonymised benchmarking
     partner_name: Optional[str] = None  # commercialista studio name for co-branded PDFs
+    account_subtype: Optional[str] = None  # 'esco' | 'commercialista'
 
 
 @router.post("/signup", response_model=Token, dependencies=[Depends(login_rate_limit)])
@@ -323,7 +324,9 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
     org.org_type = "managing" if user.org_type == "managing" else "standalone"
     if user.partner_name and user.partner_name.strip():
         org.partner_name = user.partner_name.strip()
-    _is_commercialista = bool(org.partner_name)
+    if user.account_subtype and user.account_subtype.strip().lower() in ('esco', 'commercialista'):
+        org.account_subtype = user.account_subtype.strip().lower()
+    _is_commercialista = org.account_subtype == 'commercialista'
     org.trial_ends_at = datetime.now(timezone.utc) + timedelta(days=30)
     for k, v in [("plan_key", "cei-starter"), ("subscription_plan_key", "cei-starter"),
                  ("enable_alerts", True), ("enable_reports", True), ("subscription_status", "active")]:
@@ -513,6 +516,7 @@ def read_me(
             managed_by_org_id=getattr(org, "managed_by_org_id", None),
             client_limit=getattr(org, "client_limit", None),
             partner_name=getattr(org, "partner_name", None),
+            account_subtype=getattr(org, "account_subtype", None),
             primary_energy_sources=primary_energy_sources,
             electricity_price_per_kwh=electricity_price_per_kwh,
             gas_price_per_kwh=gas_price_per_kwh,

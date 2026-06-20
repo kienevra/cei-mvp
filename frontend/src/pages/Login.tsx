@@ -244,6 +244,7 @@ const Login: React.FC = () => {
           organization_name: managerSubType === "commercialista" ? (partnerName.trim() || organizationName.trim() || undefined) : (organizationName.trim() || undefined),
           org_type: regType === "manager" ? "managing" : "standalone",
           partner_name: managerSubType === "commercialista" ? (partnerName.trim() || organizationName.trim() || "Studio") : undefined,
+          account_subtype: managerSubType === "commercialista" ? "commercialista" : managerSubType === "esco" ? "esco" : undefined,
           ui_lang: localStorage.getItem("cei_lang") || undefined,
           terms_accepted: termsAccepted,
           aggregate_data_consent: aggregateConsent,

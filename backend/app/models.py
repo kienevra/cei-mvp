@@ -111,6 +111,7 @@ class Organization(Base):
     # Enforced at the API layer (Phase 3). NULL = unlimited (e.g. enterprise plan).
     client_limit = Column(Integer, nullable=True)
     partner_name = Column(String(255), nullable=True)  # commercialista studio name for co-branded PDFs
+    account_subtype = Column(String(32), nullable=True)  # 'esco' | 'commercialista'
 
     # -------- Billing policy fields --------
     billing_cycle_anchor = Column(DateTime(timezone=True), nullable=True)
