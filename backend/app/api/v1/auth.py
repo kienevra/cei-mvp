@@ -110,6 +110,7 @@ class OrgSummaryOut(BaseModel):
     org_type: Optional[str] = None
     managed_by_org_id: Optional[int] = None
     client_limit: Optional[int] = None
+    partner_name: Optional[str] = None
 
     primary_energy_sources: Optional[str] = None
     electricity_price_per_kwh: Optional[float] = None
