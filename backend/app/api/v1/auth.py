@@ -111,6 +111,7 @@ class OrgSummaryOut(BaseModel):
     managed_by_org_id: Optional[int] = None
     client_limit: Optional[int] = None
     partner_name: Optional[str] = None
+    account_subtype: Optional[str] = None
 
     primary_energy_sources: Optional[str] = None
     electricity_price_per_kwh: Optional[float] = None
