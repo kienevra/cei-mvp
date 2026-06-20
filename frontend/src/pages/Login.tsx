@@ -241,9 +241,9 @@ const Login: React.FC = () => {
           email,
           password,
           full_name: fullName.trim() || undefined,
-          organization_name: organizationName.trim() || undefined,
+          organization_name: managerSubType === "commercialista" ? (partnerName.trim() || undefined) : (organizationName.trim() || undefined),
           org_type: regType === "manager" ? "managing" : "standalone",
-          partner_name: managerSubType === "commercialista" && partnerName.trim() ? partnerName.trim() : undefined,
+          partner_name: managerSubType === "commercialista" ? (partnerName.trim() || undefined) : undefined,
           ui_lang: localStorage.getItem("cei_lang") || undefined,
           terms_accepted: termsAccepted,
           aggregate_data_consent: aggregateConsent,
@@ -253,15 +253,8 @@ const Login: React.FC = () => {
         // Upgrade to managing if ESCO
         if (regType === "manager") {
           try { await upgradeToManaging(null); } catch { /* non-fatal, user can upgrade later */ }
-          // After login, /auth/me will determine the right dashboard
-          // partner_name set = commercialista, no partner_name = ESCO/energy manager
-          try {
-            const meRes = await import("../services/api").then(m => m.default.get("/auth/me"));
-            const partnerName = meRes.data?.org?.partner_name ?? meRes.data?.organization?.partner_name ?? null;
-            window.location.href = partnerName ? "/commercialista" : "/manage";
-          } catch {
-            window.location.href = "/manage";
-          }
+          // Route based on sub-type chosen at signup
+          window.location.href = managerSubType === "commercialista" ? "/commercialista" : "/manage";
           return;
         }
         return;
@@ -470,7 +463,7 @@ const Login: React.FC = () => {
                 {/* Partner name field for commercialista */}
                 {regType === "manager" && managerSubType === "commercialista" && (
                   <div style={{ marginBottom: "0.75rem", padding: "0.75rem 1rem", borderRadius: "0.5rem", background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.2)" }}>
-                    <label style={{ fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", display: "block", marginBottom: "0.4rem" }}>Studio / Practice name</label>
+                    <label style={{ fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", display: "block", marginBottom: "0.4rem" }}>Studio / Practice name *</label>
                     <input value={partnerName} onChange={e => setPartnerName(e.target.value)} placeholder="e.g. Studio Pincelli & Associati" style={{ width: "100%", padding: "0.5rem 0.75rem", borderRadius: "0.4rem", border: "1px solid var(--cei-border-subtle)", background: "rgba(148,163,184,0.07)", color: "var(--cei-text-main)", fontSize: "0.875rem", boxSizing: "border-box" }} />
                     <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", marginTop: "0.35rem" }}>This name appears on all co-branded client reports.</div>
                   </div>
@@ -484,6 +477,7 @@ const Login: React.FC = () => {
                   : t("signup.selfSignup.orgSubtitle", { defaultValue: "Your account will be set up as a standalone organization with full access to sites, alerts, and reports." })}
               </p>
 
+                {!(regType === "manager" && managerSubType === "commercialista") && (
               <div>
                 <label htmlFor="organizationName">
                   {regType === "manager"
@@ -504,6 +498,8 @@ const Login: React.FC = () => {
                   autoFocus
                 />
               </div>
+              )}
+
 
               <div>
                 <label htmlFor="fullName">{t("signup.selfSignup.fullNameLabel", { defaultValue: "Your full name" })}</label>

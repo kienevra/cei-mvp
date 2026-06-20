@@ -375,7 +375,7 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
         send_welcome_email(
             to_email=email_norm,
             org_name=org.name,
-            org_type=getattr(org, "org_type", None) or (user.org_type if hasattr(user, "org_type") else "standalone"),
+            org_type="commercialista" if _is_commercialista else (getattr(org, "org_type", None) or "standalone"),
             accept_language=accept_lang,
             full_name=getattr(db_user, "full_name", None),
         )
@@ -385,19 +385,6 @@ def signup(user: UserCreate, response: Response, request: Request, db: Session =
     access = create_access_token({"sub": db_user.email})
     refresh = create_refresh_token({"sub": db_user.email})
     _set_refresh_cookie(response, refresh)
-    # Send welcome email to commercialisti
-    if _is_commercialista:
-        try:
-            from app.services.commercialista_welcome import send_commercialista_welcome
-            send_commercialista_welcome(
-                to_email=email_norm,
-                partner_name=org.partner_name,
-                user_name=(getattr(db_user, 'full_name', None) or '').strip() or None,
-                lang=getattr(user, 'ui_lang', None) or 'it',
-            )
-        except Exception as _e:
-            logger.warning('Welcome email failed: %s', _e)
-
     return Token(access_token=access, token_type="bearer")
 
 
@@ -524,6 +511,7 @@ def read_me(
             org_type=getattr(org, "org_type", "standalone"),
             managed_by_org_id=getattr(org, "managed_by_org_id", None),
             client_limit=getattr(org, "client_limit", None),
+            partner_name=getattr(org, "partner_name", None),
             primary_energy_sources=primary_energy_sources,
             electricity_price_per_kwh=electricity_price_per_kwh,
             gas_price_per_kwh=gas_price_per_kwh,

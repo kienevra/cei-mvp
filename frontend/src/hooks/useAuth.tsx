@@ -24,6 +24,7 @@ export type AuthUser = {
 export type AuthContextType = {
   token: string | null;
   isAuthenticated: boolean;
+  isLoading: boolean;
   user: AuthUser | null;
   login: (data: LoginPayload) => Promise<void>;
   logout: () => void;
@@ -172,11 +173,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // This ensures user.org.org_type is populated so the Sidebar can
   // conditionally show the Manage nav item for managing orgs.
   useEffect(() => {
-    if (!token) return;
+    if (!token) { setIsLoading(false); return; }
+    setIsLoading(true);
     api
       .get("/auth/me")
       .then((resp) => setUser(resp.data))
-      .catch(() => {}); // silently ignore — stale token will be caught by the interceptor below
+      .catch(() => {})
+      .finally(() => setIsLoading(false)); // silently ignore — stale token will be caught by the interceptor below
   }, [token]);
 
   // Global auth sink: if api.ts reports "session expired", reflect it in Auth state and route.

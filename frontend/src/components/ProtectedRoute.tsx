@@ -9,8 +9,11 @@ type ProtectedRouteProps = {
 };
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedOrgTypes }) => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const location = useLocation();
+
+  // Wait for /auth/me to complete before making routing decisions
+  if (isLoading) return null;
 
   if (!isAuthenticated) {
     return (
