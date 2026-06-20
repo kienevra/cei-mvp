@@ -569,7 +569,7 @@ def _get_playbook_attachment(org_type: str, lang: str) -> Optional[dict]:
     filename_map = {
         ("managing", "en"): "CEI_Consultant_Playbook_EN_v2.docx",
         ("managing", "it"): "CEI_Manuale_Consulenti_IT_v2.docx",
-        ("commercialista", "en"): "CEI_Commercialista_Playbook_EN.docx",
+        ("commercialista", "en"): "CEI_Accountant_Playbook_EN.docx",
         ("commercialista", "it"): "CEI_Manuale_Commercialisti_IT.docx",
         ("standalone", "en"): "CEI_Organization_Playbook_EN_v2.docx",
         ("standalone", "it"): "CEI_Manuale_Organizzazioni_IT_v2.docx",
