@@ -129,6 +129,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Optional user object (TopNav is reading this)
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(!!localStorage.getItem('cei_token'));
 
   const isAuthenticated = !!token;
 
@@ -238,6 +239,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           headers: { Authorization: `Bearer ${accessToken}` },
         });
         setUser(meResp.data);
+        // Route based on org type and partner_name
+        const _orgType = meResp.data?.org?.org_type ?? meResp.data?.organization?.org_type ?? "standalone";
+        const _pName = meResp.data?.org?.partner_name ?? meResp.data?.organization?.partner_name ?? null;
+        if (_orgType === "managing") {
+          navigate(_pName ? "/commercialista" : "/manage", { replace: true });
+          return;
+        }
       } catch {
         // Fall back to minimal user if /auth/me fails for any reason
         setUser({ username });
