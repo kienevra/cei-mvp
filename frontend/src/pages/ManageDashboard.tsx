@@ -60,7 +60,11 @@ function ClientTable({ summary, analytics, onDownload, onDownloadCbam, onDownloa
   summary: PortfolioSummary;
   analytics: PortfolioAnalytics | null;
   onDownload: (id: number) => void;
+  onDownloadCbam: (id: number) => void;
+  onDownloadCompliance: (id: number) => void;
   downloading: number | null;
+  downloadingCbam: number | null;
+  downloadingCompliance: number | null;
   onOrgClick: (id: number) => void;
 }) {
   const { t, i18n } = useTranslation();
