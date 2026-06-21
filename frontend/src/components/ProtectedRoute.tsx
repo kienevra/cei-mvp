@@ -30,10 +30,6 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedOrgTyp
   const isCommercialista = orgType === "managing" && accountSubtype === "commercialista";
   const isEsco = orgType === "managing" && accountSubtype !== "commercialista";
 
-  // Block commercialista from /manage, redirect to /commercialista
-  if (isCommercialista && location.pathname.startsWith("/manage")) {
-    return <Navigate to="/commercialista" replace />;
-  }
   // Block ESCO from /commercialista, redirect to /manage
   if (isEsco && location.pathname.startsWith("/commercialista")) {
     return <Navigate to="/manage" replace />;
