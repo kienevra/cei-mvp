@@ -3,6 +3,7 @@
 // No kWh charts, no ingestion stats, no sensor noise.
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import LinkRequestsPanel from "../components/LinkRequestsPanel";
 import { useAuth } from "../hooks/useAuth";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
@@ -349,6 +350,15 @@ const CommerciallistaDashboard: React.FC = () => {
           ))}
         </div>
       )}
+
+      {/* Link requests from factories */}
+      <div style={{ marginTop: "2rem" }}>
+        <SectionHeading>Factory Connection Requests</SectionHeading>
+        <p style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", margin: "0 0 0.75rem" }}>
+          Factories that have requested to connect their CEI account to your practice.
+        </p>
+        <LinkRequestsPanel onAccepted={() => getPortfolioSummary().then(setSummary)} />
+      </div>
 
       {/* Invite panel */}
       <div id="invite-panel">
