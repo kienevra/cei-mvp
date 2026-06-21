@@ -67,62 +67,65 @@ function ClientComplianceCard({ client, onCbam, onCompliance, loadingCbam, loadi
   loadingCompliance: boolean;
   onClick: () => void;
 }) {
-  const score  = deriveScore(client);
-  const color  = ragColor(score);
-  const label  = ragLabel(score);
+  const score    = deriveScore(client);
+  const color    = ragColor(score);
+  const label    = ragLabel(score);
   const isActive = (client.records_last_24h ?? 0) > 0;
 
   return (
-    <div style={{ background: "rgba(15,23,42,0.6)", border: `1px solid var(--cei-border-subtle)`, borderRadius: "0.75rem", padding: "1.1rem 1.25rem", display: "flex", flexDirection: "column", gap: "0.75rem", transition: "border-color 0.15s" }}
-      onMouseEnter={e => (e.currentTarget as HTMLElement).style.borderColor = "rgba(148,163,184,0.4)"}
-      onMouseLeave={e => (e.currentTarget as HTMLElement).style.borderColor = "var(--cei-border-subtle)"}
-    >
-      {/* Top row: name + RAG badge */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.5rem" }}>
-        <button onClick={onClick} style={{ background: "transparent", border: "none", padding: 0, color: "var(--cei-text-main)", fontWeight: 600, fontSize: "0.95rem", cursor: "pointer", textAlign: "left", textDecoration: "underline", textDecorationColor: "rgba(148,163,184,0.3)", textUnderlineOffset: "3px" }}>
-          {client.org_name}
-        </button>
-        <span style={{ fontSize: "0.7rem", fontWeight: 700, padding: "0.2rem 0.6rem", borderRadius: "999px", border: `1px solid ${color}44`, background: `${color}10`, color, whiteSpace: "nowrap" }}>
-          {label}
+    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1rem", background: "rgba(15,23,42,0.4)", border: "1px solid var(--cei-border-subtle)", borderRadius: "0.6rem", flexWrap: "wrap" }}>
+
+      {/* Factory name */}
+      <button onClick={onClick} style={{ flex: "1 1 160px", background: "transparent", border: "none", padding: 0, color: "var(--cei-text-main)", fontWeight: 600, fontSize: "0.9rem", cursor: "pointer", textAlign: "left", textDecoration: "underline", textDecorationColor: "rgba(148,163,184,0.25)", textUnderlineOffset: "3px" }}>
+        {client.org_name}
+      </button>
+
+      {/* RAG badge */}
+      <span style={{ fontSize: "0.68rem", fontWeight: 700, padding: "0.15rem 0.55rem", borderRadius: "999px", border: `1px solid ${color}44`, background: `${color}10`, color, whiteSpace: "nowrap" }}>
+        {label}
+      </span>
+
+      {/* Data status */}
+      <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "4px" }}>
+        <span style={{ display: "inline-block", width: "6px", height: "6px", borderRadius: "50%", background: isActive ? "var(--cei-green,#22c55e)" : "var(--cei-amber,#f59e0b)" }} />
+        {isActive ? "Active" : "No data"}
+      </span>
+
+      {/* Sites */}
+      <span style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)", whiteSpace: "nowrap" }}>
+        {client.active_sites ?? 0} site{(client.active_sites ?? 0) !== 1 ? "s" : ""}
+      </span>
+
+      {/* Alerts */}
+      {(client.open_alerts ?? 0) > 0 && (
+        <span style={{ fontSize: "0.75rem", color: "var(--cei-red,#ef4444)", fontWeight: 600, whiteSpace: "nowrap" }}>
+          {client.open_alerts} alert{client.open_alerts !== 1 ? "s" : ""}
         </span>
-      </div>
+      )}
 
-      {/* Status row */}
-      <div style={{ display: "flex", gap: "1.25rem", flexWrap: "wrap" }}>
-        <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-          <span style={{ display: "inline-block", width: "7px", height: "7px", borderRadius: "50%", background: isActive ? "var(--cei-green,#22c55e)" : "var(--cei-amber,#f59e0b)", marginRight: "5px", verticalAlign: "middle" }} />
-          {isActive ? "Data flowing" : "No recent data"}
-        </div>
-        <div style={{ fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>
-          {client.active_sites ?? 0} site{(client.active_sites ?? 0) !== 1 ? "s" : ""}
-        </div>
-        {(client.open_alerts ?? 0) > 0 && (
-          <div style={{ fontSize: "0.78rem", color: "var(--cei-red,#ef4444)", fontWeight: 600 }}>
-            {client.open_alerts} open alert{client.open_alerts !== 1 ? "s" : ""}
-          </div>
-        )}
-      </div>
-
-      {/* PDF action buttons */}
-      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", paddingTop: "0.25rem", borderTop: "1px solid var(--cei-border-subtle)" }}>
+      {/* PDF buttons — right side */}
+      <div style={{ display: "flex", gap: "0.4rem", marginLeft: "auto" }}>
         <button
           onClick={onCbam}
           disabled={loadingCbam}
-          style={{ flex: "1 1 120px", padding: "0.4rem 0.75rem", borderRadius: "999px", border: "1px solid rgba(56,189,248,0.4)", background: "transparent", color: loadingCbam ? "var(--cei-text-muted)" : "var(--cei-accent,#38bdf8)", fontSize: "0.78rem", fontWeight: 500, cursor: loadingCbam ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+          title="Download CBAM Exposure Summary PDF"
+          style={{ padding: "0.3rem 0.7rem", borderRadius: "999px", border: "1px solid rgba(56,189,248,0.4)", background: "transparent", color: loadingCbam ? "var(--cei-text-muted)" : "var(--cei-accent,#38bdf8)", fontSize: "0.75rem", fontWeight: 500, cursor: loadingCbam ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
         >
-          {loadingCbam ? "Generating..." : "📄 CBAM Exposure"}
+          {loadingCbam ? "..." : "CBAM PDF"}
         </button>
         <button
           onClick={onCompliance}
           disabled={loadingCompliance}
-          style={{ flex: "1 1 120px", padding: "0.4rem 0.75rem", borderRadius: "999px", border: "1px solid rgba(34,197,94,0.4)", background: "transparent", color: loadingCompliance ? "var(--cei-text-muted)" : "var(--cei-green,#22c55e)", fontSize: "0.78rem", fontWeight: 500, cursor: loadingCompliance ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+          title="Download Compliance Readiness Assessment PDF"
+          style={{ padding: "0.3rem 0.7rem", borderRadius: "999px", border: "1px solid rgba(34,197,94,0.4)", background: "transparent", color: loadingCompliance ? "var(--cei-text-muted)" : "var(--cei-green,#22c55e)", fontSize: "0.75rem", fontWeight: 500, cursor: loadingCompliance ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
         >
-          {loadingCompliance ? "Generating..." : "✅ Compliance Check"}
+          {loadingCompliance ? "..." : "Compliance PDF"}
         </button>
       </div>
     </div>
   );
 }
+
 
 // ---------------------------------------------------------------------------
 // Invite Panel
@@ -332,7 +335,7 @@ const CommerciallistaDashboard: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "0.85rem" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {summary?.clients.map((client: any) => (
             <ClientComplianceCard
               key={client.org_id}
