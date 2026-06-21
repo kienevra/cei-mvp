@@ -53,7 +53,7 @@ const AcceptInvite: React.FC = () => {
   // Load invite info
   useEffect(() => {
     if (!token) { setError("Invalid invite link."); setLoading(false); return; }
-    api.get(`/auth/invite-info/${token}`)
+    api.get(`/invite-info/${token}`)
       .then(res => {
         const data = res.data as InviteInfo;
         if (data.status !== "active") {
@@ -84,7 +84,7 @@ const AcceptInvite: React.FC = () => {
 
     setSubmitting(true);
     try {
-      const res = await api.post(`/auth/accept-invite/${token}`, {
+      const res = await api.post(`/accept-invite/${token}`, {
         org_name: orgName.trim(),
         email: email.trim().toLowerCase(),
         password,

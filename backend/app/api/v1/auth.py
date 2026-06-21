@@ -887,7 +887,7 @@ class AcceptInviteIn(BaseModel):
 
 
 @router.post(
-    "/auth/accept-invite/{token}",
+    "/accept-invite/{token}",
     summary="Factory signup via partner invite link",
     status_code=status.HTTP_201_CREATED,
 )
@@ -991,7 +991,7 @@ def accept_partner_invite(
 # ---------------------------------------------------------------------------
 
 @router.get(
-    "/auth/invite-info/{token}",
+    "/invite-info/{token}",
     summary="Preview partner invite details before accepting",
 )
 def get_partner_invite_info(
