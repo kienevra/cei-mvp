@@ -56,7 +56,7 @@ function SectionHeading({ children, style }: { children: React.ReactNode; style?
   );
 }
 
-function ClientTable({ summary, analytics, onDownload, downloading, onOrgClick }: {
+function ClientTable({ summary, analytics, onDownload, onDownloadCbam, onDownloadCompliance, downloading, downloadingCbam, downloadingCompliance, onOrgClick }: {
   summary: PortfolioSummary;
   analytics: PortfolioAnalytics | null;
   onDownload: (id: number) => void;
