@@ -249,15 +249,8 @@ const Login: React.FC = () => {
           terms_accepted: termsAccepted,
           aggregate_data_consent: aggregateConsent,
         });
-        // Login to get token
+        // Login to get token ? useAuth.login() handles routing based on account_subtype
         await login({ username: email, password });
-        // Upgrade to managing if ESCO
-        if (regType === "manager") {
-          try { await upgradeToManaging(null); } catch { /* non-fatal, user can upgrade later */ }
-          // Route based on sub-type chosen at signup
-          window.location.href = managerSubType === "commercialista" ? "/commercialista" : "/manage";
-          return;
-        }
         return;
       }
 
