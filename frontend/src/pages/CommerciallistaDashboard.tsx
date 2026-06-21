@@ -11,11 +11,7 @@ import {
   getPortfolioSummary,
   downloadCbamExposurePdf,
   downloadComplianceReadinessPdf,
-  listPartnerInvites,
-  createPartnerInvite,
-  revokePartnerInvite,
   type PortfolioSummary,
-  type PartnerInvite,
 } from "../services/manageApi";
 
 // ---------------------------------------------------------------------------
@@ -127,117 +123,6 @@ function ClientComplianceCard({ client, onCbam, onCompliance, loadingCbam, loadi
   );
 }
 
-
-// ---------------------------------------------------------------------------
-// Invite Panel
-// ---------------------------------------------------------------------------
-function InvitePanel() {
-  const [invites, setInvites] = useState<PartnerInvite[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState<number | null>(null);
-
-  useEffect(() => {
-    setLoading(true);
-    listPartnerInvites()
-      .then(setInvites)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleCreate = async () => {
-    if (!name.trim()) return;
-    setCreating(true); setError(null);
-    try {
-      const inv = await createPartnerInvite({ factory_name: name.trim(), factory_email: email.trim() || undefined });
-      setInvites(prev => [inv, ...prev]);
-      setName(""); setEmail("");
-    } catch (e: any) {
-      setError(e?.response?.data?.message ?? "Failed to create invite.");
-    } finally { setCreating(false); }
-  };
-
-  const handleRevoke = async (id: number) => {
-    try {
-      await revokePartnerInvite(id);
-      setInvites(prev => prev.filter(i => i.id !== id));
-    } catch (e: any) {
-      setError(e?.response?.data?.message ?? "Failed to revoke.");
-    }
-  };
-
-  const handleCopy = (id: number, url: string) => {
-    navigator.clipboard.writeText(url).then(() => {
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
-    });
-  };
-
-  const inputSt: React.CSSProperties = {
-    flex: "1 1 150px", padding: "0.45rem 0.7rem", borderRadius: "0.4rem",
-    border: "1px solid var(--cei-border-subtle)", background: "rgba(148,163,184,0.07)",
-    color: "var(--cei-text-main)", fontSize: "0.84rem", outline: "none",
-  };
-
-  return (
-    <div style={{ background: "rgba(15,23,42,0.6)", border: "1px solid var(--cei-border-subtle)", borderRadius: "0.75rem", padding: "1.25rem" }}>
-      {error && <div style={{ color: "var(--cei-red,#ef4444)", fontSize: "0.82rem", marginBottom: "0.75rem" }}>{error}</div>}
-
-      {/* Create form */}
-      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center", marginBottom: "1.25rem" }}>
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="Factory name" style={inputSt} />
-        <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email (optional)" style={inputSt} />
-        <button
-          onClick={handleCreate}
-          disabled={creating || !name.trim()}
-          style={{ padding: "0.45rem 1rem", borderRadius: "999px", border: "none", background: "var(--cei-green,#22c55e)", color: "#0f172a", fontWeight: 600, fontSize: "0.82rem", cursor: creating || !name.trim() ? "not-allowed" : "pointer", opacity: creating || !name.trim() ? 0.5 : 1, whiteSpace: "nowrap" }}
-        >
-          {creating ? "Generating..." : "+ New Invite Link"}
-        </button>
-      </div>
-
-      {/* List */}
-      {loading ? (
-        <div style={{ fontSize: "0.82rem", color: "var(--cei-text-muted)" }}>Loading...</div>
-      ) : invites.length === 0 ? (
-        <div style={{ fontSize: "0.82rem", color: "var(--cei-text-muted)" }}>
-          No invite links yet. Generate a link above and send it to a factory — they'll sign up and be automatically connected to your account.
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-          {invites.map(inv => {
-            const sc = inv.status === "active" ? "var(--cei-green,#22c55e)" : inv.status === "used" ? "var(--cei-text-muted)" : "var(--cei-red,#ef4444)";
-            return (
-              <div key={inv.id} style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.6rem 0.85rem", borderRadius: "0.5rem", background: "rgba(148,163,184,0.04)", border: "1px solid var(--cei-border-subtle)", flexWrap: "wrap" }}>
-                <div style={{ flex: "1 1 140px", fontWeight: 500, fontSize: "0.84rem" }}>{inv.factory_name ?? "-"}</div>
-                <div style={{ flex: "1 1 140px", fontSize: "0.78rem", color: "var(--cei-text-muted)" }}>{inv.factory_email ?? "-"}</div>
-                <span style={{ fontSize: "0.72rem", fontWeight: 700, color: sc, padding: "0.15rem 0.5rem", borderRadius: "999px", border: `1px solid ${sc}44`, background: `${sc}10` }}>
-                  {inv.status.toUpperCase()}
-                </span>
-                <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-                  Expires {new Date(inv.expires_at).toLocaleDateString()}
-                </div>
-                {inv.status === "active" && (
-                  <>
-                    <button onClick={() => handleCopy(inv.id, inv.invite_url)} style={{ fontSize: "0.75rem", padding: "0.2rem 0.6rem", borderRadius: "999px", border: "1px solid var(--cei-border-subtle)", background: "transparent", color: copiedId === inv.id ? "var(--cei-green,#22c55e)" : "var(--cei-accent,#38bdf8)", cursor: "pointer" }}>
-                      {copiedId === inv.id ? "Copied!" : "Copy Link"}
-                    </button>
-                    <button onClick={() => handleRevoke(inv.id)} style={{ fontSize: "0.75rem", padding: "0.2rem 0.6rem", borderRadius: "999px", border: "1px solid rgba(239,68,68,0.3)", background: "transparent", color: "var(--cei-red,#ef4444)", cursor: "pointer" }}>
-                      Revoke
-                    </button>
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Main page
@@ -358,15 +243,6 @@ const CommerciallistaDashboard: React.FC = () => {
           Factories that have requested to connect their CEI account to your practice.
         </p>
         <LinkRequestsPanel onAccepted={() => getPortfolioSummary().then(setSummary)} />
-      </div>
-
-      {/* Invite panel */}
-      <div id="invite-panel">
-        <SectionHeading>Factory Onboarding — Invite Links</SectionHeading>
-        <p style={{ fontSize: "0.84rem", color: "var(--cei-text-muted)", margin: "0 0 0.75rem" }}>
-          Generate a secure link and send it to a factory. When they sign up, their account connects to yours automatically — no manual setup required.
-        </p>
-        <InvitePanel />
       </div>
 
       {/* Link to full technical dashboard */}
