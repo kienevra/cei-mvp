@@ -342,11 +342,17 @@ const ManageDashboard: React.FC = () => {
 
       {summary ? (
         <div className="cei-card" style={{ padding: 0, overflow: "hidden" }}>
-          <ClientTable summary={summary} analytics={analytics} onDownload={handleDownload} downloading={downloading} onOrgClick={(id) => navigate(`/manage/client-orgs/${id}`)} />
+          <ClientTable
+            summary={summary}
+            analytics={analytics}
+            onDownload={handleDownload}
             onDownloadCbam={handleDownloadCbam}
             onDownloadCompliance={handleDownloadCompliance}
+            downloading={downloading}
             downloadingCbam={downloadingCbam}
             downloadingCompliance={downloadingCompliance}
+            onOrgClick={(id) => navigate(`/manage/client-orgs/${id}`)}
+          />
         </div>
       ) : (
         <div style={{ color: "var(--cei-text-muted)", fontSize: "0.85rem" }}>{t("manage.clients.noClients")}</div>
