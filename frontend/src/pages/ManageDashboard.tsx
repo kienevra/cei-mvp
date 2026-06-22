@@ -8,7 +8,6 @@ import LinkRequestsPanel from "../components/LinkRequestsPanel";
 import {
   getPortfolioSummary,
   getPortfolioAnalytics,
-  getOnboardingStatus,
   downloadClientReport,
   downloadCbamExposurePdf,
   downloadComplianceReadinessPdf,
@@ -19,10 +18,8 @@ import {
   createClientOrg,
   type PortfolioSummary,
   type PortfolioAnalytics,
-  type OnboardingStatus,
   type ClientOrgIngestionStats,
   type ClientOrgKPI,
-  type OnboardingStep,
 } from "../services/manageApi";
 import { fmtDate, fmtDateTime } from "../utils/dateFormat";
 
@@ -79,8 +76,8 @@ function ClientTable({ summary, analytics, onDownload, onDownloadCbam, onDownloa
     );
   }
 
-  const headers = [
-    t("manage.clients.table.name"),
+  const tableHeaders = [
+    t("manage.clients.table.clientOrg"),
     t("manage.clients.table.status"),
     t("manage.clients.table.sites"),
     t("manage.clients.table.records24h"),
@@ -99,7 +96,7 @@ function ClientTable({ summary, analytics, onDownload, onDownloadCbam, onDownloa
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.84rem" }}>
         <thead>
           <tr>
-            {headers.map((h) => (
+            {tableHeaders.map((h) => (
               <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--cei-text-muted)", borderBottom: "1px solid var(--cei-border-subtle)", whiteSpace: "nowrap" }}>
                 {h}
               </th>
@@ -179,7 +176,6 @@ const ManageDashboard: React.FC = () => {
   const [analytics, setAnalytics] = useState<PortfolioAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
   const [windowDays, setWindowDays] = useState(7);
-  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
   const [downloading, setDownloading] = useState<number | null>(null);
   const [downloadingCbam, setDownloadingCbam] = useState<number | null>(null);
   const [downloadingCompliance, setDownloadingCompliance] = useState<number | null>(null);
@@ -213,9 +209,8 @@ const ManageDashboard: React.FC = () => {
       setNewOrgName("");
       setNewOrgSources("");
       setNewOrgCurrency("EUR");
-      const [s, o] = await Promise.all([getPortfolioSummary(), getOnboardingStatus()]);
+      const s = await getPortfolioSummary();
       setSummary(s);
-      setOnboarding(o);
       navigate(`/manage/client-orgs/${org.id}`);
     } catch (e: unknown) {
       const err = e as any;
@@ -229,9 +224,8 @@ const ManageDashboard: React.FC = () => {
     setSummaryLoading(true);
     setSummaryError(null);
     try {
-      const [s, o] = await Promise.all([getPortfolioSummary(), getOnboardingStatus()]);
+      const s = await getPortfolioSummary();
       setSummary(s);
-      setOnboarding(o);
     } catch (e: any) {
       setSummaryError(e?.message ?? t("errors.generic"));
     } finally {
@@ -261,16 +255,60 @@ const ManageDashboard: React.FC = () => {
 
   const handleDownloadCbam = async (orgId: number) => {
     setDownloadingCbam(orgId);
-    try { await downloadCbamExposurePdf(orgId); }
+    try { await downloadCbamExposurePdf(orgId, lang); }
     catch (e: unknown) { setDownloadError((e as any)?.message ?? "Failed to download CBAM PDF."); }
     finally { setDownloadingCbam(null); }
   };
 
   const handleDownloadCompliance = async (orgId: number) => {
     setDownloadingCompliance(orgId);
-    try { await downloadComplianceReadinessPdf(orgId); }
+    try { await downloadComplianceReadinessPdf(orgId, lang); }
     catch (e: unknown) { setDownloadError((e as any)?.message ?? "Failed to download Compliance PDF."); }
     finally { setDownloadingCompliance(null); }
+  };
+
+  const loadInvites = async () => {
+    setInvitesLoading(true);
+    setInviteError(null);
+    try {
+      const data = await listPartnerInvites();
+      setInvites(data);
+    } catch (e: any) {
+      setInviteError(e?.message ?? "Failed to load invites.");
+    } finally {
+      setInvitesLoading(false);
+    }
+  };
+
+  const handleCreateInvite = async () => {
+    if (!newInviteName.trim()) return;
+    setCreatingInvite(true);
+    setInviteError(null);
+    try {
+      const inv = await createPartnerInvite({ factory_name: newInviteName.trim(), factory_email: newInviteEmail.trim() || undefined });
+      setInvites((prev) => [inv, ...prev]);
+      setNewInviteName("");
+      setNewInviteEmail("");
+    } catch (e: any) {
+      setInviteError(e?.message ?? "Failed to create invite.");
+    } finally {
+      setCreatingInvite(false);
+    }
+  };
+
+  const handleCopyInvite = (id: number, url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleRevokeInvite = async (id: number) => {
+    try {
+      await revokePartnerInvite(id);
+      setInvites((prev) => prev.map((inv) => inv.id === id ? { ...inv, status: "revoked" } : inv));
+    } catch (e: any) {
+      setInviteError(e?.message ?? "Failed to revoke invite.");
+    }
   };
 
   const WINDOW_OPTIONS = [
@@ -360,33 +398,6 @@ const ManageDashboard: React.FC = () => {
         </div>
       ) : (
         <div style={{ color: "var(--cei-text-muted)", fontSize: "0.85rem" }}>{t("manage.clients.noClients")}</div>
-      )}
-
-      {onboarding && (
-        <>
-          <SectionHeading>{t("manage.onboarding.title")}</SectionHeading>
-          <div className="cei-card">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "0.75rem" }}>
-              {onboarding.steps.map((step: OnboardingStep) => (
-                <div key={step.key} style={{ display: "flex", alignItems: "flex-start", gap: "0.5rem", fontSize: "0.83rem" }}>
-                  <span style={{ marginTop: "2px", fontSize: "1rem", flexShrink: 0, color: step.complete ? "var(--cei-green, #22c55e)" : "var(--cei-text-muted)" }}>
-                    {step.complete ? "✓" : "○"}
-                  </span>
-                  <div>
-                    <div style={{ fontWeight: 500, color: step.complete ? "var(--cei-text-main)" : "var(--cei-text-muted)" }}>
-                      {t(`manage.onboarding.steps.${step.key}.label`, { defaultValue: step.label })}
-                    </div>
-                    {step.detail && (
-                      <div style={{ fontSize: "0.75rem", color: "var(--cei-text-muted)" }}>
-                        {t(`manage.onboarding.steps.${step.key}.detail`, { defaultValue: step.detail })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </>
       )}
     {showCreateOrg && (
       <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
