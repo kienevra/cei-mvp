@@ -473,7 +473,7 @@ def _section_signature(data: Dict, s: dict) -> list:
     elements = section_title("Professional Sign-Off")
 
     partner = data.get("partner_name", "")
-    role = data.get("partner_role", "Dottore Commercialista")
+    role = data.get("partner_role") or ("Dottore Commercialista" if lang == "it" else "Chartered Accountant")
     report_date = data.get("report_date", "")
     org_name = data.get("org_name", "")
 
@@ -490,7 +490,7 @@ def _section_signature(data: Dict, s: dict) -> list:
             name=partner,
             organisation=partner,
             date_str=report_date or "_______________",
-            role=role or "Dottore Commercialista",
+            role=role or ("Dottore Commercialista" if lang == "it" else "Chartered Accountant"),
         ))
     else:
         elements.append(compliance_box(
