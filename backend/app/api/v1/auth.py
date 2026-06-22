@@ -112,6 +112,7 @@ class OrgSummaryOut(BaseModel):
     client_limit: Optional[int] = None
     partner_name: Optional[str] = None
     account_subtype: Optional[str] = None
+    managing_org_subtype: Optional[str] = None
 
     primary_energy_sources: Optional[str] = None
     electricity_price_per_kwh: Optional[float] = None
@@ -518,6 +519,12 @@ def read_me(
             client_limit=getattr(org, "client_limit", None),
             partner_name=getattr(org, "partner_name", None),
             account_subtype=getattr(org, "account_subtype", None),
+            managing_org_subtype=(
+                db.query(Organization.account_subtype)
+                .filter(Organization.id == org.managed_by_org_id)
+                .scalar()
+                if getattr(org, "managed_by_org_id", None) else None
+            ),
             primary_energy_sources=primary_energy_sources,
             electricity_price_per_kwh=electricity_price_per_kwh,
             gas_price_per_kwh=gas_price_per_kwh,

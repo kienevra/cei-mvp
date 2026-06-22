@@ -48,6 +48,11 @@ const Sidebar: React.FC = () => {
     user?.org?.org_type === "client" ||
     user?.organization?.org_type === "client";
 
+  const managingOrgSubtype =
+    user?.org?.managing_org_subtype ?? user?.organization?.managing_org_subtype ?? null;
+
+  const isClientOfCommercialista = isClientOrg && managingOrgSubtype === "commercialista";
+
   const navItems = useMemo(() => {
     if (isCommercialista) {
       return [
@@ -65,6 +70,20 @@ const Sidebar: React.FC = () => {
         { label: t("nav.account"), path: "/account", icon: <FiUser /> },
         { label: t("nav.billing"), path: "/billing", icon: <FiCreditCard /> },
         { label: t("nav.settings"), path: "/settings", icon: <FiSettings /> },
+        { label: t("nav.support", { defaultValue: "Support" }), path: "/support", icon: <FiLifeBuoy /> },
+      ];
+    }
+
+    if (isClientOfCommercialista) {
+      return [
+        { label: t("nav.dashboard"), path: "/", icon: <FiHome /> },
+        { label: t("nav.sites"), path: "/sites", icon: <FiList /> },
+        { label: t("nav.alerts"), path: "/alerts", icon: <FiAlertTriangle /> },
+        { label: t("nav.uploadCsv"), path: "/upload", icon: <FiUpload /> },
+        { label: t("nav.reports"), path: "/reports", icon: <FiFileText /> },
+        { label: t("nav.billing"), path: "/billing", icon: <FiCreditCard /> },
+        { label: t("nav.settings"), path: "/settings", icon: <FiSettings /> },
+        { label: t("nav.account"), path: "/account", icon: <FiUser /> },
         { label: t("nav.support", { defaultValue: "Support" }), path: "/support", icon: <FiLifeBuoy /> },
       ];
     }
@@ -90,7 +109,7 @@ const Sidebar: React.FC = () => {
       { label: t("nav.account"), path: "/account", icon: <FiUser /> },
       { label: t("nav.support", { defaultValue: "Support" }), path: "/support", icon: <FiLifeBuoy /> },
     ];
-  }, [t, isManagingOrg, isCommercialista, isEsco, isClientOrg]);
+  }, [t, isManagingOrg, isCommercialista, isEsco, isClientOrg, isClientOfCommercialista]);
 
   return (
     <aside
