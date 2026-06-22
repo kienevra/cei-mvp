@@ -81,7 +81,7 @@ from .base import (
     spacer,
     _FONT_BOLD, _FONT_REGULAR, _FONT_SEMIBOLD,
 )
-from .i18n import fmt_date
+from .i18n import fmt_date, t
 
 
 # ---------------------------------------------------------------------------
