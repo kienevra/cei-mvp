@@ -117,7 +117,7 @@ def _rag_color(status: str) -> HexColor:
     return {"green": C_GREEN, "amber": C_AMBER, "red": C_RED}.get(status, C_AMBER)
 
 
-def _rag_label(status: str) -> str:
+def _rag_label(status: str, lang: str = "en") -> str:
     return {"green": "COMPLIANT", "amber": "ATTENTION", "red": "ACTION REQUIRED"}.get(status, status.upper())
 
 
@@ -469,60 +469,54 @@ def _eval_documentation(data: Dict) -> RAGItem:
 # Section builders
 # ---------------------------------------------------------------------------
 
-def _section_overall_score(items: List[RAGItem], s: dict) -> list:
+def _section_overall_score(items: List[RAGItem], s: dict, lang: str = "en") -> list:
     """Overall readiness score and RAG summary table."""
     avg_score = sum(i.score for i in items) / len(items)
 
     if avg_score >= 75:
-        overall_status = "green"
-        overall_label  = "LARGELY COMPLIANT"
-        overall_detail = "The organisation is well-positioned for CBAM/ETS compliance. Address amber items before declaration deadlines."
+        overall_label  = t("cra_largely_compliant", lang)
+        overall_detail = t("cra_largely_compliant_detail", lang)
     elif avg_score >= 45:
-        overall_status = "amber"
-        overall_label  = "PARTIALLY READY"
-        overall_detail = "Significant gaps exist that must be addressed before the September 2027 CBAM declaration deadline."
+        overall_label  = t("cra_partially_ready", lang)
+        overall_detail = t("cra_partially_ready_detail", lang)
     else:
-        overall_status = "red"
-        overall_label  = "ACTION REQUIRED"
-        overall_detail = "Critical compliance gaps identified. Immediate action is required across multiple dimensions."
+        overall_label  = t("cra_action_required", lang)
+        overall_detail = t("cra_action_required_detail", lang)
 
-    color = _rag_color(overall_status)
+    color = _rag_color("green" if avg_score >= 75 else "amber" if avg_score >= 45 else "red")
 
-    elements = section_title("Overall Compliance Readiness")
+    elements = section_title(t("cra_overall_title", lang))
 
-    # Overall score result box
     elements.append(result_box(
-        label="OVERALL READINESS SCORE",
+        label=t("cra_score_label", lang),
         value=f"{avg_score:.0f}/100",
         unit=overall_label,
         sub=overall_detail,
     ))
     elements.append(spacer(5))
 
-    # RAG summary table
     rows_data = []
     for item in items:
-        status_label = _rag_label(item.status)
+        status_label = _rag_label(item.status, lang)
         rows_data.append([item.dimension, item.headline, status_label, str(item.score)])
 
-    t = data_table(
-        headers=["Dimension", "Finding", "Status", "Score"],
+    tbl = data_table(
+        headers=[t("cra_dim_header", lang), t("cra_finding_header", lang), t("cra_status_header", lang), t("cra_score_header", lang)],
         rows=rows_data,
         col_widths=[52 * mm, 88 * mm, 25 * mm, 10 * mm],
         right_align_from=3,
     )
-    elements.append(t)
+    elements.append(tbl)
 
     return elements
 
 
-def _section_dimension(item: RAGItem, s: dict) -> list:
+def _section_dimension(item: RAGItem, s: dict, lang: str = "en") -> list:
     """Full detail card for one RAG dimension."""
     color = _rag_color(item.status)
     elements = section_title(item.dimension)
 
-    # Status banner
-    banner_text = f"<b>{_rag_label(item.status)}</b>  —  Score: {item.score}/100"
+    banner_text = f"<b>{_rag_label(item.status, lang)}</b>  —  Score: {item.score}/100"
     banner = Table([[Paragraph(banner_text, s["body_bold"])]], colWidths=[CONTENT_W])
     banner.setStyle(TableStyle([
         ("BACKGROUND",    (0, 0), (-1, -1), color),
@@ -534,23 +528,21 @@ def _section_dimension(item: RAGItem, s: dict) -> list:
     elements.append(banner)
     elements.append(spacer(2))
 
-    # Score bar
     elements.append(_score_bar_table(item.score, color))
     elements.append(spacer(3))
 
-    # Finding and action
     elements.append(kv_table([
-        ("Finding",           item.detail),
-        ("Recommended action", item.action),
-        ("Priority",          item.priority.upper()),
+        (t("cra_finding_label", lang),  item.detail),
+        (t("cra_action_label", lang),   item.action),
+        (t("cra_priority_label", lang), item.priority.upper()),
     ]))
 
     return elements
 
 
-def _section_priority_matrix(items: List[RAGItem], s: dict) -> list:
-    """Prioritised action matrix — immediate items first."""
-    elements = section_title("Priority Action Matrix")
+def _section_priority_matrix(items: List[RAGItem], s: dict, lang: str = "en") -> list:
+    """Prioritised action matrix."""
+    elements = section_title(t("cra_priority_matrix_title", lang))
 
     priority_order = {"immediate": 0, "q3 2026": 1, "q1 2027": 2, "ongoing": 3}
     sorted_items = sorted(items, key=lambda x: priority_order.get(x.priority.lower(), 99))
@@ -562,37 +554,34 @@ def _section_priority_matrix(items: List[RAGItem], s: dict) -> list:
             item.dimension,
             item.action,
             item.priority.upper(),
-            _rag_label(item.status),
+            _rag_label(item.status, lang),
         ])
 
-    t = data_table(
-        headers=["#", "Dimension", "Action", "Timeline", "Status"],
+    tbl = data_table(
+        headers=["#", t("cra_dim_header", lang), t("cra_action_header", lang), t("cra_timeline_header", lang), t("cra_status_header", lang)],
         rows=rows_data,
         col_widths=[8 * mm, 42 * mm, 90 * mm, 20 * mm, 15 * mm],
         right_align_from=3,
     )
-    elements.append(t)
+    elements.append(tbl)
     elements.append(spacer(4))
 
-    # Count immediate items
     immediate = [i for i in items if i.priority.lower() == "immediate"]
     if immediate:
         elements.append(info_box(
-            f"{len(immediate)} item(s) require immediate attention before the next "
-            f"CBAM reporting window. Delays increase financial exposure and reduce "
-            f"the time available to establish a defensible verified baseline.",
+            t("cra_immediate_warning", lang).format(n=len(immediate)),
             color=C_RED,
         ))
 
     return elements
 
 
-def _section_next_steps(data: Dict, items: List[RAGItem], s: dict) -> list:
-    """What the commercialista should propose to their client."""
+def _section_next_steps(data: Dict, items: List[RAGItem], s: dict, lang: str = "en") -> list:
+    """Proposed next steps."""
     partner = data.get("partner_name")
     org     = data.get("org_name", "this organisation")
 
-    elements = section_title("Proposed Next Steps")
+    elements = section_title(t("cra_next_steps_title", lang))
 
     red_dims   = [i.dimension for i in items if i.status == "red"]
     amber_dims = [i.dimension for i in items if i.status == "amber"]
@@ -600,34 +589,17 @@ def _section_next_steps(data: Dict, items: List[RAGItem], s: dict) -> list:
     text_parts = []
 
     if partner:
-        text_parts.append(
-            f"Based on this compliance readiness assessment, <b>{partner}</b> recommends "
-            f"the following actions for <b>{org}</b>:"
-        )
+        text_parts.append(t("cra_next_with_partner", lang).format(partner=f"<b>{partner}</b>", org=f"<b>{org}</b>"))
     else:
-        text_parts.append(
-            f"Based on this compliance readiness assessment, the following actions "
-            f"are recommended for <b>{org}</b>:"
-        )
+        text_parts.append(t("cra_next_no_partner", lang).format(org=f"<b>{org}</b>"))
 
     if red_dims:
-        text_parts.append(
-            f"<b>Critical (immediate):</b> {', '.join(red_dims)} require urgent attention. "
-            f"These gaps directly impair the ability to file a compliant CBAM declaration."
-        )
+        text_parts.append(t("cra_critical_dims", lang).format(dims=", ".join(red_dims)))
 
     if amber_dims:
-        text_parts.append(
-            f"<b>Important (next 90 days):</b> {', '.join(amber_dims)} should be resolved "
-            f"before Q3 2026 to ensure full readiness for the September 2027 deadline."
-        )
+        text_parts.append(t("cra_important_dims", lang).format(dims=", ".join(amber_dims)))
 
-    text_parts.append(
-        "The recommended first action is to initiate the CEI 30-day diagnostic, "
-        "which produces the verified energy baseline required for all subsequent "
-        "compliance steps. No hardware installation is required — only existing "
-        "utility bills."
-    )
+    text_parts.append(t("cra_first_action", lang))
 
     for part in text_parts:
         elements.append(Paragraph(part, s["body"]))
@@ -636,8 +608,8 @@ def _section_next_steps(data: Dict, items: List[RAGItem], s: dict) -> list:
     return elements
 
 
-def _section_signature(data: Dict, s: dict) -> list:
-    elements = section_title("Professional Sign-Off")
+def _section_signature(data: Dict, s: dict, lang: str = "en") -> list:
+    elements = section_title(t("cra_signoff_title", lang))
 
     partner     = data.get("partner_name", "")
     role        = data.get("partner_role") or ("Dottore Commercialista" if lang == "it" else "Chartered Accountant")
@@ -733,24 +705,24 @@ def generate_compliance_readiness_pdf(
     story.append(spacer(6))
 
     # ── Overall score ────────────────────────────────────────────────────
-    story += _section_overall_score(items, s)
+    story += _section_overall_score(items, s, lang)
     story.append(spacer(5))
 
     # ── Dimension detail cards ───────────────────────────────────────────
     for item in items:
-        story += _section_dimension(item, s)
+        story += _section_dimension(item, s, lang)
         story.append(spacer(4))
 
     # ── Priority matrix ──────────────────────────────────────────────────
-    story += _section_priority_matrix(items, s)
+    story += _section_priority_matrix(items, s, lang)
     story.append(spacer(4))
 
     # ── Next steps ───────────────────────────────────────────────────────
-    story += _section_next_steps(data, items, s)
+    story += _section_next_steps(data, items, s, lang)
     story.append(spacer(6))
 
     # ── Sign-off ─────────────────────────────────────────────────────────
-    story += _section_signature(data, s)
+    story += _section_signature(data, s, lang)
 
     doc.build(story)
     buf.seek(0)

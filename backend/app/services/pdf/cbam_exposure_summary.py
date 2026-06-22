@@ -163,76 +163,48 @@ def _section_executive_summary(data: Dict, s: dict, lang: str) -> list:
 
     lines = []
 
-    # Opening statement
     if annualised:
-        lines.append(
-            f"<b>{org}</b> operates in the <b>{sector}</b> sector and is subject to EU CBAM "
-            f"reporting obligations under Regulation (EU) 2023/956. Based on energy data "
-            f"analysed by CEI, the organisation's projected annual CO2 emissions for {year} "
-            f"are estimated at <b>{_tco2(annualised)}</b>."
-        )
+        lines.append(t("cbam_exec_subject_cbam", lang).format(
+            org=f"<b>{org}</b>", sector=f"<b>{sector}</b>", year=year, tco2=f"<b>{_tco2(annualised)}</b>"
+        ))
     else:
-        lines.append(
-            f"<b>{org}</b> operates in the <b>{sector}</b> sector and is subject to EU CBAM "
-            f"reporting obligations under Regulation (EU) 2023/956."
-        )
+        lines.append(t("cbam_exec_subject_no_data", lang).format(
+            org=f"<b>{org}</b>", sector=f"<b>{sector}</b>"
+        ))
 
-    # ETS position
     if deficit is not None:
         if deficit < 0:
-            lines.append(
-                f"The organisation's current ETS position shows a <b>deficit of "
-                f"{_tco2(abs(deficit))}</b>, representing an estimated liability of "
-                f"<b>{_eur(abs(cost or 0))}</b> at current carbon prices."
-            )
+            lines.append(t("cbam_exec_deficit", lang).format(
+                tco2=f"<b>{_tco2(abs(deficit))}</b>", eur=f"<b>{_eur(abs(cost or 0))}</b>"
+            ))
         else:
-            lines.append(
-                f"The organisation's current ETS position shows a <b>surplus of "
-                f"{_tco2(deficit)}</b>, which may be banked or sold on the ETS market."
-            )
+            lines.append(t("cbam_exec_surplus", lang).format(tco2=f"<b>{_tco2(deficit)}</b>"))
 
-    # Default vs verified penalty
     if default_delta and default_delta > 0:
-        lines.append(
-            f"If the organisation files its CBAM declaration using EU default emission "
-            f"factors rather than its own verified baseline, it is estimated to pay "
-            f"<b>{_eur(default_delta)} more</b> than necessary. Establishing a verified "
-            f"baseline with CEI eliminates this unnecessary cost."
-        )
+        lines.append(t("cbam_exec_default_penalty", lang).format(eur=f"<b>{_eur(default_delta)}</b>"))
 
-    # Benchmark position
     if gap_pct is not None:
         if gap_pct > 0:
-            lines.append(
-                f"Against the EU sector benchmark for {sector.lower()}, the organisation "
-                f"is currently <b>{gap_pct:.1f}% above</b> the reference efficiency level. "
-                f"This gap will be subject to increasing scrutiny under ETS Phase 4 "
-                f"benchmark ratcheting (−4.4%/year from 2026)."
-            )
+            lines.append(t("cbam_exec_above_benchmark", lang).format(
+                sector=sector.lower(), pct=f"<b>{gap_pct:.1f}</b>"
+            ))
         else:
-            lines.append(
-                f"Against the EU sector benchmark for {sector.lower()}, the organisation "
-                f"is <b>{abs(gap_pct):.1f}% below</b> the reference level — a competitive "
-                f"advantage that should be preserved and documented."
-            )
+            lines.append(t("cbam_exec_below_benchmark", lang).format(
+                sector=sector.lower(), pct=f"<b>{abs(gap_pct):.1f}</b>"
+            ))
 
-    # Action required
-    lines.append(
-        "A verified energy baseline, produced from existing utility bills with no hardware "
-        "installation required, is the single most important action this organisation can "
-        "take before the September 2027 CBAM declaration deadline."
-    )
+    lines.append(t("cbam_exec_action", lang))
 
-    elements = section_title("Executive Summary")
+    elements = section_title(t("cbam_exec_summary_title", lang))
     for line in lines:
         elements.append(Paragraph(line, s["body"]))
         elements.append(Spacer(1, 3 * mm))
     return elements
 
 
-def _section_cbam_position(data: Dict, s: dict) -> list:
+def _section_cbam_position(data: Dict, s: dict, lang: str = "en") -> list:
     """Key numbers: emissions, ETS position, financial exposure."""
-    elements = section_title("CBAM & ETS Position")
+    elements = section_title(t("cbam_position_title", lang))
 
     total = data.get("total_tco2", 0.0)
     annualised = data.get("annualised_tco2")
@@ -244,41 +216,40 @@ def _section_cbam_position(data: Dict, s: dict) -> list:
     days = data.get("data_window_days", 0)
 
     rows = [
-        ("Verified CO2 (measurement period)", _tco2(total)),
-        ("Projected annual CO2", _tco2(annualised) if annualised else "Insufficient data"),
-        ("EU free allocation", _tco2(free_alloc) if free_alloc else "Not configured"),
-        ("ETS surplus / (deficit)", (
+        (t("cbam_pos_verified_co2", lang),       _tco2(total)),
+        (t("cbam_pos_projected_co2", lang),      _tco2(annualised) if annualised else t("cbam_pos_insufficient", lang)),
+        (t("cbam_pos_free_alloc", lang),         _tco2(free_alloc) if free_alloc else t("cbam_pos_not_configured", lang)),
+        (t("cbam_pos_surplus_deficit", lang),    (
             f"+{_tco2(deficit)}" if deficit and deficit > 0
             else _tco2(deficit) if deficit is not None
-            else "Not configured"
+            else t("cbam_pos_not_configured", lang)
         )),
-        ("Estimated financial exposure", (
+        (t("cbam_pos_financial_exposure", lang), (
             _eur(abs(cost)) if cost and cost < 0
-            else ("Surplus — no purchase required" if deficit and deficit > 0 else "Not configured")
+            else (t("cbam_pos_surplus_no_purchase", lang) if deficit and deficit > 0 else t("cbam_pos_not_configured", lang))
         )),
-        ("Carbon price used (EUR/tCO2)", f"€{price:.2f}"),
-        ("Data confidence level", _confidence_label(confidence)),
-        ("Days of energy data analysed", f"{days} days"),
+        (t("cbam_pos_carbon_price", lang),       f"€{price:.2f}"),
+        (t("cbam_pos_confidence", lang),         _confidence_label(confidence)),
+        (t("cbam_pos_days", lang),               t("cbam_pos_days_unit", lang).format(n=days)),
     ]
     elements.append(kv_table(rows))
     elements.append(spacer(4))
 
-    # Financial exposure result box if deficit
     if deficit is not None and deficit < 0 and cost:
         elements.append(result_box(
-            label="ESTIMATED ETS LIABILITY",
+            label=t("cbam_liability_label", lang),
             value=_eur(abs(cost)),
-            unit="at current carbon prices",
-            sub=f"Based on {_tco2(abs(deficit))} deficit × €{price:.0f}/tCO2",
+            unit=t("cbam_liability_unit", lang),
+            sub=t("cbam_liability_sub", lang).format(tco2=_tco2(abs(deficit)), price=f"{price:.0f}"),
         ))
         elements.append(spacer(4))
 
     return elements
 
 
-def _section_default_vs_verified(data: Dict, s: dict) -> list:
+def _section_default_vs_verified(data: Dict, s: dict, lang: str = "en") -> list:
     """The cost of filing with default values vs verified baseline."""
-    elements = section_title("Default vs. Verified Baseline: Cost Impact")
+    elements = section_title(t("cbam_default_vs_verified_title", lang))
 
     default_factor = data.get("cbam_default_factor")
     verified_factor = data.get("cbam_verified_factor")
@@ -286,24 +257,20 @@ def _section_default_vs_verified(data: Dict, s: dict) -> list:
     annualised = data.get("annualised_tco2")
 
     if default_factor is None and delta is None:
-        elements.append(info_box(
-            "Default vs. verified comparison requires emission factor configuration. "
-            "Contact CEI to complete your emissions baseline setup.",
-            color=C_AMBER,
-        ))
+        elements.append(info_box(t("cbam_dvv_no_config", lang), color=C_AMBER))
         return elements
 
     rows = []
     if default_factor:
-        rows.append(("EU default emission factor", f"{default_factor:.4f} kg CO2/kWh"))
+        rows.append((t("cbam_dvv_default_ef", lang), f"{default_factor:.4f} kg CO2/kWh"))
     if verified_factor:
-        rows.append(("CEI verified emission factor", f"{verified_factor:.4f} kg CO2/kWh"))
+        rows.append((t("cbam_dvv_verified_ef", lang), f"{verified_factor:.4f} kg CO2/kWh"))
     if annualised and default_factor and verified_factor:
         default_tco2 = annualised * (default_factor / verified_factor) if verified_factor else annualised
-        rows.append(("Emissions using default factor (projected)", _tco2(default_tco2)))
-        rows.append(("Emissions using verified baseline (projected)", _tco2(annualised)))
+        rows.append((t("cbam_dvv_default_tco2", lang), _tco2(default_tco2)))
+        rows.append((t("cbam_dvv_verified_tco2", lang), _tco2(annualised)))
     if delta is not None:
-        rows.append(("Additional cost from using default values", _eur(delta)))
+        rows.append((t("cbam_dvv_extra_cost", lang), _eur(delta)))
 
     if rows:
         elements.append(kv_table(rows))
@@ -311,17 +278,17 @@ def _section_default_vs_verified(data: Dict, s: dict) -> list:
 
     if delta and delta > 0:
         elements.append(compliance_box(
-            f"By establishing a verified energy baseline with CEI, {data.get('org_name', 'this organisation')} "
-            f"avoids an estimated <b>{_eur(delta)}</b> in unnecessary CBAM compliance costs. "
-            f"The baseline requires only existing utility bills — no hardware, no site visits."
+            t("cbam_dvv_saving", lang).format(
+                org=data.get("org_name", "this organisation"), eur=f"<b>{_eur(delta)}</b>"
+            )
         ))
 
     return elements
 
 
-def _section_benchmark(data: Dict, s: dict) -> list:
+def _section_benchmark(data: Dict, s: dict, lang: str = "en") -> list:
     """ETS Phase 4 benchmark position."""
-    elements = section_title("EU Sector Benchmark Position")
+    elements = section_title(t("cbam_benchmark_title", lang))
 
     gap_pct = data.get("benchmark_gap_pct")
     benchmark = data.get("benchmark_value")
@@ -329,18 +296,14 @@ def _section_benchmark(data: Dict, s: dict) -> list:
     sector = _sector_display(data.get("sector_code", ""))
 
     if benchmark is None:
-        elements.append(info_box(
-            "Benchmark comparison requires production volume data. "
-            "Contact CEI to configure your production baseline.",
-            color=C_AMBER,
-        ))
+        elements.append(info_box(t("cbam_bm_no_production", lang), color=C_AMBER))
         return elements
 
     rows = [
-        ("EU sector benchmark (tCO2/tonne product)", f"{benchmark:.4f}"),
-        ("Organisation actual intensity (tCO2/tonne)", f"{actual:.4f}" if actual else "Not calculated"),
-        ("Gap vs. benchmark", _pct(gap_pct) if gap_pct is not None else "N/A"),
-        ("Sector", sector),
+        (t("cbam_bm_eu_benchmark", lang),     f"{benchmark:.4f}"),
+        (t("cbam_bm_actual_intensity", lang),  f"{actual:.4f}" if actual else t("cbam_bm_not_calculated", lang)),
+        (t("cbam_bm_gap", lang),              _pct(gap_pct) if gap_pct is not None else t("cbam_bm_na", lang)),
+        (t("cbam_bm_sector", lang),           sector),
     ]
     elements.append(kv_table(rows))
     elements.append(spacer(3))
@@ -349,61 +312,45 @@ def _section_benchmark(data: Dict, s: dict) -> list:
     elements.append(info_box(_risk_label(gap_pct), color=color))
     elements.append(spacer(3))
 
-    # ETS Phase 4 ratchet context
-    elements.append(compliance_box(
-        "Under EU ETS Phase 4 (2021–2030), free allocations are reduced by 4.4% per year "
-        "from 2026 onwards. Organisations above the sector benchmark receive fewer free "
-        "allowances, increasing their financial exposure annually. Organisations below the "
-        "benchmark are protected and may accumulate surplus allowances."
-    ))
+    elements.append(compliance_box(t("cbam_bm_ets_context", lang)))
 
     return elements
 
 
-def _section_cbam_timeline(s: dict, year: int) -> list:
+def _section_cbam_timeline(s: dict, year: int, lang: str = "en") -> list:
     """CBAM key deadlines."""
-    elements = section_title("CBAM Compliance Timeline")
+    elements = section_title(t("cbam_timeline_title", lang))
 
     milestones = [
-        ("January 2026",      "CBAM transitional period ends. Full obligations begin."),
-        ("Q1 2026",           "First annual CBAM declaration due for goods imported in 2025."),
-        ("January 2027",      "Free allocation reductions accelerate under ETS Phase 4."),
-        ("September 2027",    "CBAM declaration deadline for 2026 reporting year. "
-                              "Organisations without verified baselines must use EU defaults."),
-        ("2028 onwards",      "Full CBAM pricing in effect. Verified baselines become "
-                              "essential for cost optimisation."),
+        ("January 2026",   t("cbam_tl_jan2026", lang)),
+        ("Q1 2026",        t("cbam_tl_q12026", lang)),
+        ("January 2027",   t("cbam_tl_jan2027", lang)),
+        ("September 2027", t("cbam_tl_sep2027", lang)),
+        ("2028 onwards",   t("cbam_tl_2028", lang)),
     ]
-
-    # Highlight the critical 2027 deadline
-    critical_year = year <= 2026
 
     rows_data = []
     for date_str, desc in milestones:
         is_critical = "September 2027" in date_str
-        rows_data.append([date_str, desc, "⚠ CRITICAL" if is_critical else ""])
+        rows_data.append([date_str, desc, t("cbam_tl_critical", lang) if is_critical else ""])
 
-    t = data_table(
-        headers=["Deadline", "Obligation", "Priority"],
+    tbl = data_table(
+        headers=[t("cbam_tl_deadline", lang), t("cbam_tl_obligation", lang), t("cbam_tl_priority", lang)],
         rows=rows_data,
         col_widths=[38 * mm, 115 * mm, 22 * mm],
         right_align_from=2,
     )
-    elements.append(t)
+    elements.append(tbl)
     elements.append(spacer(4))
 
-    elements.append(info_box(
-        "The September 2027 CBAM declaration is the first filing where verified "
-        "per-process emission data significantly impacts costs. Organisations that "
-        "establish their baseline before this date avoid the default-value penalty.",
-        color=C_ACCENT,
-    ))
+    elements.append(info_box(t("cbam_tl_note", lang), color=C_ACCENT))
 
     return elements
 
 
-def _section_recommended_actions(data: Dict, s: dict) -> list:
+def _section_recommended_actions(data: Dict, s: dict, lang: str = "en") -> list:
     """Actionable next steps."""
-    elements = section_title("Recommended Actions")
+    elements = section_title(t("cbam_actions_title", lang))
 
     confidence = data.get("cbam_confidence", "none")
     deficit = data.get("ets_surplus_deficit")
@@ -411,65 +358,38 @@ def _section_recommended_actions(data: Dict, s: dict) -> list:
 
     actions = []
 
-    # Always recommend baseline
-    actions.append((
-        "1",
-        "Establish verified energy baseline",
-        "Complete the 30-day CEI diagnostic to produce a per-process verified baseline "
-        "from existing utility bills. Required for CBAM September 2027 declaration.",
-        "Immediate",
-    ))
+    actions.append(("1", t("cbam_act_1_title", lang), t("cbam_act_1_desc", lang), t("cbam_act_1_timeline", lang)))
 
     if confidence in ("none", "low"):
-        actions.append((
-            "2",
-            "Extend data collection period",
-            "Provide 90+ days of energy bills or meter data to achieve high-confidence "
-            "CBAM extrapolation. Current data window is insufficient for regulatory filing.",
-            "Within 30 days",
-        ))
+        actions.append((str(len(actions) + 1), t("cbam_act_2_title", lang), t("cbam_act_2_desc", lang), t("cbam_act_2_timeline", lang)))
 
     if deficit is not None and deficit < 0:
-        actions.append((
-            "3" if confidence not in ("none", "low") else "3",
-            "Review ETS position and purchase strategy",
-            "The current ETS deficit requires either purchasing carbon allowances or "
-            "implementing energy reduction measures before the compliance deadline.",
-            "Q3 2026",
-        ))
+        actions.append((str(len(actions) + 1), t("cbam_act_3_title", lang), t("cbam_act_3_desc", lang), t("cbam_act_3_timeline", lang)))
 
     if gap_pct is not None and gap_pct > 5:
         actions.append((
             str(len(actions) + 1),
-            "Energy efficiency gap assessment",
-            f"The organisation is {gap_pct:.1f}% above the EU sector benchmark. A CEI "
-            "opportunity assessment will identify the highest-ROI efficiency measures "
-            "to close this gap before ETS Phase 4 ratcheting increases the cost.",
-            "Q4 2026",
+            t("cbam_act_4_title", lang),
+            t("cbam_act_4_desc", lang).format(pct=f"{gap_pct:.1f}"),
+            t("cbam_act_4_timeline", lang),
         ))
 
-    actions.append((
-        str(len(actions) + 1),
-        "Configure CBAM declaration parameters",
-        "Align emission factor configuration with the EU CBAM Implementing Regulation "
-        "to ensure declaration accuracy. CEI generates all required supporting documentation.",
-        "Before Q1 2027",
-    ))
+    actions.append((str(len(actions) + 1), t("cbam_act_5_title", lang), t("cbam_act_5_desc", lang), t("cbam_act_5_timeline", lang)))
 
     rows_data = [[a[0], a[1], a[2], a[3]] for a in actions]
-    t = data_table(
-        headers=["#", "Action", "Description", "Timeline"],
+    tbl = data_table(
+        headers=[t("cbam_act_hash", lang), t("cbam_act_action", lang), t("cbam_act_description", lang), t("cbam_act_timeline", lang)],
         rows=rows_data,
         col_widths=[8 * mm, 42 * mm, 100 * mm, 25 * mm],
         right_align_from=3,
     )
-    elements.append(t)
+    elements.append(tbl)
 
     return elements
 
 
-def _section_signature(data: Dict, s: dict) -> list:
-    """Sign-off block for the commercialista."""
+def _section_signature(data: Dict, s: dict, lang: str = "en") -> list:
+    """Sign-off block."""
     elements = section_title("Professional Sign-Off")
 
     partner = data.get("partner_name", "")
@@ -550,13 +470,13 @@ def generate_cbam_exposure_pdf(
 
     # ── Cover information ────────────────────────────────────────────────
     story.append(kv_table([
-        ("Organisation",      org_name),
-        ("Sector",            _sector_display(data.get("sector_code", ""))),
-        ("Reporting year",    str(year)),
-        ("Country",           data.get("country_code", "—")),
-        ("Report date",       data.get("report_date", fmt_date("", lang) or "—")),
-        ("Prepared by",       pname or "Carbon Efficiency Intelligence"),
-        ("Data confidence",   _confidence_label(data.get("cbam_confidence", "none"))),
+        (t("cbam_org_label", lang),         org_name),
+        (t("cbam_sector_label", lang),      _sector_display(data.get("sector_code", ""))),
+        (t("cbam_year_label", lang),        str(year)),
+        (t("cbam_country_label", lang),     data.get("country_code", "—")),
+        (t("cbam_date_label", lang),        data.get("report_date", fmt_date("", lang) or "—")),
+        (t("cbam_prepared_by_label", lang), pname or "Carbon Efficiency Intelligence"),
+        (t("cbam_confidence_label", lang),  _confidence_label(data.get("cbam_confidence", "none"))),
     ]))
     story.append(spacer(6))
 
@@ -564,22 +484,22 @@ def generate_cbam_exposure_pdf(
     story += _section_executive_summary(data, s, lang)
     story.append(spacer(4))
 
-    story += _section_cbam_position(data, s)
+    story += _section_cbam_position(data, s, lang)
     story.append(spacer(4))
 
-    story += _section_default_vs_verified(data, s)
+    story += _section_default_vs_verified(data, s, lang)
     story.append(spacer(4))
 
-    story += _section_benchmark(data, s)
+    story += _section_benchmark(data, s, lang)
     story.append(spacer(4))
 
-    story += _section_cbam_timeline(s, year)
+    story += _section_cbam_timeline(s, year, lang)
     story.append(spacer(4))
 
-    story += _section_recommended_actions(data, s)
+    story += _section_recommended_actions(data, s, lang)
     story.append(spacer(6))
 
-    story += _section_signature(data, s)
+    story += _section_signature(data, s, lang)
 
     doc.build(story)
     buf.seek(0)
