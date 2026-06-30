@@ -21,6 +21,11 @@ const TopNav: React.FC = () => {
     user?.org?.org_type === "client" ||
     user?.organization?.org_type === "client";
 
+  const managingOrgSubtype =
+    user?.org?.managing_org_subtype ?? user?.organization?.managing_org_subtype ?? null;
+
+  const isClientOfCommercialista = isClientOrg && managingOrgSubtype === "commercialista";
+
   const navItems = useMemo(() => {
     if (isManagingOrg) {
       return [
@@ -32,6 +37,19 @@ const TopNav: React.FC = () => {
       ];
     }
 
+    if (isClientOfCommercialista) {
+      return [
+        { label: t("nav.dashboard", { defaultValue: "Dashboard" }), path: "/" },
+        { label: t("nav.sites", { defaultValue: "Sites" }), path: "/sites" },
+        { label: t("nav.alerts", { defaultValue: "Alerts" }), path: "/alerts" },
+        { label: t("nav.uploadCsv", { defaultValue: "Upload CSV" }), path: "/upload" },
+        { label: t("nav.reports", { defaultValue: "Reports" }), path: "/reports" },
+        { label: t("nav.billing", { defaultValue: "Billing" }), path: "/billing" },
+        { label: t("nav.settings", { defaultValue: "Settings" }), path: "/settings" },
+        { label: t("nav.account", { defaultValue: "Account" }), path: "/account" },
+        { label: t("nav.support", { defaultValue: "Support" }), path: "/support" },
+      ];
+    }
     if (isClientOrg) {
       return [
         { label: t("nav.dashboard", { defaultValue: "Dashboard" }), path: "/" },
@@ -54,7 +72,7 @@ const TopNav: React.FC = () => {
       { label: t("nav.account", { defaultValue: "Account" }), path: "/account" },
       { label: t("nav.support", { defaultValue: "Support" }), path: "/support" },
     ];
-  }, [t, isManagingOrg, isClientOrg]);
+  }, [t, isManagingOrg, isClientOrg, isClientOfCommercialista]);
 
   const currentLang = (i18n.language || "en").toLowerCase().startsWith("it")
     ? "it"
