@@ -164,6 +164,8 @@ FRAMEWORKS = {
     "VCS":           "Verra Verified Carbon Standard",
     "GOLD_STANDARD": "Gold Standard for the Global Goals",
     "ISO14064":      "ISO 14064 GHG Quantification",
+    "KNCR":          "Kenya National Carbon Registry",
+    "GHG_REPORTING": "GHG Reporting (National Inventory)",
 }
 
 ENERGY_SOURCES = [
@@ -265,7 +267,34 @@ class EmissionsCalculator:
                 )
                 return ef
 
-        # 4. IPCC defaults (electricity: 0.233 EU avg; gas: 0.202 global)
+        # 4. Country-aware framework fallback before IPCC defaults
+        _country_framework_map = {
+            "KEN": ["KNCR", "GHG_REPORTING", "VCS"],
+            "TZA": ["GHG_REPORTING", "VCS"],
+            "UGA": ["GHG_REPORTING", "VCS"],
+            "RWA": ["GHG_REPORTING", "VCS"],
+            "GBR": ["UK_ETS"],
+            "USA": ["ISO14064"],
+            "ZAF": ["VCS"],
+        }
+        for alt_framework in _country_framework_map.get(country_code, []):
+            if alt_framework == framework:
+                continue
+            ef = self.db.query(EmissionFactor).filter(
+                and_(
+                    EmissionFactor.country_code == country_code,
+                    EmissionFactor.energy_source == energy_source,
+                    EmissionFactor.framework == alt_framework,
+                )
+            ).order_by(EmissionFactor.valid_year.desc()).first()
+            if ef:
+                logger.info(
+                    "EmissionFactor: using %s framework for %s (requested %s not available)",
+                    alt_framework, country_code, framework
+                )
+                return ef
+
+        # 5. IPCC defaults (electricity: 0.233 EU avg; gas: 0.202 global)
         ipcc_defaults = {
             "electricity": 0.233,
             "natural_gas": 0.202,
@@ -706,10 +735,25 @@ def get_or_create_emissions_config(
         OrgEmissionsConfig.organization_id == organization_id
     ).first()
     if not config:
+        _country_framework_defaults = {
+            "KEN": "KNCR",
+            "TZA": "GHG_REPORTING",
+            "UGA": "GHG_REPORTING",
+            "RWA": "GHG_REPORTING",
+            "GBR": "UK_ETS",
+            "USA": "ISO14064",
+            "ZAF": "VCS",
+        }
+        _eu_countries = {"ITA","DEU","FRA","ESP","POL","NLD","BEL","AUT","SWE","DNK","FIN","PRT","GRC","CZE","HUN","ROU","BGR","HRV","SVK","SVN","EST","LVA","LTU","LUX","MLT","CYP","IRL"}
+        _detected_country = "ITA"
+        _detected_framework = _country_framework_defaults.get(
+            _detected_country,
+            "EU_ETS" if _detected_country in _eu_countries else "GHG_REPORTING"
+        )
         config = OrgEmissionsConfig(
             organization_id       = organization_id,
-            country_code          = "ITA",
-            framework             = "EU_ETS",
+            country_code          = _detected_country,
+            framework             = _detected_framework,
             primary_energy_source = "electricity",
         )
         db.add(config)
