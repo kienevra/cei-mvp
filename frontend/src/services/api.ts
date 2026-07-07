@@ -463,6 +463,7 @@ export type SiteConfig = {
   annual_production_volume: number | null;
   production_unit: string | null;
   free_allocation_tonnes: number | null;
+  ets_carbon_price_eur: number | null;
   reporting_year: number | null;
   config_updated_at: string | null;
 };
@@ -484,6 +485,7 @@ export type EmissionsResult = {
   free_allocation_tonnes: number | null;
   ets_surplus_deficit: number | null;
   ets_credit_cost_eur: number | null;
+  ets_carbon_price_eur: number;
   ets_position_label: string;
   benchmark_value: number | null;
   production_volume: number | null;

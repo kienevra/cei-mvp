@@ -2064,6 +2064,7 @@ function SiteConfigPanel({ siteId }: { siteId: number }) {
         annual_production_volume:   form.annual_production_volume   ?? null,
         production_unit:            form.production_unit            ?? null,
         free_allocation_tonnes:     form.free_allocation_tonnes     ?? null,
+        ets_carbon_price_eur:       form.ets_carbon_price_eur       ?? null,
         reporting_year:             form.reporting_year             ?? null,
       });
       setConfig(updated);
@@ -2279,6 +2280,7 @@ function SiteConfigPanel({ siteId }: { siteId: number }) {
             <div>
               <div style={{ fontWeight: 600, fontSize: "0.82rem", color: "var(--cei-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "0.75rem" }}>ETS / Quota</div>
               {row("Quote gratuite ETS (tCO₂/anno)", <input style={inp} type="number" min="0" value={form.free_allocation_tonnes ?? ""} onChange={e => setForm(f => ({ ...f, free_allocation_tonnes: e.target.value ? parseFloat(e.target.value) : null as any }))} placeholder="es. 500" />)}
+              {row("Prezzo carbonio (€/tCO₂)", <input style={inp} type="number" step="0.01" min="0" value={form.ets_carbon_price_eur ?? ""} onChange={e => setForm(f => ({ ...f, ets_carbon_price_eur: e.target.value ? parseFloat(e.target.value) : null as any }))} placeholder="es. 75.28" />)}
               {row("Anno di riferimento", <input style={inp} type="number" min="2020" max="2030" value={form.reporting_year ?? ""} onChange={e => setForm(f => ({ ...f, reporting_year: e.target.value ? parseInt(e.target.value) : null as any }))} placeholder="2026" />)}
             </div>
           </div>
