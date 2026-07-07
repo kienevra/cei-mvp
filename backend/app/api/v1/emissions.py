@@ -48,6 +48,7 @@ class EmissionsConfigIn(BaseModel):
     production_unit:           Optional[str]   = None
     reporting_year:            Optional[int]   = None
     free_allocation_tonnes:    Optional[float] = None
+    ets_carbon_price_eur:      Optional[float] = None
 
 
 class EmissionsConfigOut(BaseModel):
@@ -61,6 +62,7 @@ class EmissionsConfigOut(BaseModel):
     production_unit:           Optional[str]
     reporting_year:            Optional[int]
     free_allocation_tonnes:    Optional[float]
+    ets_carbon_price_eur:      Optional[float]
     framework_label:           Optional[str]   = None
 
     class Config:
@@ -90,6 +92,7 @@ class EmissionsResultOut(BaseModel):
     free_allocation_tonnes:    Optional[float]
     ets_surplus_deficit:       Optional[float]
     ets_credit_cost_eur:       Optional[float]
+    ets_carbon_price_eur:      float
     ets_position_label:        str
 
     # Benchmark
@@ -278,6 +281,7 @@ def get_emissions_config(
         production_unit          = config.production_unit,
         reporting_year           = config.reporting_year,
         free_allocation_tonnes   = float(config.free_allocation_tonnes) if config.free_allocation_tonnes else None,
+        ets_carbon_price_eur     = float(config.ets_carbon_price_eur) if config.ets_carbon_price_eur else None,
         framework_label          = FRAMEWORKS.get(config.framework),
     )
     return out
@@ -316,6 +320,8 @@ def update_emissions_config(
         config.reporting_year = body.reporting_year
     if body.free_allocation_tonnes is not None:
         config.free_allocation_tonnes = body.free_allocation_tonnes
+    if body.ets_carbon_price_eur is not None:
+        config.ets_carbon_price_eur = body.ets_carbon_price_eur
 
     db.commit()
     db.refresh(config)
@@ -331,6 +337,7 @@ def update_emissions_config(
         production_unit          = config.production_unit,
         reporting_year           = config.reporting_year,
         free_allocation_tonnes   = float(config.free_allocation_tonnes) if config.free_allocation_tonnes else None,
+        ets_carbon_price_eur     = float(config.ets_carbon_price_eur) if config.ets_carbon_price_eur else None,
         framework_label          = FRAMEWORKS.get(config.framework),
     )
 
@@ -378,6 +385,7 @@ def calculate_emissions(
         free_allocation_tonnes     = result.free_allocation_tonnes,
         ets_surplus_deficit        = result.ets_surplus_deficit,
         ets_credit_cost_eur        = result.ets_credit_cost_eur,
+        ets_carbon_price_eur       = result.ets_carbon_price_eur,
         ets_position_label         = result.ets_position_label,
         benchmark_value            = result.benchmark_value,
         production_volume          = result.production_volume,
@@ -450,6 +458,7 @@ def calculate_site_emissions(
         free_allocation_tonnes     = result.free_allocation_tonnes,
         ets_surplus_deficit        = result.ets_surplus_deficit,
         ets_credit_cost_eur        = result.ets_credit_cost_eur,
+        ets_carbon_price_eur       = result.ets_carbon_price_eur,
         ets_position_label         = result.ets_position_label,
         benchmark_value            = result.benchmark_value,
         production_volume          = result.production_volume,

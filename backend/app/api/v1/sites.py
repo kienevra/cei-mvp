@@ -297,6 +297,7 @@ class SiteConfigIn(BaseModel):
     annual_production_volume:   Optional[float] = None
     production_unit:            Optional[str]   = None
     free_allocation_tonnes:     Optional[float] = None
+    ets_carbon_price_eur:       Optional[float] = None
     reporting_year:             Optional[int]   = None
 
 
@@ -314,6 +315,7 @@ class SiteConfigOut(BaseModel):
     annual_production_volume:   Optional[float]
     production_unit:            Optional[str]
     free_allocation_tonnes:     Optional[float]
+    ets_carbon_price_eur:       Optional[float]
     reporting_year:             Optional[int]
     config_updated_at:          Optional[str]
 
@@ -349,6 +351,7 @@ def get_site_config(
         annual_production_volume  = float(site.annual_production_volume)  if site.annual_production_volume  else None,
         production_unit           = site.production_unit,
         free_allocation_tonnes    = float(site.free_allocation_tonnes)    if site.free_allocation_tonnes    else None,
+        ets_carbon_price_eur      = float(site.ets_carbon_price_eur)      if site.ets_carbon_price_eur      else None,
         reporting_year            = site.reporting_year,
         config_updated_at         = site.config_updated_at.isoformat() if site.config_updated_at else None,
     )
@@ -382,6 +385,7 @@ def update_site_config(
     if body.annual_production_volume   is not None: site.annual_production_volume   = body.annual_production_volume
     if body.production_unit            is not None: site.production_unit            = body.production_unit
     if body.free_allocation_tonnes     is not None: site.free_allocation_tonnes     = body.free_allocation_tonnes
+    if body.ets_carbon_price_eur       is not None: site.ets_carbon_price_eur       = body.ets_carbon_price_eur
     if body.reporting_year             is not None: site.reporting_year             = body.reporting_year
     site.config_updated_at = datetime.now(timezone.utc)
 
@@ -402,6 +406,7 @@ def update_site_config(
         annual_production_volume  = float(site.annual_production_volume)  if site.annual_production_volume  else None,
         production_unit           = site.production_unit,
         free_allocation_tonnes    = float(site.free_allocation_tonnes)    if site.free_allocation_tonnes    else None,
+        ets_carbon_price_eur      = float(site.ets_carbon_price_eur)      if site.ets_carbon_price_eur      else None,
         reporting_year            = site.reporting_year,
         config_updated_at         = site.config_updated_at.isoformat() if site.config_updated_at else None,
     )

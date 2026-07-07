@@ -1726,7 +1726,7 @@ async def get_client_cbam_exposure_pdf(
         "cbam_default_factor":         None,
         "cbam_verified_factor":        getattr(result, "emission_factor_kg_co2_kwh", None),
         "default_vs_verified_delta_eur": None,
-        "ets_carbon_price_eur":        65.0,
+        "ets_carbon_price_eur":        getattr(result, "ets_carbon_price_eur", 65.0),
         "partner_name":                partner_name,
         "partner_role":                "Dottore Commercialista",
         "report_date":                 datetime.now(timezone.utc).strftime("%Y-%m-%d"),

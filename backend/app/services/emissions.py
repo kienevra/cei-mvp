@@ -70,7 +70,8 @@ class EmissionsResult:
     # ETS position (if applicable)
     free_allocation_tonnes: Optional[float] # ETS free quota
     ets_surplus_deficit: Optional[float]    # positive = surplus, negative = deficit
-    ets_credit_cost_eur: Optional[float]    # estimated cost if deficit (@ ~65 EUR/tCO₂)
+    ets_credit_cost_eur: Optional[float]    # estimated cost if deficit
+    ets_carbon_price_eur: float             # actual price used for this calculation
 
     # Benchmark comparison
     benchmark_value: Optional[float]        # tCO₂ per unit of product
@@ -153,6 +154,7 @@ class EmissionsConfigOut:
     production_unit: Optional[str]
     reporting_year: Optional[int]
     free_allocation_tonnes: Optional[float]
+    ets_carbon_price_eur: Optional[float]
 
 
 # ── Supported frameworks ───────────────────────────────────────────────────────
@@ -192,8 +194,8 @@ SECTORS = [
     "manufacturing",
 ]
 
-# ETS carbon price estimate (EUR/tCO₂) — used for cost calculations
-# Update periodically based on EU carbon market
+# ETS carbon price (EUR/tCO₂) — PLATFORM DEFAULT / FALLBACK ONLY.
+# Per-org and per-site values (ets_carbon_price_eur) take priority when set.
 ETS_CARBON_PRICE_EUR = 65.0
 
 
@@ -492,6 +494,11 @@ class EmissionsCalculator:
             float(org_config.free_allocation_tonnes) if (org_config and org_config.free_allocation_tonnes) else None,
             None
         )
+        carbon_price    = resolve(
+            float(site.ets_carbon_price_eur) if site.ets_carbon_price_eur else None,
+            float(org_config.ets_carbon_price_eur) if (org_config and org_config.ets_carbon_price_eur) else None,
+            ETS_CARBON_PRICE_EUR
+        )
 
         # Get kWh for this site only
         total_kwh, data_points = self.get_kwh_for_site(site_id, window_hours)
@@ -512,7 +519,7 @@ class EmissionsCalculator:
 
         # ETS position
         ets_surplus_deficit = (free_alloc - total_tco2) if free_alloc is not None else None
-        ets_credit_cost_eur = abs(ets_surplus_deficit) * ETS_CARBON_PRICE_EUR if (ets_surplus_deficit is not None and ets_surplus_deficit < 0) else None
+        ets_credit_cost_eur = abs(ets_surplus_deficit) * carbon_price if (ets_surplus_deficit is not None and ets_surplus_deficit < 0) else None
 
         # Benchmark
         benchmark_value = actual_intensity = benchmark_gap = benchmark_gap_pct = None
@@ -542,6 +549,7 @@ class EmissionsCalculator:
             free_allocation_tonnes     = free_alloc,
             ets_surplus_deficit        = round(ets_surplus_deficit, 3) if ets_surplus_deficit is not None else None,
             ets_credit_cost_eur        = round(ets_credit_cost_eur, 2) if ets_credit_cost_eur is not None else None,
+            ets_carbon_price_eur       = carbon_price,
             benchmark_value            = benchmark_value,
             production_volume          = production_volume,
             production_unit            = production_unit,
@@ -665,12 +673,17 @@ class EmissionsCalculator:
             annualised_kwh  = total_kwh
 
         # ETS position
+        carbon_price = (
+            (float(site_config.ets_carbon_price_eur) if site_config and site_config.ets_carbon_price_eur else None) or
+            (float(config.ets_carbon_price_eur) if config and config.ets_carbon_price_eur else None) or
+            ETS_CARBON_PRICE_EUR
+        )
         ets_surplus_deficit = None
         ets_credit_cost_eur = None
         if free_alloc is not None:
             ets_surplus_deficit = free_alloc - total_tco2
             if ets_surplus_deficit < 0:
-                ets_credit_cost_eur = abs(ets_surplus_deficit) * ETS_CARBON_PRICE_EUR
+                ets_credit_cost_eur = abs(ets_surplus_deficit) * carbon_price
 
         # Benchmark comparison
         benchmark_value    = None
@@ -707,6 +720,7 @@ class EmissionsCalculator:
             free_allocation_tonnes = free_alloc,
             ets_surplus_deficit    = round(ets_surplus_deficit, 3) if ets_surplus_deficit is not None else None,
             ets_credit_cost_eur    = round(ets_credit_cost_eur, 2) if ets_credit_cost_eur is not None else None,
+            ets_carbon_price_eur   = carbon_price,
             benchmark_value        = benchmark_value,
             production_volume      = production_volume,
             production_unit        = production_unit,

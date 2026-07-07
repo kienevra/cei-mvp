@@ -250,6 +250,7 @@ class Site(Base):
     annual_production_volume   = Column(Numeric(18, 3), nullable=True)
     production_unit            = Column(String(32),     nullable=True)
     free_allocation_tonnes     = Column(Numeric(12, 3), nullable=True)
+    ets_carbon_price_eur       = Column(Numeric(10, 2), nullable=True)
     reporting_year             = Column(Integer,        nullable=True)
     config_updated_at          = Column(DateTime(timezone=True), nullable=True)
 
@@ -794,6 +795,7 @@ class OrgEmissionsConfig(Base):
     production_unit          = Column(String(32),    nullable=True)   # tonne, m2, units
     reporting_year           = Column(Integer,       nullable=True)
     free_allocation_tonnes   = Column(Numeric(12,3), nullable=True)   # ETS free quota (tCO₂)
+    ets_carbon_price_eur     = Column(Numeric(10,2), nullable=True)   # EUR/tCO₂ override
     created_at               = Column(DateTime(timezone=True), server_default=func.now())
     updated_at               = Column(DateTime(timezone=True), server_default=func.now(),
                                       onupdate=func.now())
