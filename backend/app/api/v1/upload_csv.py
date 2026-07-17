@@ -8,7 +8,7 @@ import csv
 import io
 import logging
 import inspect
-from datetime import datetime, timezone
+from datetime import datetime, timezone as dt_timezone
 
 from fastapi import (
     APIRouter,
