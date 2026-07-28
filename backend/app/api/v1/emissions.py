@@ -627,11 +627,12 @@ async def get_mrv_report(
 @router.get("/ets-statement/{org_id}", summary="Generate ETS Position Statement PDF")
 async def get_ets_statement(
     org_id: int,
-    year: int            = Query(..., description="Reporting year, e.g. 2026"),
-    lang: str            = Query("en", description="Language: en or it"),
-    consultant_role: str = Query("Certified Energy Manager"),
-    db: Session          = Depends(get_db),
-    current_user         = Depends(get_current_active_user),
+    year: int             = Query(..., description="Reporting year, e.g. 2026"),
+    site_id: Optional[int] = Query(None, description="Optional: restrict report to a single site"),
+    lang: str             = Query("en", description="Language: en or it"),
+    consultant_role: str  = Query("Certified Energy Manager"),
+    db: Session           = Depends(get_db),
+    current_user          = Depends(get_current_active_user),
 ):
     from app.services.pdf.ets_statement import generate_ets_pdf, _build_ets_schedule
 
@@ -646,10 +647,14 @@ async def get_ets_statement(
         raise HTTPException(status_code=403, detail="Access denied")
     from app.api.deps import check_soft_lock
     check_soft_lock(org, method="POST")
-    # 2. Load all sites for this org
-    sites = db.query(Site).filter(Site.org_id == org_id).all()
+    # 2. Load site(s) for this org — single site if site_id given, else all
+    sites_q = db.query(Site).filter(Site.org_id == org_id)
+    if site_id is not None:
+        sites_q = sites_q.filter(Site.id == site_id)
+    sites = sites_q.all()
     if not sites:
-        raise HTTPException(status_code=422, detail="No sites found for this organisation.")
+        detail = "Site not found in this organisation." if site_id is not None else "No sites found for this organisation."
+        raise HTTPException(status_code=422, detail=detail)
 
     # 3. Aggregate timeseries for the full year across all sites
     period_start = date(year, 1, 1)
@@ -695,16 +700,22 @@ async def get_ets_statement(
             detail=f"No energy data found for {year}. Check that timeseries records exist.",
         )
 
-    surplus        = total_alloc - total_tco2
-    carbon_price   = ETS_CARBON_PRICE_EUR
-    financial_impact = abs(surplus) * carbon_price
-
     # 4. Benchmark from org config
     org_config     = get_or_create_emissions_config(db, org_id)
     sector_code    = org_config.sector_code or "ceramics"
     framework      = org_config.framework   or "EU_ETS"
     production_vol = float(org_config.annual_production_volume or 0)
     production_unit = org_config.production_unit or "tonne"
+
+    surplus        = total_alloc - total_tco2
+    carbon_price   = next(
+        (float(s.ets_carbon_price_eur) for s in sites if getattr(s, "ets_carbon_price_eur", None)),
+        float(org_config.ets_carbon_price_eur) if org_config.ets_carbon_price_eur else ETS_CARBON_PRICE_EUR
+    )
+    financial_impact = abs(surplus) * carbon_price
+    # Note: when site_id is set, `sites` contains exactly one site, so this
+    # resolves to that site's own price unambiguously. The "first match" logic
+    # only matters for whole-org reports with mixed per-site pricing.
 
     benchmark = calculator.get_sector_benchmark(sector_code, framework, year)
     bmark_val  = float(benchmark.benchmark_value) if benchmark else None

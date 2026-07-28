@@ -5,6 +5,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import LinkRequestsPanel from "../components/LinkRequestsPanel";
 import { useAuth } from "../hooks/useAuth";
+import { useTranslation } from "react-i18next";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ErrorBanner from "../components/ErrorBanner";
 import {
@@ -128,6 +129,8 @@ function ClientComplianceCard({ client, onCbam, onCompliance, loadingCbam, loadi
 // Main page
 // ---------------------------------------------------------------------------
 const CommerciallistaDashboard: React.FC = () => {
+  const { i18n } = useTranslation();
+  const isIT = i18n.language?.toLowerCase().startsWith("it");
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -167,7 +170,7 @@ const CommerciallistaDashboard: React.FC = () => {
       {/* Page header */}
       <div style={{ marginBottom: "0.25rem" }}>
         <div style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--cei-accent,#38bdf8)", marginBottom: "0.3rem" }}>
-          Commercialista Portal
+          {isIT ? "Commercialista Portal" : "Accountant Portal"}
         </div>
         <h1 style={{ fontSize: "1.5rem", fontWeight: 700, margin: "0 0 0.4rem" }}>
           {orgName}

@@ -71,6 +71,10 @@ type SiteOpportunityRow = {
 
   // prefer backend cost estimate if present; otherwise computed from org tariff
   est_annual_cost_saved: number | null;
+
+  // payback/effort context (from OpportunityEngine._build_opportunity)
+  est_capex_eur: number | null;
+  simple_roi_years: number | null;
 };
 
 // -------- helpers --------
@@ -527,6 +531,9 @@ const Reports: React.FC = () => {
                         : 0,
 
                     est_annual_cost_saved: estAnnualCostSaved,
+
+                    est_capex_eur: pickNumber(opp, ["est_capex_eur"]),
+                    simple_roi_years: pickNumber(opp, ["simple_roi_years"]),
                   };
                 });
               }
@@ -653,6 +660,57 @@ const Reports: React.FC = () => {
     return clone;
   }, [siteRows, hasTariff]);
 
+  // Cost-first ranking for portfolio opportunities: only compare by cost when
+  // BOTH rows have a real (non-null) cost figure — otherwise fall through to
+  // kWh so a missing cost estimate isn't silently treated as €0.
+  const sortedTopOpportunities: SiteOpportunityRow[] = useMemo(() => {
+    if (!topOpportunities.length) return [];
+    const clone = [...topOpportunities];
+    clone.sort((a, b) => {
+      if (hasTariff) {
+        const aCost =
+          typeof a.est_annual_cost_saved === "number" &&
+          Number.isFinite(a.est_annual_cost_saved)
+            ? a.est_annual_cost_saved
+            : null;
+        const bCost =
+          typeof b.est_annual_cost_saved === "number" &&
+          Number.isFinite(b.est_annual_cost_saved)
+            ? b.est_annual_cost_saved
+            : null;
+        if (aCost !== null && bCost !== null && aCost !== bCost) {
+          return bCost - aCost;
+        }
+      }
+
+      const aKwh =
+        typeof a.est_annual_kwh_saved === "number" &&
+        Number.isFinite(a.est_annual_kwh_saved)
+          ? a.est_annual_kwh_saved
+          : 0;
+      const bKwh =
+        typeof b.est_annual_kwh_saved === "number" &&
+        Number.isFinite(b.est_annual_kwh_saved)
+          ? b.est_annual_kwh_saved
+          : 0;
+      return bKwh - aKwh;
+    });
+    return clone;
+  }, [topOpportunities, hasTariff]);
+
+  // Magnitude anchor for the impact bar: cost-saved when tariffs exist, kWh-saved otherwise.
+  const maxOpportunityMagnitude = useMemo(() => {
+    return sortedTopOpportunities.reduce((max, row) => {
+      const magnitude =
+        hasTariff &&
+        row.est_annual_cost_saved !== null &&
+        Number.isFinite(row.est_annual_cost_saved)
+          ? row.est_annual_cost_saved
+          : row.est_annual_kwh_saved;
+      return magnitude > max ? magnitude : max;
+    }, 0);
+  }, [sortedTopOpportunities, hasTariff]);
+
   // --- CSV export (7-day site reports) ---
   const handleDownloadCsv = () => {
     if (!enableReports) {
@@ -777,7 +835,7 @@ const Reports: React.FC = () => {
 
     const tariff = hasTariff ? electricityPricePerKwh : null;
 
-    const rows = topOpportunities.map((row) => {
+    const rows = sortedTopOpportunities.map((row) => {
       const hasKwh =
         typeof row.est_annual_kwh_saved === "number" &&
         Number.isFinite(row.est_annual_kwh_saved) &&
@@ -807,6 +865,14 @@ const Reports: React.FC = () => {
         est_co2_tons_saved_per_year:
           Number.isFinite(row.est_co2_tons_saved_per_year)
             ? row.est_co2_tons_saved_per_year.toFixed(2)
+            : "",
+        est_capex_eur:
+          row.est_capex_eur !== null && Number.isFinite(row.est_capex_eur)
+            ? row.est_capex_eur.toFixed(2)
+            : "",
+        simple_roi_years:
+          row.simple_roi_years !== null && Number.isFinite(row.simple_roi_years)
+            ? row.simple_roi_years.toFixed(2)
             : "",
 
         currency_code: currencyCode || "EUR",
@@ -1417,13 +1483,13 @@ const Reports: React.FC = () => {
               <div>
                 <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
                   {t("reports.opps.title", {
-                    defaultValue: "Top efficiency opportunities (portfolio)",
+                    defaultValue: "Top efficiency opportunities per site",
                   })}
                 </div>
                 <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--cei-text-muted)" }}>
                   {t("reports.opps.subtitle", {
                     defaultValue:
-                      "Highest-impact measures per site, ranked by estimated annual cost savings when tariffs are configured (fallback to kWh).",
+                      "Top 3 measures for each site, ranked by estimated annual cost savings when tariffs are configured (fallback to kWh). Every site is represented — this is not a single ranked list across the whole portfolio.",
                   })}
                 </div>
               </div>
@@ -1482,45 +1548,69 @@ const Reports: React.FC = () => {
                       <th>{t("reports.opps.columns.site", { defaultValue: "Site" })}</th>
                       <th>{t("reports.opps.columns.location", { defaultValue: "Location" })}</th>
                       <th>{t("reports.opps.columns.measure", { defaultValue: "Measure" })}</th>
+                      <th>{t("reports.opps.columns.impact", { defaultValue: "Impact" })}</th>
                       <th>{t("reports.opps.columns.kwhSaved", { defaultValue: "Est. kWh saved / year" })}</th>
                       <th>{t("reports.opps.columns.costSaved", { defaultValue: "Est. cost saved / year" })}</th>
+                      <th>{t("reports.opps.columns.payback", { defaultValue: "Payback" })}</th>
                       <th>{t("reports.opps.columns.co2Saved", { defaultValue: "CO₂ saved (t / year)" })}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {[...topOpportunities]
-                      .sort((a, b) => {
-                        if (hasTariff) {
-                          const aCost =
-                            typeof a.est_annual_cost_saved === "number" &&
-                            Number.isFinite(a.est_annual_cost_saved)
-                              ? a.est_annual_cost_saved
-                              : 0;
-                          const bCost =
-                            typeof b.est_annual_cost_saved === "number" &&
-                            Number.isFinite(b.est_annual_cost_saved)
-                              ? b.est_annual_cost_saved
-                              : 0;
-                          if (aCost !== bCost) return bCost - aCost;
-                        }
+                    {sortedTopOpportunities.map((row, idx) => {
+                      const magnitude =
+                        hasTariff &&
+                        row.est_annual_cost_saved !== null &&
+                        Number.isFinite(row.est_annual_cost_saved)
+                          ? row.est_annual_cost_saved
+                          : row.est_annual_kwh_saved;
+                      const magnitudeRatio =
+                        maxOpportunityMagnitude > 0 ? magnitude / maxOpportunityMagnitude : 0;
+                      const barWidthPct = magnitude > 0 ? 8 + magnitudeRatio * 92 : 0;
 
-                        const aKwh =
-                          typeof a.est_annual_kwh_saved === "number" &&
-                          Number.isFinite(a.est_annual_kwh_saved)
-                            ? a.est_annual_kwh_saved
-                            : 0;
-                        const bKwh =
-                          typeof b.est_annual_kwh_saved === "number" &&
-                          Number.isFinite(b.est_annual_kwh_saved)
-                            ? b.est_annual_kwh_saved
-                            : 0;
-                        return bKwh - aKwh;
-                      })
-                      .map((row, idx) => (
+                      return (
                         <tr key={`opp-${row.siteId}-${row.id}-${idx}`}>
                           <td>{row.siteName}</td>
                           <td>{row.location || "—"}</td>
-                          <td>{row.name}</td>
+                          <td>
+                            <div style={{ fontWeight: 500 }}>{row.name}</div>
+                            {row.description && (
+                              <div
+                                title={row.description}
+                                style={{
+                                  marginTop: "0.15rem",
+                                  fontSize: "0.72rem",
+                                  color: "var(--cei-text-muted)",
+                                  maxWidth: "22rem",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {row.description}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ minWidth: "90px" }}>
+                            <div
+                              style={{
+                                width: "100%",
+                                height: "8px",
+                                borderRadius: "4px",
+                                background: "rgba(148, 163, 184, 0.2)",
+                                overflow: "hidden",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${barWidthPct}%`,
+                                  height: "100%",
+                                  borderRadius: "4px",
+                                  background:
+                                    "linear-gradient(to right, rgba(56, 189, 248, 0.95), rgba(56, 189, 248, 0.45))",
+                                }}
+                              />
+                            </div>
+                          </td>
                           <td>
                             {row.est_annual_kwh_saved > 0
                               ? row.est_annual_kwh_saved.toLocaleString(undefined, {
@@ -1536,12 +1626,41 @@ const Reports: React.FC = () => {
                               : "—"}
                           </td>
                           <td>
+                            {row.simple_roi_years !== null && Number.isFinite(row.simple_roi_years) ? (
+                              <span
+                                title={
+                                  row.est_capex_eur !== null && Number.isFinite(row.est_capex_eur)
+                                    ? `Est. implementation cost: ${formatCurrency(row.est_capex_eur, currencyCode)}`
+                                    : undefined
+                                }
+                                style={{
+                                  padding: "0.1rem 0.45rem",
+                                  borderRadius: "999px",
+                                  fontSize: "0.72rem",
+                                  fontWeight: 600,
+                                  color: "#0f172a",
+                                  background:
+                                    row.simple_roi_years <= 2
+                                      ? "rgba(74, 222, 128, 0.85)"
+                                      : row.simple_roi_years <= 5
+                                      ? "rgba(250, 204, 21, 0.85)"
+                                      : "rgba(248, 113, 113, 0.85)",
+                                }}
+                              >
+                                {row.simple_roi_years.toFixed(1)} {t("reports.opps.years", { defaultValue: "yr" })}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td>
                             {Number.isFinite(row.est_co2_tons_saved_per_year)
                               ? row.est_co2_tons_saved_per_year.toFixed(2)
                               : "—"}
                           </td>
                         </tr>
-                      ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

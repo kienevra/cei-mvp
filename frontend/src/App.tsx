@@ -169,7 +169,7 @@ const App: React.FC = () => (
             path="/sites"
             element={
               <Layout>
-                <ProtectedRoute allowedOrgTypes={["standalone"]}>
+                <ProtectedRoute allowedOrgTypes={["standalone"]} allowCommercialista>
                   <SitesList />
                 </ProtectedRoute>
               </Layout>
@@ -180,7 +180,7 @@ const App: React.FC = () => (
             path="/sites/:id"
             element={
               <Layout>
-                <ProtectedRoute allowedOrgTypes={["standalone"]}>
+                <ProtectedRoute allowedOrgTypes={["standalone"]} allowCommercialista>
                   <SiteView />
                 </ProtectedRoute>
               </Layout>
@@ -191,7 +191,7 @@ const App: React.FC = () => (
             path="/alerts"
             element={
               <Layout>
-                <ProtectedRoute allowedOrgTypes={["standalone"]}>
+                <ProtectedRoute allowedOrgTypes={["standalone"]} allowCommercialista>
                   <Alerts />
                 </ProtectedRoute>
               </Layout>
@@ -202,7 +202,7 @@ const App: React.FC = () => (
             path="/reports"
             element={
               <Layout>
-                <ProtectedRoute allowedOrgTypes={["standalone"]}>
+                <ProtectedRoute allowedOrgTypes={["standalone"]} allowCommercialista>
                   <Reports />
                 </ProtectedRoute>
               </Layout>
@@ -213,7 +213,7 @@ const App: React.FC = () => (
             path="/upload"
             element={
               <Layout>
-                <ProtectedRoute allowedOrgTypes={["standalone"]}>
+                <ProtectedRoute allowedOrgTypes={["standalone"]} allowCommercialista>
                   <CSVUpload />
                 </ProtectedRoute>
               </Layout>

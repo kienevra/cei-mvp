@@ -45,6 +45,7 @@ interface MrvForm {
 
 interface EtsForm {
   year: string;
+  siteId: string; // "" = whole organisation (all sites)
 }
 
 interface EnpiForm {
@@ -291,6 +292,7 @@ const ComplianceReports: React.FC<Props> = ({ sites, userOrgId }) => {
 
   const [etsForm, setEtsForm] = useState<EtsForm>({
     year: currentYear(),
+    siteId: "",
   });
 
   const [enpiForm, setEnpiForm] = useState<EnpiForm>({
@@ -356,10 +358,13 @@ const ComplianceReports: React.FC<Props> = ({ sites, userOrgId }) => {
     setDownloading(true);
     setDownloadError(null);
     try {
-      const url = `/emissions/ets-statement/${userOrgId}?year=${etsForm.year}&lang=${lang}`;
+      const siteParam = etsForm.siteId ? `&site_id=${etsForm.siteId}` : "";
+      const url = `/emissions/ets-statement/${userOrgId}?year=${etsForm.year}${siteParam}&lang=${lang}`;
+      const site = etsForm.siteId ? sites.find((s) => String(s.id) === etsForm.siteId) : null;
+      const filenameSite = site ? `_${site.name.replace(/\s+/g, "_")}` : "";
       await triggerPdfDownload(
         url,
-        `CEI_ETS_${etsForm.year}.pdf`,
+        `CEI_ETS${filenameSite}_${etsForm.year}.pdf`,
         token
       );
       closeModal();
@@ -432,13 +437,19 @@ const ComplianceReports: React.FC<Props> = ({ sites, userOrgId }) => {
   const SiteSelect: React.FC<{
     value: string;
     onChange: (v: string) => void;
-  }> = ({ value, onChange }) => (
+    allowAll?: boolean;
+  }> = ({ value, onChange, allowAll }) => (
     <Field label={lang === "it" ? "Impianto" : "Site"}>
       <select
         style={selectStyle}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
+        {allowAll && (
+          <option value="">
+            {lang === "it" ? "Tutta l'organizzazione" : "Whole organisation"}
+          </option>
+        )}
         {sites.map((s) => (
           <option key={s.id} value={String(s.id)}>
             {s.name}
@@ -716,6 +727,11 @@ const ComplianceReports: React.FC<Props> = ({ sites, userOrgId }) => {
                   : "Organisation ID not available. Please log in again."}
               </div>
             )}
+            <SiteSelect
+              value={etsForm.siteId}
+              onChange={(v) => setEtsForm((f) => ({ ...f, siteId: v }))}
+              allowAll
+            />
             <Field label={lang === "it" ? "Anno di Riferimento" : "Reporting Year"}>
               <input
                 type="number"
@@ -724,7 +740,7 @@ const ComplianceReports: React.FC<Props> = ({ sites, userOrgId }) => {
                 min={2021}
                 max={new Date().getFullYear()}
                 onChange={(e) =>
-                  setEtsForm({ year: e.target.value })
+                  setEtsForm((f) => ({ ...f, year: e.target.value }))
                 }
               />
             </Field>
@@ -740,7 +756,11 @@ const ComplianceReports: React.FC<Props> = ({ sites, userOrgId }) => {
               }}
             >
               {lang === "it"
-                ? "Il report ETS aggrega tutti i siti dell'organizzazione per l'anno selezionato."
+                ? etsForm.siteId
+                  ? "Il report verrà generato solo per il sito selezionato, usando il suo prezzo del carbonio se impostato."
+                  : "Il report ETS aggrega tutti i siti dell'organizzazione per l'anno selezionato."
+                : etsForm.siteId
+                ? "The ETS report will be generated for the selected site only, using that site's own carbon price if set."
                 : "The ETS report aggregates all sites in your organisation for the selected year."}
             </div>
           </div>

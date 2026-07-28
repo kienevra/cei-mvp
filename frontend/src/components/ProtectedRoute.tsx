@@ -5,8 +5,9 @@ import { useAuth } from "../hooks/useAuth";
 type ProtectedRouteProps = {
   children: React.ReactElement;
   allowedOrgTypes?: string[];
+  allowCommercialista?: boolean;
 };
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedOrgTypes }) => {
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedOrgTypes, allowCommercialista }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
   const location = useLocation();
 
@@ -35,13 +36,21 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedOrgTyp
     return <Navigate to="/manage" replace />;
   }
 
+  const managingOrgSubtype =
+    user?.org?.managing_org_subtype ?? user?.organization?.managing_org_subtype ?? null;
+  const isClientOfCommercialista = orgType === "client" && managingOrgSubtype === "commercialista";
+
   if (allowedOrgTypes && allowedOrgTypes.length > 0) {
     if (!allowedOrgTypes.includes(orgType)) {
-      if (orgType === "managing") {
+      if (allowCommercialista && isClientOfCommercialista) {
+        // client org linked to a commercialista — allow through
+      } else if (orgType === "managing") {
         return <Navigate to={isCommercialista ? "/commercialista" : "/manage"} replace />;
+      } else if (orgType === "client") {
+        return <Navigate to="/" replace />;
+      } else {
+        return <Navigate to="/" replace />;
       }
-      if (orgType === "client") return <Navigate to="/" replace />;
-      return <Navigate to="/" replace />;
     }
   }
 
