@@ -1378,8 +1378,8 @@
       "caption": "L'altezza delle barre scala con l'energia 7 giorni di ciascun sito. Le barre sono ordinate per impatto € quando le tariffe sono configurate."
     },
     "opps": {
-      "title": "Top opportunità di efficienza (portfolio)",
-      "subtitle": "Misure a maggior impatto per sito, ordinate per risparmio annuo stimato quando le tariffe sono configurate (fallback su kWh).",
+      "title": "Top opportunità di efficienza per sito",
+      "subtitle": "Le 3 misure principali per ciascun sito, ordinate per risparmio annuo stimato quando le tariffe sono configurate (fallback su kWh). Ogni sito è rappresentato — non è un'unica classifica sull'intero portfolio.",
       "download": "Scarica CSV opportunità",
       "downloadTooltip": "Esporta la lista opportunità portfolio (con stime costi quando disponibili).",
       "costRankingRequiresTariffs": "La classifica per costo richiede tariffe.",
@@ -1388,10 +1388,13 @@
         "site": "Sito",
         "location": "Località",
         "measure": "Misura",
+        "impact": "Impatto",
         "kwhSaved": "kWh risparmiati stimati / anno",
         "costSaved": "Risparmio costo stimato / anno",
+        "payback": "Payback",
         "co2Saved": "CO₂ risparmiata (t / anno)"
-      }
+      },
+      "years": "anni"
     },
     "errors": {
       "loadReports": "Impossibile caricare i report.",

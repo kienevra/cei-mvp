@@ -1378,8 +1378,8 @@
       "caption": "Bar height scales with each site's 7-day energy. Bars are ordered by € impact when tariffs are configured."
     },
     "opps": {
-      "title": "Top efficiency opportunities (portfolio)",
-      "subtitle": "Highest-impact measures per site, ranked by estimated annual cost savings when tariffs are configured (fallback to kWh).",
+      "title": "Top efficiency opportunities per site",
+      "subtitle": "Top 3 measures for each site, ranked by estimated annual cost savings when tariffs are configured (fallback to kWh). Every site is represented — this is not a single ranked list across the whole portfolio.",
       "download": "Download opportunities CSV",
       "downloadTooltip": "Exports the portfolio opportunity list (with cost estimates when available).",
       "costRankingRequiresTariffs": "Cost ranking requires tariffs.",
@@ -1388,10 +1388,13 @@
         "site": "Site",
         "location": "Location",
         "measure": "Measure",
+        "impact": "Impact",
         "kwhSaved": "Est. kWh saved / year",
         "costSaved": "Est. cost saved / year",
+        "payback": "Payback",
         "co2Saved": "CO₂ saved (t / year)"
-      }
+      },
+      "years": "yr"
     },
     "errors": {
       "loadReports": "Failed to load reports.",
