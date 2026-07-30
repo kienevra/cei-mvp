@@ -1,5 +1,5 @@
 // frontend/src/pages/Login.tsx
-import React, { useEffect, useMemo, useState, FormEvent } from "react";
+import React, { useEffect, useMemo, useRef, useState, FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/useAuth";
@@ -143,6 +143,49 @@ const Login: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated) navigate("/", { replace: true });
   }, [isAuthenticated, navigate]);
+
+  // ── Hero background video: force muted autoplay, retry on load/visibility/tap ──
+  const heroVideoRef = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    const v = heroVideoRef.current;
+    if (!v) return;
+    v.muted = true;
+    v.defaultMuted = true;
+    const tryPlay = () => {
+      const p = v.play();
+      if (p && (p as Promise<void>).catch) (p as Promise<void>).catch(() => {});
+    };
+    tryPlay();
+    v.addEventListener("loadedmetadata", tryPlay);
+    v.addEventListener("canplay", tryPlay);
+    v.addEventListener("loadeddata", tryPlay);
+    const onVisibility = () => { if (!document.hidden) tryPlay(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    let io: IntersectionObserver | null = null;
+    if ("IntersectionObserver" in window) {
+      io = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && entry.intersectionRatio > 0.25) tryPlay();
+        });
+      }, { threshold: [0, 0.25, 0.5, 1] });
+      io.observe(v);
+    }
+    const onceEvents: Array<"touchstart" | "click"> = ["touchstart", "click"];
+    const handlers: Array<() => void> = [];
+    onceEvents.forEach((evt) => {
+      const handler = () => { tryPlay(); document.removeEventListener(evt, handler); };
+      handlers.push(handler);
+      document.addEventListener(evt, handler, { once: true, passive: true } as AddEventListenerOptions);
+    });
+    return () => {
+      v.removeEventListener("loadedmetadata", tryPlay);
+      v.removeEventListener("canplay", tryPlay);
+      v.removeEventListener("loadeddata", tryPlay);
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (io) io.disconnect();
+      onceEvents.forEach((evt, i) => document.removeEventListener(evt, handlers[i]));
+    };
+  }, []);
 
   // Notice + invite auto-detection
   useEffect(() => {
@@ -310,7 +353,21 @@ const Login: React.FC = () => {
 
   return (
     <div className="auth-page">
-      <div style={{ position: "relative" }}>
+      <video
+        ref={heroVideoRef}
+        className="auth-hero-video"
+        autoPlay
+        muted
+        loop
+        playsInline
+        poster="/assets/cei-hero-poster.jpg"
+        aria-hidden="true"
+      >
+        <source src="/assets/cei-hero-loop.webm" type="video/webm" />
+        <source src="/assets/cei-hero-loop.mp4" type="video/mp4" />
+      </video>
+      <div className="auth-hero-overlay" />
+      <div style={{ position: "relative", zIndex: 2 }}>
         <div style={{ position: "absolute", top: "1rem", right: "1rem", zIndex: 5 }}>
           <LanguageToggle variant="pill" />
         </div>
