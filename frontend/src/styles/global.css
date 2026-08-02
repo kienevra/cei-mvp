@@ -638,33 +638,6 @@ tbody tr:hover {
   }
 }
 
-@media (max-width: 767px) {
-  .auth-page {
-    flex-direction: column;
-    overflow: visible;
-  }
-
-  .auth-hero-video {
-    position: relative;
-    top: auto;
-    left: auto;
-    right: auto;
-    bottom: auto;
-    width: 100%;
-    height: auto;
-    aspect-ratio: 16 / 9;
-    display: block;
-    object-fit: cover;
-    border-radius: var(--cei-radius-xl);
-    margin-bottom: var(--cei-spacing-lg);
-    z-index: auto;
-  }
-
-  .auth-hero-overlay {
-    display: none;
-  }
-}
-
 .auth-card {
   position: relative;
   z-index: 2;

@@ -144,13 +144,36 @@ const Login: React.FC = () => {
     if (isAuthenticated) navigate("/", { replace: true });
   }, [isAuthenticated, navigate]);
 
-  // ── Hero background video: force muted autoplay, retry on load/visibility/tap ──
+  // ── Hero background video: pick mobile/desktop source, force muted autoplay, retry on load/visibility/tap ──
   const heroVideoRef = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
     const v = heroVideoRef.current;
     if (!v) return;
+
+    const mql = window.matchMedia("(max-width: 767px)");
+
+    const applySources = () => {
+      const isMobile = mql.matches;
+      const mp4 = isMobile ? "/assets/cei-hero-loop-mobile.mp4" : "/assets/cei-hero-loop.mp4";
+      const webm = isMobile ? "/assets/cei-hero-loop-mobile.webm" : "/assets/cei-hero-loop.webm";
+      const poster = isMobile ? "/assets/cei-hero-poster-mobile.jpg" : "/assets/cei-hero-poster.jpg";
+      v.poster = poster;
+      while (v.firstChild) v.removeChild(v.firstChild);
+      const sourceWebm = document.createElement("source");
+      sourceWebm.src = webm;
+      sourceWebm.type = "video/webm";
+      const sourceMp4 = document.createElement("source");
+      sourceMp4.src = mp4;
+      sourceMp4.type = "video/mp4";
+      v.appendChild(sourceWebm);
+      v.appendChild(sourceMp4);
+      v.load();
+    };
+
+    applySources();
     v.muted = true;
     v.defaultMuted = true;
+
     const tryPlay = () => {
       const p = v.play();
       if (p && (p as Promise<void>).catch) (p as Promise<void>).catch(() => {});
@@ -177,6 +200,9 @@ const Login: React.FC = () => {
       handlers.push(handler);
       document.addEventListener(evt, handler, { once: true, passive: true } as AddEventListenerOptions);
     });
+    const onBreakpointChange = () => { applySources(); tryPlay(); };
+    if (mql.addEventListener) mql.addEventListener("change", onBreakpointChange);
+    else if ((mql as any).addListener) (mql as any).addListener(onBreakpointChange);
     return () => {
       v.removeEventListener("loadedmetadata", tryPlay);
       v.removeEventListener("canplay", tryPlay);
@@ -184,6 +210,8 @@ const Login: React.FC = () => {
       document.removeEventListener("visibilitychange", onVisibility);
       if (io) io.disconnect();
       onceEvents.forEach((evt, i) => document.removeEventListener(evt, handlers[i]));
+      if (mql.removeEventListener) mql.removeEventListener("change", onBreakpointChange);
+      else if ((mql as any).removeListener) (mql as any).removeListener(onBreakpointChange);
     };
   }, []);
 
@@ -362,10 +390,7 @@ const Login: React.FC = () => {
         playsInline
         poster="/assets/cei-hero-poster.jpg"
         aria-hidden="true"
-      >
-        <source src="/assets/cei-hero-loop.webm" type="video/webm" />
-        <source src="/assets/cei-hero-loop.mp4" type="video/mp4" />
-      </video>
+      />
       <div className="auth-hero-overlay" />
       <div style={{ position: "relative", zIndex: 2 }}>
         <div style={{ position: "absolute", top: "1rem", right: "1rem", zIndex: 5 }}>
