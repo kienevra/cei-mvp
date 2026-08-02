@@ -650,10 +650,33 @@ tbody tr:hover {
   padding: var(--cei-spacing-xl) var(--cei-spacing-lg);
 }
 
+.auth-brand-image {
+  height: 320px;
+}
+
 .auth-title {
   font-size: 1.4rem;
   font-weight: 600;
   margin-bottom: 0.4rem;
+}
+
+@media (max-width: 767px) {
+  .auth-brand-image {
+    height: 130px;
+  }
+
+  .auth-page {
+    padding: var(--cei-spacing-lg) var(--cei-spacing-md);
+  }
+
+  .auth-card {
+    padding: var(--cei-spacing-lg) var(--cei-spacing-md);
+  }
+
+  .auth-subtitle {
+    font-size: 0.78rem;
+    margin-bottom: var(--cei-spacing-md);
+  }
 }
 
 .auth-subtitle {

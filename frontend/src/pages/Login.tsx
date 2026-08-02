@@ -403,7 +403,8 @@ const Login: React.FC = () => {
             <img
               src={encodeURI("/ChatGPT Image Dec 5, 2025, 10_47_03 PM.png")}
               alt={t("brand.full", { defaultValue: "CEI – Carbon Efficiency Intelligence" })}
-              style={{ height: "320px", width: "auto", display: "block", marginBottom: "0.05rem" }}
+              className="auth-brand-image"
+              style={{ width: "auto", display: "block", marginBottom: "0.05rem" }}
             />
             <div className="auth-title">
               {t("auth.hero.title", { defaultValue: "Decarbonization Intelligence." })}
