@@ -662,45 +662,54 @@ tbody tr:hover {
 
 @media (max-width: 767px) {
   .auth-brand-image {
-    height: 100px;
+    height: 130px;
   }
 
   .auth-page {
-    padding: var(--cei-spacing-md) var(--cei-spacing-sm);
+    padding: var(--cei-spacing-sm) var(--cei-spacing-sm);
   }
 
   .auth-card {
-    padding: var(--cei-spacing-md) var(--cei-spacing-sm);
+    padding: var(--cei-spacing-sm) var(--cei-spacing-sm);
   }
 
   .auth-title {
-    font-size: 1.15rem;
-    margin-bottom: 0.25rem;
+    font-size: 1rem;
+    margin-bottom: 0.2rem;
   }
 
   .auth-subtitle {
-    font-size: 0.74rem;
-    margin-bottom: var(--cei-spacing-sm);
+    font-size: 0.68rem;
+    line-height: 1.35;
+    margin-bottom: 0.5rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   .auth-mode-toggle {
-    margin-bottom: 0.5rem !important;
+    margin-bottom: 0.4rem !important;
   }
 
   .auth-form {
-    gap: var(--cei-spacing-sm);
+    gap: 0.5rem;
+  }
+
+  .auth-card label {
+    margin-bottom: 0.15rem;
   }
 
   .auth-card input {
-    padding: 0.42rem 0.6rem;
+    padding: 0.35rem 0.55rem;
   }
 
   .auth-card .cei-btn {
-    padding: 0.45rem 0.9rem;
+    padding: 0.4rem 0.85rem;
   }
 
   .auth-hero-overlay {
-    background: radial-gradient(circle at center, rgba(2,6,23,0.35) 0%, rgba(2,6,23,0.75) 100%);
+    background: radial-gradient(circle at center, rgba(2,6,23,0.3) 0%, rgba(2,6,23,0.7) 100%);
   }
 }
 
