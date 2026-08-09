@@ -423,7 +423,7 @@ const Login: React.FC = () => {
           )}
 
           {/* Mode toggle tabs */}
-          <div style={{ display: "flex", marginBottom: "0.9rem", borderRadius: "999px", background: "rgba(15, 23, 42, 0.7)", padding: "0.15rem", opacity: inviteToken ? 0.9 : 1 }}>
+          <div className="auth-mode-toggle" style={{ display: "flex", marginBottom: "0.9rem", borderRadius: "999px", background: "rgba(15, 23, 42, 0.7)", padding: "0.15rem", opacity: inviteToken ? 0.9 : 1 }}>
             <button
               type="button"
               onClick={() => handleModeToggle("login")}
