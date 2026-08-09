@@ -662,7 +662,7 @@ tbody tr:hover {
 
 @media (max-width: 767px) {
   .auth-brand-image {
-    height: 130px;
+    height: 180px;
   }
 
   .auth-page {
