@@ -709,7 +709,16 @@ tbody tr:hover {
   }
 
   .auth-hero-overlay {
+    position: fixed;
     background: radial-gradient(circle at center, rgba(2,6,23,0.3) 0%, rgba(2,6,23,0.7) 100%);
+  }
+
+  .auth-hero-video {
+    position: fixed;
+  }
+
+  .auth-page {
+    overflow: visible;
   }
 }
 
